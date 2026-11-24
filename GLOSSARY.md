@@ -34,8 +34,16 @@ _Avoid_: Consultation, session, chat, visit ticket
 一次 Encounter 中的医患实时对话过程，按顺序记录医生与患者的发言原文。它保留沟通证据，不等同于医生整理和签署的正式病历。
 _Avoid_: Encounter, Clinical Note, chat log
 
+**Encounter Abandonment**:
+负责医生显式放弃一次尚未完诊的 Encounter 的临床事实。被放弃的 Encounter 冻结写入、不解锁 Case Truth，也不视为完诊。
+_Avoid_: Cancel encounter, delete encounter, reset
+
+**Physical Examination**:
+负责医生针对本次 Encounter 按部位执行的查体动作，其发现依据 Case Truth 即时确定性揭示。查体发现属于客观证据，不同于患者口述，也不需要已阅确认。
+_Avoid_: Patient self-report, Investigation, vitals in Visible Source History
+
 **Investigation**:
-医生针对本次 Encounter 正式签发的检验或检查申请。申请成立不等于结果已返回，也不等于医生已核对报告。
+医生针对本次 Encounter 正式签发的检验或检查申请。申请成立不等于结果已返回，也不等于医生已核对报告。首份 Report 签发前可经确认后取消；已取消的申请不再要求已阅。
 _Avoid_: Lab order draft, report, test result
 
 **Report**:
@@ -47,7 +55,7 @@ _Avoid_: Investigation, snapshot, raw finding
 _Avoid_: Read receipt, report approval, viewed flag
 
 **Diagnosis**:
-负责医生针对本次 Encounter 正式确认的主次诊断集合，每次确认恰有一项主诊断。修订保留历史确认版本，草稿不具有正式效力。
+负责医生针对本次 Encounter 正式确认的主次诊断集合，每次确认恰有一项主诊断。修订保留历史确认版本，草稿不具有正式效力。诊断修订晚于病历签署时，原签署病历不再满足完诊条件，须追加签署新修订。
 _Avoid_: Differential suggestion, Diagnosis Draft, Case Truth
 
 **Prescription**:
@@ -68,10 +76,18 @@ _Avoid_: Doctor, autonomous prescriber, chatbot
 由医生编辑或由 Clinical Copilot 自动生成的待核对临床内容（包括候选诊断、待开检查、待开处方与病历草稿）。Draft 不是正式临床事实，不触发正式执行或完诊满足条件。
 _Avoid_: Formal record, confirmed order, signed note
 
+**Suggestion**:
+Clinical Copilot 针对医生已编辑或正在关注的草稿内容提出的待处理修改建议，须医生逐条接受或驳回。Suggestion 不覆盖医生原文，也不是 Draft 本身。
+_Avoid_: Auto-fill, overwrite, Draft
+
+**Case Debrief**:
+Encounter 完诊后才解锁的只读复盘，将本次正式临床记录与 Golden Case 参考逐项并排对照。它不产生评分，也不修改任何临床记录。
+_Avoid_: Score, grading, answer reveal during encounter
+
 **Clinical Confirmation**:
 负责医生对高风险正式医疗意图（确认诊断、签发检查、签发处方或无需用药、确认报告已阅、签署病历、完诊）作出的显式人工放行。
 _Avoid_: Auto-apply, silent commit, suggestion accept
 
 **Completion Gate**:
-办理门诊完诊前由服务端实时重验的五项强制临床前提（恰有一项已确认主诊断、所有未取消检查最新报告已阅、已签发有效处方或明确无需用药、已签署结构化病历、无遗留待确认高风险草稿）。
+办理门诊完诊前由服务端实时重验的五项强制临床前提（恰有一项已确认主诊断、所有未取消检查最新报告已阅、已签发有效处方或明确无需用药、已签署且不早于当前诊断的结构化病历、无遗留待确认高风险草稿）。高风险草稿指未签发也未丢弃的检查、处方或诊断草稿，以及未处理的 Suggestion。
 _Avoid_: Frontend button state, checklist UI, soft warning
