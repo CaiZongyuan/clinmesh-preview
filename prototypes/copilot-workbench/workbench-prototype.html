@@ -1,0 +1,1937 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ClinMesh 门诊工作台原型</title>
+<!--
+  PROTOTYPE — throwaway, do not merge to main.
+  Question: 无感 Clinical Copilot 在门诊医生工作台里应该长什么样、用起来是否真实？
+  Layout (variant A chosen): 候诊队列 rail | 问诊记录 (resizable, collapsible) | 病例工作区 | 临床助手 (resizable).
+  Voice: 持续收音 (toggle, VAD 自动断句) / 按住说话 (hold button or Space; 上移取消). ASR + patient TTS are simulated.
+  Copilot: pi-durable session rendered Claude-desktop style (after pi-pocket / pi-web) + 上下文 view (after dsh-context).
+  Visual language from D:\Projects\Agents\clinmesh (packages/ui tokens, docs/ui/design.md). Golden Case 1 is scripted.
+  All clinical state is in memory; only layout widths / theme / font size / panel toggles are remembered in localStorage.
+-->
+<style>
+:root {
+  --background: #f5f6f7; --foreground: #0f1115; --card: #ffffff; --popover: #ffffff;
+  --primary: #0f1115; --primary-fg: #ffffff; --secondary: #ebeef2; --muted: #f5f6f7; --muted-fg: #61666b;
+  --accent: #e9f0fc; --accent-fg: #175fb8; --destructive: #b4232c; --success: #187442; --warning: #875b0c; --info: #1764c0;
+  --border: #dce0e5; --input: #7e8793; --scrim: rgb(15 17 21 / .4); --shadow-pop: 0 10px 30px rgb(15 17 21 / .16);
+  --c1: #64748b; --c2: #7c5cc4; --c3: #0f8a8a; --c4: #1764c0; --c5: #b7791f; --c6: #187442; --c7: #8a94a6;
+  --ui: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  --scale: 1;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --background: #151517; --foreground: #f9fafb; --card: #232324; --popover: #2c2c2e;
+  --primary: #f9fafb; --primary-fg: #0f1115; --secondary: #43454a; --muted: #2c2c2e; --muted-fg: #cfd3d6;
+  --accent: #24344c; --accent-fg: #a7caff; --destructive: #ff9b9b; --success: #7ddba4; --warning: #f4ca7b; --info: #8dbbff;
+  --border: #ffffff1f; --input: #848b96; --scrim: rgb(0 0 0 / .55); --shadow-pop: 0 10px 30px rgb(0 0 0 / .45);
+  --c1: #94a3b8; --c2: #b39dff; --c3: #4fd1c5; --c4: #8dbbff; --c5: #f4ca7b; --c6: #7ddba4; --c7: #aab4c3; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --background: #151517; --foreground: #f9fafb; --card: #232324; --popover: #2c2c2e;
+  --primary: #f9fafb; --primary-fg: #0f1115; --secondary: #43454a; --muted: #2c2c2e; --muted-fg: #cfd3d6;
+  --accent: #24344c; --accent-fg: #a7caff; --destructive: #ff9b9b; --success: #7ddba4; --warning: #f4ca7b; --info: #8dbbff;
+  --border: #ffffff1f; --input: #848b96; --scrim: rgb(0 0 0 / .55); --shadow-pop: 0 10px 30px rgb(0 0 0 / .45);
+  --c1: #94a3b8; --c2: #b39dff; --c3: #4fd1c5; --c4: #8dbbff; --c5: #f4ca7b; --c6: #7ddba4; --c7: #aab4c3; color-scheme: dark; }
+@property --ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--background); color: var(--foreground); font: 14px/1.5 var(--ui); overflow: hidden; }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+#root, #float-root { zoom: var(--scale); }
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: 0; }
+:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
+h1, h2, h3, h4, p { margin: 0; }
+h1, h2, h3, h4 { font-weight: 600; }
+.ic { flex: none; }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.xs { font-size: 12px; } .xxs { font-size: 11px; }
+.mf { color: var(--muted-fg); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.row.nowrap { flex-wrap: nowrap; } .row.between { justify-content: space-between; }
+.col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.ellip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.rot { transition: transform .15s; } .rot.open { transform: rotate(90deg); }
+
+/* primitives (shadcn-like, clinmesh tokens) */
+.btn { height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.btn:hover:not([disabled]) { background: var(--muted); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 13px; }
+.btn.xs { height: 24px; padding: 0 8px; font-size: 12px; gap: 4px; }
+.btn.primary { background: var(--primary); color: var(--primary-fg); border-color: var(--primary); }
+.btn.primary:hover:not([disabled]) { background: var(--primary); opacity: .88; }
+.btn.primary.notready { background: transparent; color: var(--foreground); border: 1px dashed var(--input); }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.dest { color: var(--destructive); }
+.btn.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, transparent); }
+.btn.w100 { width: 100%; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.ibtn { width: 28px; height: 28px; border-radius: 6px; border: 0; background: transparent; display: inline-grid; place-items: center; cursor: pointer; color: var(--muted-fg); flex: none; padding: 0; }
+.ibtn:hover:not([disabled]) { background: var(--muted); color: var(--foreground); }
+.ibtn.xs { width: 22px; height: 22px; border-radius: 5px; }
+.ibtn.on { color: var(--info); }
+.ibtn[disabled] { opacity: .4; cursor: not-allowed; }
+.lnk { border: 0; background: transparent; padding: 0; color: var(--info); cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 3px; }
+.lnk:hover { text-decoration: underline; }
+.badge { display: inline-flex; align-items: center; gap: 3px; height: 20px; padding: 0 7px; border-radius: 6px; font-size: 12px; font-weight: 500; border: 1px solid transparent; white-space: nowrap; }
+.badge.outline { border-color: var(--border); }
+.badge.secondary { background: var(--secondary); }
+.badge.dest { background: var(--destructive); color: var(--card); }
+.badge.warn { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--warning); }
+.badge.warn-o { border-color: color-mix(in srgb, var(--warning) 45%, transparent); color: var(--warning); }
+.badge.ok { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.badge.info { border-color: color-mix(in srgb, var(--info) 40%, transparent); color: var(--info); }
+.badge.crit { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--destructive); }
+.badge.tiny { height: 18px; padding: 0 5px; font-size: 11px; }
+.input { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); padding: 0 10px; outline: none; }
+.input:focus { border-color: var(--input); }
+.input.sm { height: 28px; font-size: 13px; }
+textarea.input { height: auto; min-height: 56px; padding: 7px 10px 22px; resize: vertical; line-height: 1.6; display: block; }
+select.input { width: auto; max-width: 100%; padding: 0 6px; }
+.card { background: var(--card); border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border); min-width: 0; }
+.sect { padding: 12px 14px; }
+.sect-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.sect-h h3 { font-size: 14px; }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.li { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 7px 10px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--border); }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; background: var(--muted-fg); }
+.dot.ok { background: var(--success); } .dot.warn { background: var(--warning); } .dot.info { background: var(--info); } .dot.crit { background: var(--destructive); }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+.tbl th { text-align: left; font-weight: 500; color: var(--muted-fg); padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 12px; }
+.tbl td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tblwrap { overflow-x: auto; }
+.empty { padding: 14px; text-align: center; color: var(--muted-fg); font-size: 12.5px; border: 1px dashed var(--border); border-radius: 8px; }
+.seg2 { display: inline-flex; padding: 2px; border-radius: 7px; background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); flex: none; }
+.seg2 button { height: 26px; padding: 0 10px; border: 0; background: transparent; border-radius: 5px; font-size: 12.5px; color: var(--muted-fg); display: inline-flex; gap: 5px; align-items: center; cursor: pointer; white-space: nowrap; }
+.seg2.xs button { height: 22px; padding: 0 7px; font-size: 12px; }
+.seg2 button.on { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08), inset 0 0 0 1px var(--border); font-weight: 500; }
+.switch { width: 28px; height: 16px; border-radius: 99px; background: var(--secondary); position: relative; border: 0; cursor: pointer; flex: none; padding: 0; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .15s; }
+.switch.on { background: var(--info); } .switch.on::after { transform: translateX(12px); }
+kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; box-shadow: inset 0 -1px 0 var(--border), inset 0 0 0 1px var(--border); background: var(--muted); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { height: 26px; padding: 0 10px; border-radius: 99px; border: 1px solid var(--border); background: var(--card); font-size: 12.5px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.chip:hover:not([disabled]) { border-color: var(--info); color: var(--info); }
+.chip.used { color: var(--muted-fg); background: var(--muted); }
+.chip[disabled] { opacity: .5; cursor: default; }
+.floating { position: fixed; z-index: 90; }
+.pop { background: var(--popover); border-radius: 10px; box-shadow: var(--shadow-pop), inset 0 0 0 1px var(--border); padding: 6px; min-width: 180px; max-height: 70vh; overflow-y: auto; }
+.menu { display: flex; flex-direction: column; }
+.menu > button { display: flex; gap: 8px; align-items: center; text-align: left; border: 0; background: transparent; padding: 7px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; width: 100%; }
+.menu > button:hover, .menu > button.on { background: var(--muted); }
+.menu-h { font-size: 11px; color: var(--muted-fg); padding: 6px 8px 4px; }
+.menu-note { font-size: 11.5px; color: var(--muted-fg); padding: 7px 8px 4px; border-top: 1px solid var(--border); margin-top: 4px; line-height: 1.55; }
+.combo { position: relative; display: inline-flex; align-items: center; flex: 1 1 220px; min-width: 0; }
+.combo .input { padding-left: 30px; }
+.combo-i { position: absolute; left: 9px; color: var(--muted-fg); display: inline-flex; pointer-events: none; }
+.lb { background: var(--popover); border-radius: 8px; box-shadow: var(--shadow-pop), inset 0 0 0 1px var(--border); padding: 4px; max-height: 300px; overflow-y: auto; }
+.opt { padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+.opt.on { background: var(--muted); }
+
+/* agent presence (clinmesh agent-workspace-glow / agent-action-feedback) */
+[data-agent="active"], [data-agent="recent"] { position: relative; }
+[data-agent="active"] { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--info) 35%, transparent), 0 0 16px color-mix(in srgb, var(--info) 16%, transparent) !important; }
+[data-agent="active"]::after { content: ""; position: absolute; inset: -1.5px; border-radius: inherit; padding: 1.5px; pointer-events: none; z-index: 2;
+  background: conic-gradient(from var(--ang), var(--info), color-mix(in srgb, var(--info) 30%, transparent) 30%, transparent 55%, var(--info));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: spin 1.8s linear infinite; }
+[data-agent="recent"] { box-shadow: 0 0 0 1px color-mix(in srgb, var(--info) 35%, transparent) !important; transition: box-shadow .6s ease-out; }
+@keyframes spin { to { --ang: 360deg; } }
+.draft-field { position: relative; border-radius: 6px; }
+.draft-field.agent textarea { border-style: dashed; border-color: color-mix(in srgb, var(--info) 60%, transparent); }
+.abadge { position: absolute; right: 6px; top: 6px; z-index: 3; }
+.review { border: 1px solid color-mix(in srgb, var(--info) 45%, transparent); background: color-mix(in srgb, var(--info) 7%, transparent); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.redline { border: 1px solid var(--destructive); border-radius: 8px; padding: 10px 12px; color: var(--destructive); background: color-mix(in srgb, var(--destructive) 7%, transparent); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.warnline { border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); border-radius: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--warning) 8%, transparent); font-size: 13px; display: flex; flex-direction: column; gap: 8px; }
+.spin-i { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--info) 25%, transparent); border-top-color: var(--info); display: inline-block; animation: rot .8s linear infinite; flex: none; }
+@keyframes rot { to { transform: rotate(360deg); } }
+.caret::after { content: "▍"; color: var(--info); animation: blink 1s steps(1) infinite; margin-left: 1px; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* shell */
+.app { height: calc(100dvh / var(--scale)); display: flex; flex-direction: column; }
+.top { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); background: var(--card); box-shadow: inset 0 -1px 0 var(--border); }
+.logo { width: 22px; height: 22px; border-radius: 5px; background: var(--info); display: grid; place-items: center; color: var(--card); font-weight: 700; font-size: 15px; flex: none; }
+.top h1 { font-size: 15px; white-space: nowrap; }
+.top .ctx { font-size: 12px; color: var(--muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.top-r { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.status { display: flex; align-items: center; gap: 7px; font-size: 12.5px; min-width: 0; margin-right: 6px; }
+.doc-chip { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 8px 0 4px; border-radius: 99px; border: 0; background: transparent; cursor: pointer; }
+.doc-chip:hover { background: var(--muted); }
+.avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; font-size: 12px; font-weight: 600; flex: none; }
+.wb { flex: 1; min-height: 0; display: grid; grid-template-columns: 52px min(var(--wc), 30vw) 12px minmax(440px, 1fr) 12px min(var(--wa), 34vw); padding: 12px max(16px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px)); }
+.wb.noai { grid-template-columns: 52px min(var(--wc), 34vw) 12px minmax(440px, 1fr); }
+.wb > * { min-height: 0; min-width: 0; }
+.splitter { position: relative; cursor: col-resize; touch-action: none; outline: none; }
+.splitter::after { content: ""; position: absolute; top: 10px; bottom: 10px; left: 5px; width: 2px; border-radius: 2px; background: transparent; transition: background .15s; }
+.splitter:hover::after, .splitter.drag::after, .splitter:focus-visible::after { background: color-mix(in srgb, var(--info) 70%, transparent); }
+.splitter .grip { position: absolute; top: 50%; left: 1px; width: 10px; height: 30px; margin-top: -15px; border-radius: 4px; background: var(--card); box-shadow: inset 0 0 0 1px var(--border); opacity: 0; transition: opacity .15s; display: grid; place-items: center; color: var(--muted-fg); z-index: 1; }
+.splitter:hover .grip, .splitter.drag .grip, .splitter:focus-visible .grip { opacity: 1; }
+.size-tip { position: absolute; top: 50%; left: 14px; transform: translateY(22px); background: var(--primary); color: var(--primary-fg); font: 11px var(--mono); padding: 2px 6px; border-radius: 4px; white-space: nowrap; z-index: 5; }
+.agent-split .size-tip { left: auto; right: 14px; }
+
+/* queue rail */
+.rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-right: 8px; }
+.av-btn { width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border); background: var(--card); cursor: pointer; font-size: 14px; position: relative; }
+.av-btn.on { background: var(--accent); color: var(--accent-fg); border-color: color-mix(in srgb, var(--info) 45%, transparent); font-weight: 600; }
+.av-btn .n { position: absolute; right: -4px; bottom: -4px; font: 10px var(--mono); background: var(--secondary); border-radius: 4px; padding: 0 3px; color: var(--muted-fg); }
+.rail .sep { width: 24px; height: 1px; background: var(--border); }
+.queue-pop { width: 300px; }
+.qtabs { display: grid; grid-template-columns: repeat(3, 1fr); box-shadow: inset 0 -1px 0 var(--border); margin-bottom: 4px; }
+.qtabs button { height: 32px; border: 0; background: transparent; font-size: 13px; cursor: pointer; color: var(--muted-fg); }
+.qtabs button.on { color: var(--foreground); box-shadow: inset 0 -2px 0 var(--foreground); font-weight: 500; }
+.qitem { padding: 8px; display: flex; gap: 10px; border-radius: 6px; font-size: 13px; align-items: flex-start; }
+.qitem.on { background: var(--accent); }
+.qitem .no { font-family: var(--mono); color: var(--muted-fg); width: 18px; padding-top: 1px; }
+
+/* panes */
+.pane { display: flex; flex-direction: column; overflow: hidden; }
+.pane-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--border); min-height: 50px; flex: none; }
+.pane-h h3 { font-size: 14px; white-space: nowrap; }
+.pane-b { flex: 1; overflow-y: auto; min-height: 0; overflow-anchor: none; }
+.pane-f { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; flex: none; }
+.jump { position: sticky; bottom: 10px; margin: 0 auto 8px; z-index: 6; height: 26px; padding: 0 10px; border-radius: 99px; border: 0; background: var(--primary); color: var(--primary-fg); font-size: 12px; cursor: pointer; box-shadow: var(--shadow-pop); display: flex; align-items: center; gap: 4px; width: max-content; }
+.collapsed-pane { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0; }
+.vtext { writing-mode: vertical-rl; font-size: 13px; letter-spacing: 2px; color: var(--muted-fg); }
+
+/* consultation */
+.consult-sub { font-size: 11px; color: var(--muted-fg); }
+.paused-bar { display: flex; align-items: center; gap: 8px; padding: 7px 14px; font-size: 12.5px; color: var(--warning); background: color-mix(in srgb, var(--warning) 9%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--warning) 25%, transparent); flex: none; }
+.transcript { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px 16px; }
+.turn { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; position: relative; }
+.turn .who { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.turn.doctor .who { background: var(--accent); color: var(--accent-fg); }
+.turn.patient .who { background: var(--secondary); }
+.turn .meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-fg); flex-wrap: wrap; min-height: 18px; }
+.turn .meta b { color: var(--foreground); font-weight: 500; }
+.turn .text { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.turn .text.rough { color: var(--muted-fg); font-style: italic; }
+.turn.failed .text { color: var(--destructive); font-size: 13px; }
+.tag { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted-fg); padding: 0 5px; height: 18px; border-radius: 4px; background: var(--muted); }
+.tag.playing { color: var(--info); background: color-mix(in srgb, var(--info) 10%, transparent); }
+.tag.warn { color: var(--warning); background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.eq { display: inline-flex; gap: 1.5px; align-items: flex-end; height: 10px; }
+.eq i { width: 2px; background: currentColor; border-radius: 1px; animation: eq .9s ease-in-out infinite; height: 40%; }
+.eq i:nth-child(2) { animation-delay: .2s } .eq i:nth-child(3) { animation-delay: .4s }
+@keyframes eq { 50% { height: 100%; } }
+.tts-bar { height: 2px; border-radius: 2px; background: var(--muted); margin-top: 4px; overflow: hidden; }
+.tts-bar span { display: block; height: 100%; background: var(--info); }
+.hover-acts { position: absolute; right: 0; top: -6px; display: none; gap: 2px; background: var(--card); border-radius: 6px; box-shadow: 0 2px 8px rgb(0 0 0 / .1), inset 0 0 0 1px var(--border); padding: 2px; z-index: 4; }
+.turn:hover .hover-acts, .turn:focus-within .hover-acts, .prompt:hover .hover-acts, .prompt:focus-within .hover-acts { display: flex; }
+.exam-row { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, var(--success) 6%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--success) 60%, transparent); }
+.exam-row .t { margin-left: auto; font-size: 11px; color: var(--muted-fg); flex: none; }
+.typing { display: inline-flex; gap: 3px; align-items: center; height: 18px; }
+.typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--muted-fg); animation: bounce 1.2s infinite; }
+.typing i:nth-child(2) { animation-delay: .15s } .typing i:nth-child(3) { animation-delay: .3s }
+@keyframes bounce { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+.foot-sec { display: flex; flex-direction: column; gap: 6px; }
+.foot-h { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; font-size: 12px; color: var(--muted-fg); cursor: pointer; align-self: flex-start; }
+.voicebar { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
+.livebtn, .pttbtn { width: 100%; min-height: 48px; border-radius: 9px; border: 1px solid var(--border); background: var(--card); display: flex; align-items: center; gap: 10px; padding: 6px 12px; cursor: pointer; text-align: left; user-select: none; -webkit-user-select: none; touch-action: none; }
+.livebtn.on { border-color: color-mix(in srgb, var(--destructive) 45%, transparent); }
+.livebtn .lab { line-height: 1.35; }
+.livebtn b, .pttbtn b { font-size: 13.5px; font-weight: 600; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted-fg); flex: none; }
+.livebtn.on .rec-dot, .rec-dot.on { background: var(--destructive); box-shadow: 0 0 0 0 color-mix(in srgb, var(--destructive) 50%, transparent); animation: pulse 1.6s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.pttbtn { justify-content: center; }
+.pttbtn.on { background: color-mix(in srgb, var(--destructive) 9%, var(--card)); border-color: color-mix(in srgb, var(--destructive) 55%, transparent); }
+.pttbtn.cancel { background: color-mix(in srgb, var(--warning) 12%, var(--card)); border-color: var(--warning); color: var(--warning); }
+.pttbtn[disabled] { opacity: .55; cursor: not-allowed; }
+.level { display: inline-flex; gap: 2px; align-items: center; height: 20px; flex: none; }
+.level i { width: 3px; border-radius: 2px; background: var(--muted-fg); transition: height .2s; }
+.level.live i { background: var(--destructive); }
+.asr { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted-fg); white-space: nowrap; }
+
+/* case workspace */
+.main { display: flex; flex-direction: column; overflow: hidden; }
+.banner { padding: 12px 16px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); flex: none; max-height: 45%; overflow-y: auto; }
+.banner h2 { font-size: 16px; }
+.vitals { display: flex; flex-wrap: wrap; gap: 6px; align-items: stretch; }
+.vt { display: flex; align-items: baseline; gap: 4px; padding: 3px 9px; border-radius: 6px; background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); font-size: 12px; }
+.vt .vk { color: var(--muted-fg); } .vt .vv { font-size: 13.5px; font-weight: 600; } .vt .vu { color: var(--muted-fg); font-size: 11px; }
+.vt.abn .vv { color: var(--warning); }
+.checklist { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; padding: 4px 0 2px; }
+.checklist .item { display: flex; gap: 8px; align-items: center; }
+.tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border); align-items: center; overflow-x: auto; flex: none; }
+.tab { height: 42px; padding: 0 10px; border: 0; background: transparent; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--muted-fg); font-size: 14px; border-radius: 6px 6px 0 0; }
+.tab.on { color: var(--foreground); box-shadow: inset 0 -2px 0 var(--foreground); font-weight: 500; }
+.tab .st-ok { width: 14px; height: 14px; border-radius: 50%; background: var(--success); color: var(--card); display: inline-grid; place-items: center; }
+.panel { padding: 16px; display: flex; flex-direction: column; gap: 14px; flex: 1; overflow-y: auto; min-height: 0; }
+.actionbar { min-height: 50px; padding: 8px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; flex: none; background: var(--card); border-radius: 0 0 8px 8px; }
+.actionbar > * { flex: none; } .actionbar > .grow { flex: 1 1 auto; }
+.actionbar.ready { background: color-mix(in srgb, var(--warning) 8%, var(--card)); }
+.nf { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 10px; align-items: start; }
+.nf-l { font-size: 12.5px; padding-top: 7px; font-weight: 500; }
+.req { color: var(--destructive); margin-left: 2px; }
+.nf-tools { position: absolute; left: 10px; right: 8px; bottom: 4px; display: flex; gap: 10px; align-items: center; font-size: 11.5px; pointer-events: none; z-index: 3; }
+.nf-tools > * { pointer-events: auto; }
+.nf-tools .cnt { margin-left: auto; color: var(--muted-fg); font-size: 11px; }
+.nf-tools .cnt.over { color: var(--destructive); }
+.save-state { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-fg); }
+.composer2 { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 12px; }
+@container (max-width: 600px) { .composer2 { grid-template-columns: minmax(0, 1fr); } }
+.catalog { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.catalog .combo { flex: none; width: 100%; }
+.cat-list { display: flex; flex-direction: column; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border); max-height: 264px; overflow-y: auto; }
+.cat-row { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.cat-row:last-child { border-bottom: 0; }
+.pendinglist { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); min-width: 0; }
+.order { border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.order + .order { margin-top: 8px; }
+.stepper { display: flex; align-items: flex-start; font-size: 11px; color: var(--muted-fg); flex-wrap: wrap; row-gap: 4px; }
+.stp { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding-right: 16px; }
+.stp .nm { display: inline-flex; align-items: center; gap: 4px; }
+.stp .nm::before { content: ""; width: 7px; height: 7px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border); }
+.stp.done .nm { color: var(--foreground); } .stp.done .nm::before { background: var(--success); box-shadow: none; }
+.stp.cur .nm { color: var(--info); } .stp.cur .nm::before { background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 20%, transparent); }
+.stp .tm { font-family: var(--mono); font-size: 10.5px; padding-left: 11px; }
+.rmeta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted-fg); }
+.rx-table input.input, .rx-table select.input { height: 26px; font-size: 13px; }
+.rx-table input.num-in { width: 58px; padding: 0 6px; text-align: right; }
+.insert { width: 340px; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; padding: 6px; margin: 0; }
+.insert dt { color: var(--muted-fg); font-size: 11.5px; margin-top: 4px; } .insert dd { margin: 0; }
+
+/* agent panel */
+.agent-logo { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); flex: none; }
+.atabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--border); flex: none; }
+.atabs button { height: 34px; border: 0; background: transparent; padding: 0 8px; cursor: pointer; color: var(--muted-fg); font-size: 13px; display: inline-flex; gap: 5px; align-items: center; }
+.atabs button.on { color: var(--foreground); box-shadow: inset 0 -2px 0 var(--foreground); font-weight: 500; }
+.chat { display: flex; flex-direction: column; gap: 18px; padding: 12px 14px 14px; }
+.chat-intro { font-size: 12px; color: var(--muted-fg); text-align: center; line-height: 1.6; padding: 4px 8px; }
+.cturn { display: flex; flex-direction: column; gap: 8px; position: relative; }
+.prompt { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; position: relative; padding: 8px 10px; border-radius: 10px; background: var(--muted); }
+.av { width: 22px; height: 22px; border-radius: 6px; background: var(--primary); color: var(--primary-fg); display: grid; place-items: center; font-size: 11.5px; flex: none; }
+.evt { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted-fg); }
+.evt .line { flex: 1; height: 1px; background: var(--border); min-width: 12px; }
+.evt-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 99px; background: var(--muted); box-shadow: inset 0 0 0 1px var(--border); white-space: nowrap; max-width: 82%; overflow: hidden; text-overflow: ellipsis; }
+.reply { display: flex; flex-direction: column; gap: 6px; position: relative; }
+.act-h { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 2px 0; font-size: 12.5px; color: var(--muted-fg); cursor: pointer; align-self: flex-start; max-width: 100%; }
+.act-h:hover { color: var(--foreground); }
+.steps { display: flex; flex-direction: column; border-left: 1.5px solid var(--border); margin-left: 6px; padding-left: 8px; gap: 1px; }
+.step-h { width: 100%; display: flex; align-items: center; gap: 7px; border: 0; background: transparent; padding: 4px 6px; border-radius: 5px; cursor: pointer; font-size: 12.5px; text-align: left; min-width: 0; }
+.step-h:hover { background: var(--muted); }
+.step-h .nm { font: 11.5px var(--mono); color: var(--muted-fg); flex: none; }
+.step-h .sub { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.step-h .meta { font-size: 11px; color: var(--muted-fg); flex: none; }
+.step.denied .sub, .step.denied .meta { color: var(--warning); }
+.step.approval .meta { color: var(--info); }
+.mark { width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; flex: none; color: var(--success); box-shadow: inset 0 0 0 1.2px currentColor; }
+.mark.denied { color: var(--warning); } .mark.approval { color: var(--info); } .mark.stopped { color: var(--muted-fg); } .mark.think { color: var(--c2); box-shadow: none; }
+.mark.running { box-shadow: none; }
+.think { font-size: 12.5px; color: var(--muted-fg); padding: 2px 6px 6px 28px; line-height: 1.65; }
+.step-b { padding: 2px 0 6px 28px; display: flex; flex-direction: column; gap: 4px; }
+pre.code { margin: 0; font: 11.5px/1.5 var(--mono); background: var(--muted); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; }
+pre.code.out { box-shadow: inset 2px 0 0 var(--border); }
+.code-l { font-size: 10.5px; color: var(--muted-fg); letter-spacing: .04em; }
+.md { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.md p + p, .md p + ol, .md p + ul, .md ol + p, .md ul + p { margin-top: 6px; }
+.md ol, .md ul { margin: 4px 0 0; padding-left: 20px; }
+.md code { font: 12.5px var(--mono); background: var(--muted); padding: 1px 4px; border-radius: 4px; }
+.live { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--info); }
+.turn-foot { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.turn-foot .usage { font: 11px var(--mono); color: var(--muted-fg); }
+.turn-foot .acts { display: flex; gap: 1px; opacity: 0; transition: opacity .12s; }
+.cturn:hover .turn-foot .acts, .turn-foot .acts:focus-within { opacity: 1; }
+.approval { border: 1px solid color-mix(in srgb, var(--info) 45%, transparent); background: color-mix(in srgb, var(--info) 6%, transparent); border-radius: 10px; padding: 9px 11px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.compact-card { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--border); color: var(--muted-fg); }
+.composer { padding: 8px 12px 6px; display: flex; flex-direction: column; gap: 6px; position: relative; flex: none; }
+.composer .box { border: 1px solid var(--border); border-radius: 12px; padding: 8px 8px 6px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / .04); }
+.composer .box:focus-within { border-color: var(--input); }
+.composer textarea { border: 0; outline: 0; resize: none; background: transparent; width: 100%; line-height: 1.55; min-height: 44px; max-height: 160px; }
+.chipm { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 99px; background: var(--muted); border: 0; font-size: 11.5px; color: var(--muted-fg); cursor: pointer; white-space: nowrap; }
+.chipm:hover { color: var(--foreground); }
+.send { width: 28px; height: 28px; border-radius: 8px; border: 0; background: var(--primary); color: var(--primary-fg); cursor: pointer; display: grid; place-items: center; flex: none; }
+.send[disabled] { opacity: .3; cursor: default; }
+.stopbtn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); display: grid; place-items: center; cursor: pointer; flex: none; }
+.cmdmenu { position: absolute; bottom: calc(100% - 4px); left: 12px; right: 12px; background: var(--popover); border-radius: 10px; box-shadow: var(--shadow-pop), inset 0 0 0 1px var(--border); padding: 4px; display: flex; flex-direction: column; z-index: 8; max-height: 260px; overflow-y: auto; }
+.cmdmenu button { display: flex; gap: 10px; align-items: center; border: 0; background: transparent; padding: 6px 8px; border-radius: 6px; cursor: pointer; text-align: left; font-size: 13px; }
+.cmdmenu button.on, .cmdmenu button:hover { background: var(--muted); }
+.queued { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; background: var(--muted); border-radius: 8px; }
+.hint { font-size: 11px; color: var(--muted-fg); padding: 0 4px; }
+.statusline { font: 10.5px var(--mono); color: var(--muted-fg); padding: 0 14px 8px; white-space: nowrap; overflow: hidden; flex: none; display: flex; gap: 10px; }
+.ring { display: inline-grid; place-items: center; border-radius: 50%; flex: none; }
+.ring i { width: 64%; height: 64%; border-radius: 50%; background: var(--card); }
+.ctx { display: flex; flex-direction: column; gap: 14px; padding: 14px; }
+.stackbar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--muted); }
+.stackbar span { height: 100%; min-width: 2px; }
+.stackbar .free { flex: 1; min-width: 0; }
+.stackbar .reserve { background: repeating-linear-gradient(135deg, var(--border) 0 3px, transparent 3px 6px); }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; flex: none; }
+.iso { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--success) 8%, transparent); }
+.tl { display: flex; align-items: flex-end; gap: 3px; height: 72px; padding-bottom: 2px; border-bottom: 1px solid var(--border); }
+.tlbar { flex: 1; max-width: 16px; display: flex; flex-direction: column-reverse; border-radius: 2px 2px 0 0; overflow: hidden; min-height: 4px; }
+.tlbar.cmp { outline: 1px dashed var(--muted-fg); outline-offset: 1px; }
+.cb { border-bottom: 1px solid var(--border); }
+.cb summary { display: flex; align-items: center; gap: 2px; padding: 7px 2px; cursor: pointer; font-size: 13px; list-style: none; }
+.cb summary::-webkit-details-marker { display: none; }
+.cb ul { list-style: none; margin: 0 0 8px; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.cb li { display: flex; justify-content: space-between; gap: 10px; }
+.cb li span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* overlays */
+.scrim { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 60; padding: 16px; }
+.dialog { background: var(--popover); border-radius: 12px; box-shadow: 0 10px 40px rgb(0 0 0 / .25); width: min(480px, 100%); padding: 18px; display: flex; flex-direction: column; gap: 12px; max-height: 90vh; overflow: auto; }
+.dialog.wide { width: min(900px, 100%); }
+.toast { position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 95; background: var(--popover); border-radius: 8px; box-shadow: var(--shadow-pop), inset 0 0 0 1px var(--border); padding: 8px 12px; font-size: 13px; max-width: min(560px, calc(100% - 32px)); display: flex; gap: 12px; align-items: center; }
+.toast.crit { color: var(--destructive); }
+.devbtn { position: fixed; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 80; background: #111; color: #fff; border: 0; border-radius: 99px; padding: 5px 11px; font-size: 11.5px; cursor: pointer; opacity: .5; }
+.devbtn:hover { opacity: 1; }
+.devpanel { position: fixed; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(46px + env(safe-area-inset-bottom, 0px)); z-index: 80; background: #111; color: #eee; border-radius: 12px; padding: 12px; width: min(440px, calc(100% - 24px)); font-size: 12.5px; display: flex; flex-direction: column; gap: 8px; }
+.devpanel button { background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+
+@media (max-width: 1180px) {
+  .wb, .wb.noai { grid-template-columns: 52px min(var(--wc), 38vw) 12px minmax(0, 1fr); }
+  .wb > .agent-split { display: none; }
+  .wb > .agent { position: fixed; right: 12px; top: 60px; bottom: 12px; width: min(420px, calc(100% - 24px)); z-index: 40; box-shadow: var(--shadow-pop), inset 0 0 0 1px var(--border); }
+}
+@media (max-width: 860px) {
+  body { overflow: auto; } .app { height: auto; }
+  .wb, .wb.noai { display: flex; flex-direction: column; gap: 12px; }
+  .wb > .splitter { display: none; }
+  .rail { flex-direction: row; padding: 0; }
+  .wb > .consult { height: 540px; } .wb > .main { min-height: 640px; }
+  .top .ctx { display: none; }
+  .nf { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-agent="active"]::after { animation: none; background: var(--info); opacity: .55; }
+  .spin-i, .eq i, .typing i, .rec-dot, .caret::after { animation: none !important; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="float-root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<script>
+const { useReducer, useState, useEffect, useRef, useContext, createContext, useMemo, useLayoutEffect, Fragment } = React;
+const html = htm.bind(React.createElement);
+
+/* ================= helpers ================= */
+const LUC = window.lucide || {};
+function Icon({ n, size = 16, className = '', style }) {
+  const node = (LUC.icons && LUC.icons[n]) || LUC[n];
+  if (!node) return null;
+  const kids = node[0] === 'svg' ? node[2] : node;
+  return React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, className: 'ic ' + className, style },
+    kids.map(([tag, attrs], i) => React.createElement(tag, { ...attrs, key: i })));
+}
+const getScale = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--scale')) || 1;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+function usePersist(key, def) {
+  const [v, setV] = useState(() => store.get(key, def));
+  useEffect(() => { store.set(key, v); }, [key, v]);
+  return [v, setV];
+}
+const clock = (t, sec) => new Date(t).toTimeString().slice(0, sec ? 8 : 5);
+const fmtDur = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+const fmtK = n => Math.abs(n) >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+const tk = str => Math.round((str || '').length * 1.35);
+const resolve = v => (typeof v === 'function' ? v() : v);
+
+/* ================= Golden Case 1 (scripted; structure follows clinmesh Authored Case Pack) ================= */
+const HOSPITAL = '仁和临床仿真医院', DEPT = '全科医学科门诊', ROOM = '3 诊室';
+const DOCTOR = { name: '张明', title: '主治医师' };
+const PATIENT = { name: '李建国', sex: '男', age: 58, opNo: '20261124-0007', visitAt: '08:31', kind: '初诊', insurance: '城镇职工医保', triage: 3,
+  allergies: [{ name: '青霉素', reaction: '过敏性休克', year: 2015 }], chronic: ['高血压'], persona: 'Persona v1.2（版本固定）' };
+const CASES = [
+  { id: 'gc1', no: 7, name: '李建国', sex: '男', age: 58, cc: '发热咳嗽 3 天', live: true, tag: '在诊', at: '08:31', kind: '初诊' },
+  { id: 'gc2', no: 8, name: '王秀兰', sex: '女', age: 66, cc: '间断胸闷 2 天', tag: '待诊', at: '08:46', kind: '初诊' },
+  { id: 'gc3', no: 9, name: '陈志强', sex: '男', age: 49, cc: '多饮多尿 1 月，尿痛 2 天', tag: '待诊', at: '09:02', kind: '复诊' },
+  { id: 'gc4', no: 10, name: '周雨晴', sex: '女', age: 27, cc: '咽痛流涕 2 天', tag: '待诊', at: '09:15', kind: '初诊' },
+];
+const HISTORY = {
+  visits: [
+    { date: '2024-03-12', dept: '全科医学科', reason: '高血压复诊', dx: 'I10 原发性高血压', med: '氨氯地平 5 mg QD' },
+    { date: '2023-11-02', dept: '全科医学科', reason: '咽痛流涕 2 天', dx: 'J06.9 急性上呼吸道感染', med: '对症治疗' },
+    { date: '2015-06-02', dept: '急诊科', reason: '注射青霉素后呼吸困难、血压下降', dx: 'T88.6 药物过敏性休克', med: '肾上腺素抢救' },
+  ],
+  allergies: [{ agent: '青霉素', reaction: '过敏性休克', when: '2015-06', source: '急诊抢救记录' }],
+  chronic: [{ name: '原发性高血压', since: '2014', status: '规律服药，控制可' }],
+  meds: [{ name: '苯磺酸氨氯地平片', dose: '5 mg 口服 QD', since: '2014 起' }],
+};
+const CATALOG = [
+  { key: 'cbc', name: '血常规（五分类）', cat: '检验', specimen: '静脉血 · EDTA 紫帽', dept: '检验科', tat: 20, tatText: '30 分钟', py: ['xcg', 'cbc'] },
+  { key: 'crp', name: 'C 反应蛋白', cat: '检验', specimen: '静脉血 · 紫帽', dept: '检验科', tat: 20, tatText: '30 分钟', py: ['crp', 'cfydb'] },
+  { key: 'pct', name: '降钙素原', cat: '检验', specimen: '静脉血 · 黄帽', dept: '检验科', tat: 25, tatText: '60 分钟', py: ['pct', 'jgsy'] },
+  { key: 'glu', name: '随机血糖', cat: '检验', specimen: '指尖血', dept: '检验科', tat: 12, tatText: '10 分钟', py: ['sjxt', 'glu'] },
+  { key: 'ua', name: '尿常规', cat: '检验', specimen: '中段尿', dept: '检验科', tat: 20, tatText: '30 分钟', py: ['ncg'] },
+  { key: 'cxr', name: '胸部正侧位 X 线', cat: '放射', specimen: '胸部 · 正侧位', dept: '放射科', tat: 40, tatText: '1 小时', py: ['xp', 'xbzcw', 'dr'] },
+  { key: 'ct', name: '胸部 CT 平扫', cat: '放射', specimen: '胸部 · 平扫', dept: '放射科', tat: 60, tatText: '2 小时', py: ['ct', 'xbct'] },
+  { key: 'ecg', name: '12 导联心电图', cat: '功能', specimen: '床旁', dept: '心电图室', tat: 30, tatText: '20 分钟', py: ['xdt', 'ecg'] },
+];
+const STAGES = { 检验: ['已开立', '已采样', '检验中', '已出报告'], 放射: ['已开立', '已登记', '检查中', '待审核', '已出报告'], 功能: ['已开立', '检查中', '已出报告'] };
+const R = (name, value, unit, ref, flag = 'N') => ({ name, value, unit, ref, flag });
+const LAB_STAFF = { reporter: '王丽（检验师）', reviewer: '陈刚（主管检验师）' };
+const RAD_STAFF = { reporter: '刘洋（放射科医师）', reviewer: '赵敏（副主任医师）' };
+const TRUTH = {
+  cbc: { kind: 'lab', staff: LAB_STAFF, rows: [R('白细胞计数 WBC', '14.2', '×10⁹/L', '3.5–9.5', 'H'), R('中性粒细胞百分比 NEUT%', '86.1', '%', '40–75', 'H'), R('淋巴细胞百分比 LYM%', '9.2', '%', '20–50', 'L'), R('红细胞计数 RBC', '4.82', '×10¹²/L', '4.3–5.8'), R('血红蛋白 HGB', '142', 'g/L', '130–175'), R('血小板计数 PLT', '236', '×10⁹/L', '125–350')],
+    amend: { rows: [R('白细胞计数 WBC', '15.0', '×10⁹/L', '3.5–9.5', 'H'), R('中性粒细胞百分比 NEUT%', '87.4', '%', '40–75', 'H'), R('淋巴细胞百分比 LYM%', '8.8', '%', '20–50', 'L'), R('红细胞计数 RBC', '4.82', '×10¹²/L', '4.3–5.8'), R('血红蛋白 HGB', '142', 'g/L', '130–175'), R('血小板计数 PLT', '236', '×10⁹/L', '125–350')], reason: '仪器复核后更正' } },
+  crp: { kind: 'lab', staff: LAB_STAFF, rows: [R('C 反应蛋白 CRP', '86', 'mg/L', '0–8', 'H')], amend: { rows: [R('C 反应蛋白 CRP', '112', 'mg/L', '0–8', 'H')], reason: '原标本溶血，复测更正' } },
+  pct: { kind: 'lab', staff: LAB_STAFF, rows: [R('降钙素原 PCT', '0.82', 'ng/mL', '0–0.05', 'H')] },
+  glu: { kind: 'lab', staff: LAB_STAFF, rows: [R('随机血糖 GLU', '6.1', 'mmol/L', '3.9–11.1')], baseline: true },
+  ua: { kind: 'lab', staff: LAB_STAFF, rows: [R('白细胞酯酶 LEU', '阴性', '', '阴性'), R('亚硝酸盐 NIT', '阴性', '', '阴性'), R('尿蛋白 PRO', '阴性', '', '阴性'), R('尿糖 GLU', '阴性', '', '阴性')], baseline: true },
+  cxr: { kind: 'text', staff: RAD_STAFF, findings: '右肺下叶见斑片状实变影，边界模糊；左肺清晰；右肋膈角锐利，心影不大。', impression: '右下肺炎。',
+    amend: { findings: '右肺下叶实变影，内见少量支气管充气征；余同前。', impression: '右下肺炎（修订版）。', reason: '上级医师审核补充' } },
+  ct: { kind: 'text', staff: RAD_STAFF, findings: '右肺下叶后基底段大片状实变影，内见支气管充气征，周围少许磨玻璃影；纵隔淋巴结不大；双侧胸腔未见积液。', impression: '右肺下叶肺炎。' },
+  ecg: { kind: 'text', staff: { reporter: '孙婷（心电图医师）', reviewer: '孙婷（心电图医师）' }, findings: '窦性心律，心室率 98 次/分，PR 156 ms，QRS 92 ms，QTc 418 ms，未见 ST-T 改变。', impression: '窦性心律，正常心电图。', baseline: true },
+};
+const EXAMS = [
+  { key: 'vitals', name: '生命体征', f: 'T 38.6℃，P 102 次/分，R 22 次/分，BP 138/84 mmHg，SpO₂ 94%（未吸氧）' },
+  { key: 'general', name: '一般情况', f: '神志清，急性病容，对答切题' },
+  { key: 'pharynx', name: '咽部', f: '咽部轻度充血，扁桃体无肿大' },
+  { key: 'lung', name: '肺部', f: '右下肺呼吸音减低，可闻及湿性啰音；左肺呼吸音清' },
+  { key: 'heart', name: '心脏', f: '心率 102 次/分，律齐，各瓣膜区未闻及杂音' },
+  { key: 'abd', name: '腹部', f: '腹软，无压痛及反跳痛' },
+];
+const ICD = [
+  { code: 'J18.9', name: '社区获得性肺炎', py: ['sqhdxfy', 'fy'] }, { code: 'J15.9', name: '细菌性肺炎', py: ['xjxfy', 'fy'] },
+  { code: 'J13', name: '肺炎链球菌肺炎', py: ['fylqjfy', 'fy'] }, { code: 'J20.9', name: '急性支气管炎', py: ['jxzqgy'] },
+  { code: 'J06.9', name: '急性上呼吸道感染', py: ['jxshxdgr', 'sg'] }, { code: 'J44.1', name: '慢性阻塞性肺疾病伴急性加重', py: ['mxzsxfjb', 'copd'] },
+  { code: 'A15.0', name: '肺结核', py: ['fjh'] }, { code: 'R50.9', name: '发热', py: ['fr'] },
+  { code: 'I10', name: '原发性高血压', py: ['yfxgxy', 'gxy'] }, { code: 'Z88.0', name: '青霉素过敏个人史', py: ['qmsgm'] },
+];
+const FREQ = { QD: { n: 1, t: '每日 1 次' }, BID: { n: 2, t: '每日 2 次' }, TID: { n: 3, t: '每日 3 次' }, QID: { n: 4, t: '每日 4 次' }, PRN: { n: 3, t: '必要时' } };
+const DRUGS = [
+  { key: 'moxifloxacin', name: '盐酸莫西沙星片', spec: '0.4 g×3 片/盒', pack: 1, unit: '片', doseUnit: '片', dose: 1, freq: 'QD', days: 7, route: '口服', cls: 'quinolone', clsName: '喹诺酮类', py: ['mxsx'],
+    insert: { ind: '敏感菌所致成人社区获得性肺炎、急性细菌性鼻窦炎等。', contra: '对莫西沙星或其他喹诺酮类过敏者禁用；QT 间期延长、低钾血症者慎用。', note: '与氨氯地平无已知临床相关相互作用；避免与含铝镁抗酸剂同服。' } },
+  { key: 'doxycycline', name: '盐酸多西环素片', spec: '0.1 g×10 片/盒', pack: 1, unit: '片', doseUnit: '片', dose: 1, freq: 'BID', days: 7, route: '口服', cls: 'tetracycline', clsName: '四环素类', py: ['dxhs'],
+    insert: { ind: '社区获得性肺炎（非典型病原体）等。', contra: '对四环素类过敏者禁用；8 岁以下儿童、孕妇禁用。', note: '服药时多饮水，服后半小时内不宜平卧。' } },
+  { key: 'amoxicillin', name: '阿莫西林胶囊', spec: '0.25 g×24 粒/盒', pack: 1, unit: '粒', doseUnit: '粒', dose: 2, freq: 'TID', days: 7, route: '口服', cls: 'penicillin', clsName: '青霉素类', py: ['amxl'],
+    insert: { ind: '敏感菌所致呼吸道、泌尿道感染等。', contra: '青霉素类药物过敏史或青霉素皮肤试验阳性患者禁用。', note: '用药前须询问过敏史并按规定做皮试。' } },
+  { key: 'amoxiclav', name: '阿莫西林克拉维酸钾片', spec: '0.625 g×12 片/盒', pack: 1, unit: '片', doseUnit: '片', dose: 1, freq: 'TID', days: 7, route: '口服', cls: 'penicillin', clsName: '青霉素类', py: ['amxlklws'],
+    insert: { ind: '产酶菌所致下呼吸道感染等。', contra: '青霉素类过敏者禁用；既往使用本品出现胆汁淤积性黄疸者禁用。', note: '餐前服用可减少胃肠道反应。' } },
+  { key: 'cefuroxime', name: '头孢呋辛酯片', spec: '0.25 g×12 片/盒', pack: 1, unit: '片', doseUnit: '片', dose: 1, freq: 'BID', days: 7, route: '口服', cls: 'cephalosporin', clsName: '头孢菌素类', py: ['tbfx'],
+    insert: { ind: '敏感菌所致下呼吸道感染等。', contra: '对头孢菌素类过敏者禁用；青霉素过敏者慎用（交叉过敏）。', note: '餐后服用吸收更好。' } },
+  { key: 'acetaminophen', name: '对乙酰氨基酚片', spec: '0.5 g×12 片/盒', pack: 1, unit: '片', doseUnit: '片', dose: 1, freq: 'PRN', days: 3, route: '口服', cls: 'analgesic', clsName: '解热镇痛', py: ['dyxajf'],
+    insert: { ind: '发热、轻中度疼痛。', contra: '严重肝功能不全者禁用。', note: 'T>38.5℃ 时服用，间隔不少于 4 小时，每日不超过 4 次。' } },
+  { key: 'ambroxol', name: '盐酸氨溴索口服溶液', spec: '100 mL:0.6 g/瓶', pack: 100, unit: '瓶', doseUnit: 'mL', dose: 10, freq: 'TID', days: 5, route: '口服', cls: 'mucolytic', clsName: '祛痰', py: ['axs'],
+    insert: { ind: '痰液黏稠不易咳出。', contra: '对本品过敏者禁用。', note: '餐后服用。' } },
+];
+const RED = { penicillin: true }, WARN = { cephalosporin: true };
+const OVERRIDE_REASONS = ['已评估获益大于风险', '既往使用同类药物无不良反应', '存在明确适应证且无合适替代', '已完成皮试或过敏评估', '患者知情同意', '其他（见说明）'];
+const SECTIONS = [
+  { key: 'cc', name: '主诉', req: true, rows: 2 }, { key: 'hpi', name: '现病史', req: true, rows: 3 }, { key: 'past', name: '既往史与过敏史', rows: 2 },
+  { key: 'pe', name: '体格检查与辅助检查', rows: 3 }, { key: 'assess', name: '评估与诊断依据', rows: 3 }, { key: 'plan', name: '处理意见与随访', rows: 3 },
+];
+const SEC = Object.fromEntries(SECTIONS.map(s => [s.key, s.name]));
+const PHRASES = {
+  hpi: ['病程中无咯血、盗汗、体重下降。', '起病以来精神、食欲稍差，大小便正常。'],
+  past: ['否认糖尿病、冠心病史。', '否认手术、外伤、输血史。', '否认食物过敏史。'],
+  pe: ['神志清，精神可。', '双肺呼吸音清，未闻及干湿性啰音。', '心律齐，各瓣膜区未闻及杂音。', '腹软，无压痛及反跳痛。'],
+  plan: ['注意休息，多饮水。', '72 小时复诊。', '如症状加重随时急诊就诊。'],
+};
+const PERSONA = { opening: '医生，我这三天一直发烧，咳嗽得厉害，晚上都睡不好。' };
+const QUESTIONS = [
+  { text: '今天哪里不舒服？', rough: '今天哪里不舒服' },
+  { text: '发烧最高多少度？有没有怕冷？', rough: '发烧最高多少度 有没有怕冷' },
+  { text: '咳痰吗？痰是什么颜色？', rough: '咳谈吗 谈是什么颜色' },
+  { text: '有没有胸痛或者气喘？', rough: '有没有胸痛或者气喘' },
+  { text: '有没有药物过敏？', rough: '有没有要物过敏' },
+  { text: '平时有什么慢性病，吃什么药？', rough: '平时有什么慢性病 吃什么要' },
+  { text: '抽烟喝酒吗？', rough: '抽烟喝酒吗' },
+];
+const EXTRA_Q = { text: '还有别的情况要补充吗？', rough: '还有别的情况要补充吗' };
+const SCRIPT = [
+  { kw: ['不舒服', '怎么了', '哪里', '主诉'], reply: PERSONA.opening,
+    fx: [{ m: 'note', k: 'cc', text: '发热、咳嗽 3 天。' }, { m: 'note', k: 'hpi', append: '患者 3 天前无明显诱因出现发热、咳嗽，夜间加重影响睡眠。' }] },
+  { kw: ['烧', '体温', '度', '冷', '寒战'], reply: '最高烧到三十九度多，吃了退烧药能降一点，过几个钟头又上来了。还怕冷，打寒战。',
+    fx: [{ m: 'note', k: 'hpi', append: '最高体温 39.2℃，伴畏寒、寒战，口服退热药可暂时缓解。' }] },
+  { kw: ['痰', '咳'], reply: '有痰，黄的，挺黏，今天早上还有点铁锈色。',
+    fx: [{ m: 'note', k: 'hpi', append: '咳黄色黏痰，今晨见铁锈色痰。' },
+         { m: 'dx', code: 'J18.9', primary: true }, { m: 'inv', key: 'cbc' }, { m: 'inv', key: 'crp' }, { m: 'inv', key: 'cxr' }, { m: 'blocked' }] },
+  { kw: ['胸', '喘', '气', '呼吸'], reply: '咳嗽的时候右边胸口扯着疼，爬两层楼就喘。',
+    fx: [{ m: 'note', k: 'hpi', append: '咳嗽时右侧胸痛，活动后气促。' }] },
+  { kw: ['过敏', '青霉素'], reply: '我青霉素过敏！2015 年打针的时候休克过一次，差点没抢救过来。',
+    fx: [{ m: 'note', k: 'past', append: '青霉素过敏史（2015 年注射后过敏性休克）。' }, { m: 'warn', text: '**青霉素过敏性休克史**已由患者确认：处方须避开青霉素类，头孢菌素类慎用。' }] },
+  { kw: ['病史', '高血压', '慢性', '吃什么药', '平时'], reply: '高血压十来年了，一直吃氨氯地平，一天一片，血压还算稳。',
+    fx: [{ m: 'note', k: 'past', append: '高血压病史 10 余年，规律口服氨氯地平 5 mg QD，控制可。' }, { m: 'dx', code: 'I10', primary: false }] },
+  { kw: ['烟', '酒'], reply: '烟抽了三十年了，一天差不多一包。酒不怎么喝。',
+    fx: [{ m: 'note', k: 'past', append: '吸烟 30 年，约 20 支/日；否认饮酒。' }] },
+];
+const FALLBACK = '这个……我说不太清楚，医生你看呢？';
+const matchScript = text => SCRIPT.findIndex(x => x.kw.some(k => text.includes(k)));
+const THINKS = [
+  '主诉为发热、咳嗽 3 天。先把主诉和现病史骨架写出来，后续问诊再往里补。',
+  '高热伴寒战，退热药只能暂时缓解，提示细菌感染可能性上升。补进现病史。',
+  '黄痰、今晨铁锈色痰，加上高热寒战，像典型的肺炎链球菌肺炎。需要血常规、CRP 和胸片支持，先起草这三项检查和候选诊断 J18.9。来源记录提示青霉素过敏，后面用药要避开。我试着推进「确认诊断」——这是正式操作，预期会被拦截。',
+  '胸膜性胸痛加活动后气促，需要评估严重度。建议查体时测 SpO₂。',
+  '患者亲口确认青霉素过敏性休克，和来源记录一致。这是处方红线，要在既往史里写清楚。',
+  '高血压 10 年、控制稳定，作为次诊断加入；氨氯地平继续。',
+  '吸烟是下呼吸道感染的危险因素，记入既往史。',
+];
+const THINK_CXR = '胸片证实右下肺实变，结合 WBC、CRP 升高，社区获得性肺炎依据充分。CURB-65：意识清、R 22、BP 138/84、年龄 58，尿素未测，0 分，可门诊治疗。青霉素休克史 → 经验治疗选莫西沙星，加对乙酰氨基酚退热。起草评估、处理意见和处方草稿。';
+const AFTER_CXR = [
+  { m: 'note', k: 'assess', text: '中年男性，急性起病，发热、咳黄痰伴铁锈色痰、右侧胸痛；右下肺湿啰音；WBC、CRP 升高，胸片右下肺实变。考虑社区获得性肺炎（右下叶）。CURB-65 0 分（尿素未测），SpO₂ 94%，可门诊治疗。青霉素严重过敏，经验治疗避开青霉素类。' },
+  { m: 'note', k: 'plan', text: '1. 莫西沙星 0.4 g 口服 QD × 7 天；2. 对乙酰氨基酚退热 PRN；3. 休息、多饮水；4. 72 小时复诊评估疗效，如呼吸困难加重、SpO₂<92% 或持续高热即刻急诊；5. 继续氨氯地平控制血压。' },
+  { m: 'rx', key: 'moxifloxacin' }, { m: 'rx', key: 'acetaminophen' },
+];
+const MODELS = [{ name: 'glm-5.3-flash', note: '默认 · 低延迟' }, { name: 'glm-5.3', note: '更强推理' }, { name: 'claude-sonnet-5-5', note: 'Anthropic' }];
+const EFFORT = { off: '关闭', low: '低', medium: '中', high: '高' };
+const SLASH = [
+  { cmd: '/鉴别诊断', desc: '按现有资料列出鉴别诊断与依据' }, { cmd: '/检查建议', desc: '建议下一步检查及理由' },
+  { cmd: '/用药核查', desc: '核对处方草稿与过敏、相互作用' }, { cmd: '/病历小结', desc: '生成本次就诊小结' }, { cmd: '/上下文', desc: '查看助手当前上下文' },
+];
+const invOf = k => CATALOG.find(c => c.key === k);
+const drug = k => DRUGS.find(d => d.key === k);
+const icd = c => ICD.find(i => i.code === c);
+const reportShort = (key, r) => {
+  if (r.kind === 'text') return r.impression;
+  const ab = r.rows.filter(x => x.flag !== 'N');
+  return ab.length ? ab.map(x => `${x.name.split(' ').pop()} ${x.value}${x.flag === 'H' ? '↑' : '↓'}`).join('，') : '未见异常';
+};
+const mkReport = (key, v, amend) => { const T = TRUTH[key]; const src = amend ? { ...T, ...T.amend } : T; return { v, t: Date.now(), kind: T.kind, rows: src.rows, findings: src.findings, impression: src.impression, reason: amend ? (T.amend?.reason || '审核补签') : null, ack: false, baseline: !!T.baseline, staff: T.staff }; };
+const rxTotal = r => { const d = drug(r.key); const n = r.dose * FREQ[r.freq].n * r.days; return d.doseUnit === d.unit ? `${n} ${d.unit}` : `${Math.ceil(n / d.pack)} ${d.unit}`; };
+const quoteText = t => t.sp === 'patient' ? `患者述：“${t.text}”` : `医生问：“${t.text}”`;
+
+/* ================= context accounting (dsh-context style) ================= */
+const CTX_WINDOW = 131072, CTX_RESERVE = 24576;
+const CTX_CATS = [
+  { k: 'sys', name: '系统提示', color: 'var(--c1)' }, { k: 'tools', name: '工具定义', color: 'var(--c2)' },
+  { k: 'patient', name: '患者可见资料', color: 'var(--c3)' }, { k: 'consult', name: '问诊记录', color: 'var(--c4)' },
+  { k: 'his', name: 'HIS 状态与 UI 快照', color: 'var(--c5)' }, { k: 'replies', name: '助手回复与思考', color: 'var(--c6)' },
+  { k: 'results', name: '工具结果', color: 'var(--c7)' },
+];
+const CTX_TOOLS = [['get_visible_history', 380], ['query_clinic_catalog', 520], ['get_encounter_state', 460], ['read_released_reports', 410], ['ui_snapshot', 640], ['ui_query', 420], ['ui_act', 980]];
+function ctxParts(s) {
+  const live = (s.chat || []).filter((c, i) => i >= (s.compactedAt || 0) && c.kind !== 'compact');
+  const items = {
+    sys: [['角色：Clinical Copilot（无正式签发权）', 1240], ['草稿-only 规则与 data-agent-confirm 说明', 610], ['输出格式与中文临床术语约定', 340]],
+    tools: CTX_TOOLS,
+    patient: [['基本信息、分诊生命体征、过敏', 160], ...HISTORY.visits.map(h => [`${h.date} ${h.reason}`, 80 + tk(h.dx + h.med)]), ['Case Truth（隔离，未注入）', 0]],
+    consult: s.turns.filter(t => t.st !== 'pending').map(t => [`${t.sp === 'doctor' ? '医生' : t.sp === 'patient' ? '患者' : '查体'}：${t.text.slice(0, 16)}${t.text.length > 16 ? '…' : ''}`, 12 + tk(t.text)]),
+    his: [['UI 快照：页签、控件与焦点', 860], ...SECTIONS.filter(x => s.note[x.key].text).map(x => [`病历草稿「${x.name}」`, 10 + tk(s.note[x.key].text)]),
+      ...s.inv.map(i => [`检查 ${invOf(i.key).name} · ${i.st}`, 40]), ...s.dxDraft.map(x => [`诊断草稿 ${x.code}`, 30]), ...s.rxDraft.map(x => [`处方草稿 ${drug(x.key).name}`, 36])],
+    replies: [...(s.compactedAt ? [[`压缩摘要（前 ${s.compactedAt} 轮）`, 520]] : []), ...live.filter(c => c.status !== 'running').map(c => [`回复 · ${c.trigger.text.slice(0, 14)}`, tk(c.reply) + tk(c.steps.find(x => x.kind === 'think')?.text)])],
+    results: live.flatMap(c => c.steps.filter(x => x.kind === 'tool').map(x => [`${x.name} · ${x.subject}`, 24 + tk(x.result)])),
+  };
+  return CTX_CATS.map(c => ({ ...c, items: items[c.k], tok: items[c.k].reduce((a, b) => a + b[1], 0) }));
+}
+const ctxTotal = s => ctxParts(s).reduce((a, c) => a + c.tok, 0);
+
+/* ================= state ================= */
+const emptyNote = () => Object.fromEntries(SECTIONS.map(s => [s.key, { text: '', edited: false }]));
+function init() {
+  const now = Date.now();
+  const note = emptyNote();
+  note.cc = { text: '发热、咳嗽 3 天。', edited: false };
+  note.hpi = { text: '患者 3 天前无明显诱因出现发热、咳嗽，夜间加重影响睡眠。', edited: false };
+  const s = {
+    now, seq: 1, status: 'active', id: 200, startedAt: now - 372000,
+    turns: [
+      { id: 1, sp: 'doctor', text: '您好，请坐。今天哪里不舒服？', st: 'final', t: now - 41000, src: 'voice', dur: 2.4, conf: 0.97 },
+      { id: 2, sp: 'patient', text: PERSONA.opening, st: 'final', t: now - 38000 },
+    ],
+    pending: false, pendingSince: null, failNext: false,
+    voice: { mode: 'continuous', live: true, ptt: false, pttAt: 0, pttCancel: false, interim: null, asr: 'connected', latency: 286, device: '内置麦克风阵列' },
+    tts: { on: true, playing: null },
+    used: { 0: true }, exams: {}, inv: [], dxDraft: [], dxRevs: [], rxDraft: [], rxIssued: [], noMed: false, rxMode: 'rx',
+    touched: { inv: false, dx: false, rx: false },
+    note, noteRevs: [], focused: null, sugs: [], saved: { state: 'saved', t: now - 30000 },
+    halo: {}, unread: 0, copilot: 'idle', busyText: '', runQ: [], pendingEvents: [], debounce: null, auto: true, conn: 'connected',
+    checkpoint: 3, model: { name: 'glm-5.3-flash', effort: 'low' }, compactedAt: 0,
+    toast: null, redline: null, warnline: null,
+    chat: [{
+      id: 100, t: now - 35000, finishAt: now - 32000, status: 'done', dur: 2.6, trigger: { kind: 'event', text: '问诊第 1 轮已定稿' }, cnt: { note: 2 }, says: [],
+      steps: [
+        { kind: 'think', text: THINKS[0], state: 'done', dur: 1.2 },
+        { kind: 'tool', name: 'ui_snapshot', subject: '工作区快照', state: 'ok', meta: '0 个医生编辑字段', dur: 0.21, t: now - 33800, args: { scope: 'workspace', include: ['drafts', 'focused', 'doctorEdited'] }, result: '{"focused":null,"doctorEdited":[],"pendingSuggestions":0}' },
+        { kind: 'tool', name: 'ui_act', subject: '填写「主诉」', state: 'ok', meta: '改写', dur: 0.32, t: now - 33400, args: { action: 'fill', target: 'note.cc', text: '发热、咳嗽 3 天。' }, result: '{"ok":true}' },
+        { kind: 'tool', name: 'ui_act', subject: '填写「现病史」', state: 'ok', meta: '+1 句', dur: 0.29, t: now - 33000, args: { action: 'append', target: 'note.hpi', text: note.hpi.text }, result: '{"ok":true}' },
+      ],
+      reply: '已起草**主诉**和**现病史**。后续问诊我会继续补充。', usage: { in: 9120, out: 214 },
+    }],
+  };
+  s.ctxReq = [{ t: now - 32000, label: '问诊第 1 轮已定稿', parts: ctxParts(s) }];
+  return s;
+}
+
+function applyOne(s, f) {
+  const now = Date.now();
+  const ti = s.chat.findLastIndex(c => c.status === 'running');
+  if (ti < 0) return s;
+  s = { ...s, note: { ...s.note }, halo: { ...s.halo }, sugs: [...s.sugs], inv: [...s.inv], dxDraft: [...s.dxDraft], rxDraft: [...s.rxDraft], chat: [...s.chat] };
+  const turn = { ...s.chat[ti], steps: s.chat[ti].steps.map(x => (x.kind === 'think' && x.state === 'running') ? { ...x, state: 'done', dur: Math.max(0.4, (now - s.chat[ti].t) / 1000) } : x), cnt: { ...s.chat[ti].cnt }, says: [...s.chat[ti].says] };
+  const nid = () => ++s.id;
+  const inc = k => { turn.cnt[k] = (turn.cnt[k] || 0) + 1; };
+  const tool = (name, subject, args, result, state = 'ok', meta = '') => turn.steps.push({ kind: 'tool', name, subject, args, result, state, meta, t: now, dur: +(0.18 + Math.random() * 0.32).toFixed(2) });
+  const sug = (m, label, apply, k, detail, target) => {
+    s.sugs.push({ id: nid(), m, k, label, apply, detail, turnId: turn.id }); s.halo[m] = now; inc('conflict');
+    tool('ui_act', label, { action: 'fill', target }, '{"applied":false,"reason":"doctor_edited_or_focused","suggestion":"pending"}', 'approval', '医生已编辑');
+  };
+  if (f.m === 'snapshot') {
+    const edited = SECTIONS.filter(x => s.note[x.key].edited).map(x => 'note.' + x.key);
+    tool('ui_snapshot', '工作区快照', { scope: 'workspace', include: ['drafts', 'focused', 'doctorEdited'] }, JSON.stringify({ focused: s.focused ? 'note.' + s.focused : null, doctorEdited: edited, pendingSuggestions: s.sugs.length }), 'ok', s.focused ? `焦点 note.${s.focused}` : `${edited.length} 个医生编辑字段`);
+  } else if (f.m === 'note') {
+    const cur = s.note[f.k];
+    const next = f.append ? (cur.text ? cur.text + f.append : f.append) : f.text;
+    if (cur.edited || s.focused === f.k) sug('note', `${SEC[f.k]}：${f.append ? '补充' : '改写'}`, { type: 'NOTE_SET', k: f.k, text: next, keepEdited: true }, f.k, f.append || f.text, 'note.' + f.k);
+    else { s.note[f.k] = { text: next, edited: false }; s.halo.note = now; s.halo['note.' + f.k] = now; inc('note'); tool('ui_act', `填写「${SEC[f.k]}」`, { action: f.append ? 'append' : 'fill', target: 'note.' + f.k, text: f.append || f.text }, '{"ok":true}', 'ok', f.append ? '+1 句' : '改写'); }
+  } else if (f.m === 'inv') {
+    if (!s.inv.some(i => i.key === f.key && i.st !== 'cancelled')) {
+      if (s.touched.inv) sug('inv', `检查草稿「${invOf(f.key).name}」`, { type: 'INV_ADD', key: f.key, by: 'copilot' }, null, `${invOf(f.key).specimen} · ${invOf(f.key).dept}`, 'investigations.draft');
+      else { s.inv.push({ id: nid(), key: f.key, st: 'draft', by: 'copilot', reports: [], stages: [] }); s.halo.inv = now; inc('inv'); tool('ui_act', `检查草稿「${invOf(f.key).name}」`, { action: 'add_row', target: 'investigations.draft', catalogItem: f.key }, '{"ok":true,"status":"draft"}', 'ok', '+1 行'); }
+    }
+  } else if (f.m === 'dx') {
+    if (!s.dxDraft.some(d => d.code === f.code) && !s.dxRevs.at(-1)?.items.some(d => d.code === f.code)) {
+      if (s.touched.dx) sug('dx', `候选诊断「${icd(f.code).name}」`, { type: 'DX_ADD', code: f.code, primary: f.primary, by: 'copilot' }, null, `${f.code} · ${f.primary ? '建议为主诊断' : '次诊断'}`, 'diagnosis.draft');
+      else { const primary = f.primary && !s.dxDraft.some(d => d.primary); s.dxDraft.push({ code: f.code, primary, by: 'copilot' }); s.halo.dx = now; inc('dx'); tool('ui_act', `候选诊断「${icd(f.code).name}」`, { action: 'add_row', target: 'diagnosis.draft', icd10: f.code, primary }, '{"ok":true,"status":"draft"}', 'ok', primary ? '主诊断' : '次诊断'); }
+    }
+  } else if (f.m === 'rx') {
+    if (!s.rxDraft.some(r => r.key === f.key) && !s.rxIssued.some(r => r.key === f.key) && !s.noMed) {
+      const dr = drug(f.key); const line = { key: f.key, dose: dr.dose, freq: dr.freq, days: dr.days, route: dr.route, by: 'copilot' };
+      if (s.touched.rx) sug('rx', `处方草稿「${dr.name}」`, { type: 'RX_ADD', key: f.key, by: 'copilot' }, null, `${dr.dose} ${dr.doseUnit} ${dr.route} ${FREQ[dr.freq].t} × ${dr.days} 天`, 'prescription.draft');
+      else { s.rxDraft.push(line); s.halo.rx = now; inc('rx'); tool('ui_act', `处方草稿「${dr.name}」`, { action: 'add_row', target: 'prescription.draft', drug: f.key, dose: `${dr.dose} ${dr.doseUnit}`, freq: dr.freq, days: dr.days }, `{"ok":true,"allergyCheck":"pass (${dr.cls} ≠ penicillin)"}`, 'ok', '+1 行'); }
+    }
+  } else if (f.m === 'read') {
+    tool('read_released_reports', invOf(f.key).name, { investigation: f.key, version: 'latest' }, JSON.stringify({ version: f.v || 1, summary: f.text }), 'ok', `第 ${f.v || 1} 版`);
+  } else if (f.m === 'blocked') {
+    inc('blocked'); tool('ui_act', '点击「确认诊断」', { action: 'click', target: 'button[data-agent-confirm]「确认诊断」' }, '{"applied":false,"error":"DENIED: data-agent-confirm 控件只允许医生本人操作"}', 'denied', '已拦截');
+  } else if (f.m === 'warn' || f.m === 'say') turn.says.push(f.text);
+  s.chat[ti] = turn;
+  return s;
+}
+
+function gates(s) {
+  const lastDx = s.dxRevs.at(-1);
+  const prim = lastDx ? lastDx.items.filter(i => i.primary).length : 0;
+  const active = s.inv.filter(i => i.st === 'ordered' || i.st === 'released');
+  const unacked = active.filter(i => !(i.st === 'released' && i.reports.at(-1).ack));
+  const lastNote = s.noteRevs.at(-1);
+  const stale = lastNote && lastDx && lastNote.seq < lastDx.seq;
+  const pend = { inv: s.inv.filter(i => i.st === 'draft').length, dx: s.dxDraft.length, rx: s.rxDraft.length, sug: s.sugs.length };
+  const pendN = pend.inv + pend.dx + pend.rx + pend.sug;
+  return [
+    { n: 1, name: '主诊断确认', ok: prim === 1, why: lastDx ? `第 ${s.dxRevs.length} 次确认` : '尚未确认诊断', tab: 'dx' },
+    { n: 2, name: '必需报告查阅', ok: unacked.length === 0, why: active.length === 0 ? '无已开立检查' : unacked.length ? `${unacked.length} 项待出报告或待阅` : `${active.length} 项最新版本已阅`, tab: 'inv' },
+    { n: 3, name: '用药结论记录', ok: s.rxIssued.length > 0 || s.noMed, why: s.noMed ? '已确认无需用药' : s.rxIssued.length ? `已开具 ${s.rxIssued.length} 种药` : '尚未开具处方或确认无需用药', tab: 'rx' },
+    { n: 4, name: '门诊病历签署', ok: !!lastNote && !stale, why: !lastNote ? '尚未签署' : stale ? '签署早于诊断修改，需追加签署' : `第 ${s.noteRevs.length} 版已签署`, tab: 'note' },
+    { n: 5, name: '待提交草稿处理', ok: pendN === 0, why: pendN === 0 ? '无遗留草稿' : [pend.inv && `检查 ${pend.inv}`, pend.dx && `诊断 ${pend.dx}`, pend.rx && `处方 ${pend.rx}`, pend.sug && `待确认建议 ${pend.sug}`].filter(Boolean).join(' · '), tab: pend.sug ? s.sugs[0].m : pend.inv ? 'inv' : pend.dx ? 'dx' : 'rx' },
+  ];
+}
+
+const FREE = ['TICK', 'RESET', 'TOAST', 'TOAST_CLEAR', 'READ', 'CONN', 'AUTO', 'MODEL', 'FEEDBACK', 'VOICE_MODE', 'MIC', 'DEVICE', 'TTS', 'TTS_STOP', 'PTT', 'INTERIM', 'ASR', 'SAVED', 'COPILOT_START', 'COPILOT_STEP', 'COPILOT_FINISH', 'COPILOT_STOP', 'RUNQ', 'PENDING_EVENTS', 'DEBOUNCE', 'COMPACT', 'FOCUS'];
+function reducer(s, a) {
+  const now = Date.now();
+  if (s.status !== 'active' && !FREE.includes(a.type)) return s;
+  const toast = (kind, text, undo) => ({ ...s, toast: { kind, text, undo, t: now } });
+  const saving = { state: 'saving', t: now };
+  switch (a.type) {
+    case 'TICK': return { ...s, now };
+    case 'RESET': return init();
+    case 'TOAST': return { ...s, toast: { ...a.toast, t: now } };
+    case 'TOAST_CLEAR': return { ...s, toast: null };
+    case 'READ': return s.unread ? { ...s, unread: 0 } : s;
+    /* voice */
+    case 'VOICE_MODE': return { ...s, voice: { ...s.voice, mode: a.mode, ptt: false, pttCancel: false, interim: null } };
+    case 'MIC': return { ...s, voice: { ...s.voice, live: a.on ?? !s.voice.live, interim: null } };
+    case 'DEVICE': return { ...s, voice: { ...s.voice, device: a.device } };
+    case 'PTT': return { ...s, voice: { ...s.voice, ptt: a.on, pttAt: a.on && !s.voice.ptt ? now : s.voice.pttAt, pttCancel: !!a.cancel } };
+    case 'INTERIM': return { ...s, voice: { ...s.voice, interim: a.text == null ? null : { text: a.text, final: !!a.final } } };
+    case 'ASR': return { ...s, voice: { ...s.voice, asr: a.asr } };
+    case 'TTS': return { ...s, tts: { on: !s.tts.on, playing: s.tts.on ? null : s.tts.playing } };
+    case 'TTS_PLAY': return { ...s, tts: { ...s.tts, playing: { id: a.id, t0: now, dur: a.dur } }, turns: s.turns.map(t => t.id === a.id ? { ...t, interrupted: false } : t) };
+    case 'TTS_STOP': {
+      const p = s.tts.playing; if (!p || (a.id && p.id !== a.id)) return s;
+      return { ...s, tts: { ...s.tts, playing: null }, turns: a.interrupted ? s.turns.map(t => t.id === p.id ? { ...t, interrupted: true } : t) : s.turns };
+    }
+    /* consultation */
+    case 'SEND': return { ...s, pending: true, pendingSince: now, voice: { ...s.voice, interim: null, latency: a.latency ?? s.voice.latency },
+      turns: [...s.turns, { id: a.did, sp: 'doctor', text: a.text, st: 'final', t: now, src: a.src, dur: a.dur, conf: a.conf }, { id: a.pid, sp: 'patient', text: '', st: 'pending', q: a.text, t: now }] };
+    case 'REPLY': return { ...s, turns: s.turns.map(t => t.id === a.pid ? { ...t, text: a.text, st: 'streaming', t: now } : t) };
+    case 'FINAL': return { ...s, pending: false, pendingSince: null, turns: s.turns.map(t => t.id === a.pid ? { ...t, st: 'final' } : t) };
+    case 'FAIL': return { ...s, pending: false, pendingSince: null, turns: s.turns.map(t => t.id === a.pid ? { ...t, st: 'failed', text: '模拟患者 30 秒无应答，本轮已标记失败（锁已释放）' } : t) };
+    case 'USE': return { ...s, used: { ...s.used, [a.i]: true } };
+    case 'FAILNEXT': return { ...s, failNext: !s.failNext };
+    case 'EXAM': { const e = EXAMS.find(x => x.key === a.key); return { ...s, exams: { ...s.exams, [a.key]: now }, turns: [...s.turns, { id: now, sp: 'exam', text: `${e.name}：${e.f}`, st: 'final', t: now }] }; }
+    /* note */
+    case 'FOCUS': return s.focused === a.k ? s : { ...s, focused: a.k };
+    case 'NOTE_EDIT': return { ...s, note: { ...s.note, [a.k]: { text: a.text, edited: true } }, saved: saving };
+    case 'NOTE_SET': return { ...s, note: { ...s.note, [a.k]: { text: a.text, edited: !!a.keepEdited } }, saved: saving };
+    case 'NOTE_APPEND': {
+      const cur = s.note[a.k]; const sep = cur.text && !/[。；\s]$/.test(cur.text) ? '；' : '';
+      const next = { ...s, note: { ...s.note, [a.k]: { text: cur.text + sep + a.text, edited: true } }, saved: saving };
+      return a.silent ? next : { ...next, toast: { kind: 'info', text: `已引用到「${SEC[a.k]}」`, undo: { type: 'NOTE_SET', k: a.k, text: cur.text, keepEdited: cur.edited }, t: now } };
+    }
+    case 'SAVED': return { ...s, saved: { state: 'saved', t: now } };
+    case 'NOTE_SIGN': {
+      if (!s.note.cc.text || !s.note.hpi.text) return toast('crit', '服务端拒绝：主诉、现病史为必填项');
+      const seq = s.seq + 1; return { ...s, seq, noteRevs: [...s.noteRevs, { seq, t: now, by: DOCTOR.name, snap: Object.fromEntries(SECTIONS.map(x => [x.key, s.note[x.key].text])) }] };
+    }
+    /* investigations */
+    case 'INV_ADD':
+      if (s.inv.some(i => i.key === a.key && i.st !== 'cancelled')) return toast('info', `「${invOf(a.key).name}」已在列表中`);
+      return { ...s, id: s.id + 1, touched: a.by === 'doctor' ? { ...s.touched, inv: true } : s.touched, inv: [...s.inv, { id: s.id + 1, key: a.key, st: 'draft', by: a.by, reports: [], stages: [] }] };
+    case 'INV_DROP': return { ...s, touched: { ...s.touched, inv: true }, inv: s.inv.filter(i => !(i.id === a.id && i.st === 'draft')) };
+    case 'INV_DROP_KEY': return { ...s, inv: s.inv.filter(i => !(i.key === a.key && i.st === 'draft')) };
+    case 'INV_ISSUE': return { ...s, inv: s.inv.map(i => a.ids.includes(i.id) ? { ...i, st: 'ordered', orderedAt: now, stages: [{ name: '已开立', t: now }] } : i) };
+    case 'INV_STAGE': return { ...s, inv: s.inv.map(i => i.id === a.id && i.st === 'ordered' && !i.stages.some(x => x.name === a.name) ? { ...i, stages: [...i.stages, { name: a.name, t: now }] } : i) };
+    case 'INV_CANCEL': {
+      const i = s.inv.find(x => x.id === a.id);
+      if (i.reports.length) return toast('crit', '服务端拒绝：报告已发布的检查不能取消');
+      return { ...s, inv: s.inv.map(x => x.id === a.id ? { ...x, st: 'cancelled', stages: [...x.stages, { name: '已取消', t: now }] } : x) };
+    }
+    case 'INV_RELEASE': return { ...s, inv: s.inv.map(i => {
+      if (i.id !== a.id || i.st !== 'ordered') return i;
+      const order = STAGES[invOf(i.key).cat];
+      const filled = order.slice(0, -1).filter(n => !i.stages.some(x => x.name === n)).map(n => ({ name: n, t: now }));
+      return { ...i, st: 'released', stages: [...i.stages, ...filled, { name: '已出报告', t: now }].sort((x, y) => order.indexOf(x.name) - order.indexOf(y.name)), reports: [mkReport(i.key, 1)] };
+    }) };
+    case 'INV_AMEND': return { ...s, inv: s.inv.map(i => i.id === a.id && i.st === 'released' ? { ...i, reports: [...i.reports, mkReport(i.key, i.reports.length + 1, true)] } : i) };
+    case 'INV_ACK': return { ...s, inv: s.inv.map(i => a.ids.includes(i.id) ? { ...i, reports: i.reports.map((r, j) => j === i.reports.length - 1 ? { ...r, ack: true, ackAt: now, ackBy: DOCTOR.name } : r) } : i) };
+    /* diagnosis */
+    case 'DX_ADD': {
+      if (s.dxDraft.some(d => d.code === a.code)) return toast('info', `「${icd(a.code).name}」已在草稿中`);
+      if (s.dxDraft.length >= 8) return toast('crit', '诊断最多 8 项');
+      const primary = !!a.primary && !s.dxDraft.some(d => d.primary);
+      return { ...s, touched: a.by === 'doctor' ? { ...s.touched, dx: true } : s.touched, dxDraft: [...s.dxDraft, { code: a.code, primary, by: a.by }] };
+    }
+    case 'DX_PRIMARY': return { ...s, touched: { ...s.touched, dx: true }, dxDraft: s.dxDraft.map(d => ({ ...d, primary: d.code === a.code })) };
+    case 'DX_DROP': return { ...s, touched: { ...s.touched, dx: true }, dxDraft: s.dxDraft.filter(d => d.code !== a.code) };
+    case 'DX_CLEAR': return { ...s, dxDraft: [], touched: { ...s.touched, dx: true } };
+    case 'DX_CONFIRM': {
+      const p = s.dxDraft.filter(d => d.primary).length;
+      if (p !== 1) return toast('crit', `服务端拒绝：每次确认须恰有一项主诊断（当前 ${p} 项）`);
+      const seq = s.seq + 1;
+      return { ...s, seq, dxRevs: [...s.dxRevs, { seq, t: now, by: DOCTOR.name, items: s.dxDraft.map(({ code, primary }) => ({ code, primary })) }], dxDraft: [], touched: { ...s.touched, dx: false } };
+    }
+    case 'DX_REVISE': return { ...s, dxDraft: s.dxRevs.at(-1).items.map(i => ({ ...i, by: 'doctor' })), touched: { ...s.touched, dx: true } };
+    /* prescription */
+    case 'RX_MODE': return { ...s, rxMode: a.mode };
+    case 'RX_ADD': {
+      if (s.rxDraft.some(r => r.key === a.key)) return toast('info', `「${drug(a.key).name}」已在草稿中`);
+      const dr = drug(a.key);
+      return { ...s, touched: a.by === 'doctor' ? { ...s.touched, rx: true } : s.touched, rxDraft: [...s.rxDraft, { key: a.key, dose: dr.dose, freq: dr.freq, days: dr.days, route: dr.route, by: a.by }], redline: null, warnline: null };
+    }
+    case 'RX_EDIT': return { ...s, touched: { ...s.touched, rx: true }, rxDraft: s.rxDraft.map(r => r.key === a.key ? { ...r, [a.field]: a.value, by: 'doctor' } : r) };
+    case 'RX_DROP': return { ...s, touched: { ...s.touched, rx: true }, rxDraft: s.rxDraft.filter(r => r.key !== a.key), redline: null, warnline: null };
+    case 'RX_ISSUE': {
+      if (!s.dxRevs.length) return toast('crit', '服务端拒绝：须先确认诊断才能开具处方');
+      if (s.noMed) return toast('crit', '服务端拒绝：已确认无需用药，与处方互斥');
+      const ds = s.rxDraft.map(r => drug(r.key));
+      const red = ds.filter(d => RED[d.cls]);
+      if (red.length) return { ...s, warnline: null, redline: { items: red.map(d => `${d.name}（${d.clsName}）`), t: now } };
+      const warn = ds.filter(d => WARN[d.cls]);
+      if (warn.length && !a.override) return { ...s, warnline: { items: warn.map(d => `${d.name}（${d.clsName}）`) } };
+      return { ...s, redline: null, warnline: null, rxIssued: [...s.rxIssued, ...s.rxDraft.map(r => ({ ...r, t: now, override: a.override && WARN[drug(r.key).cls] ? a.override : null }))], rxDraft: [], touched: { ...s.touched, rx: false } };
+    }
+    case 'NOMED':
+      if (s.rxIssued.length) return toast('crit', '服务端拒绝：已有有效处方，不能同时确认无需用药');
+      if (!s.dxRevs.length) return toast('crit', '服务端拒绝：须先确认诊断');
+      return { ...s, noMed: true, rxDraft: [] };
+    /* suggestions */
+    case 'SUG_ACCEPT': {
+      const g = s.sugs.find(x => x.id === a.id); if (!g) return s;
+      const ap = g.apply;
+      const undo = ap.type === 'NOTE_SET' ? { type: 'NOTE_SET', k: ap.k, text: s.note[ap.k].text, keepEdited: s.note[ap.k].edited }
+        : ap.type === 'INV_ADD' ? { type: 'INV_DROP_KEY', key: ap.key } : ap.type === 'DX_ADD' ? { type: 'DX_DROP', code: ap.code } : { type: 'RX_DROP', key: ap.key };
+      const s2 = reducer({ ...s, sugs: s.sugs.filter(x => x.id !== a.id) }, ap);
+      return { ...s2, toast: { kind: 'info', text: `已采纳：${g.label}`, undo, t: now } };
+    }
+    case 'SUG_DISMISS': return { ...s, sugs: s.sugs.filter(x => x.id !== a.id) };
+    /* copilot */
+    case 'COPILOT_START': return { ...s, id: s.id + 1, copilot: 'busy', busyText: a.text || '正在分析', chat: [...s.chat, { id: s.id + 1, t: now, trigger: a.trigger, status: 'running', steps: [{ kind: 'think', text: a.think, state: 'running' }], cnt: {}, says: [] }] };
+    case 'COPILOT_STEP': return applyOne(s, a.f);
+    case 'COPILOT_FINISH': {
+      const ti = s.chat.findLastIndex(c => c.status === 'running'); if (ti < 0) return { ...s, copilot: 'idle', busyText: '' };
+      const c = s.chat[ti]; const cnt = c.cnt;
+      const parts = [];
+      if (cnt.note) parts.push(`更新了 ${cnt.note} 处病历草稿`);
+      if (cnt.inv) parts.push(`起草 ${cnt.inv} 项检查`);
+      if (cnt.dx) parts.push(`加入 ${cnt.dx} 项候选诊断`);
+      if (cnt.rx) parts.push(`起草 ${cnt.rx} 条处方`);
+      let lead = parts.length ? parts.join('，') + '。' : '';
+      if (cnt.conflict) lead += `有 ${cnt.conflict} 处涉及你改过的内容，我**没有覆盖**，放在下面等你确认。`;
+      if (cnt.blocked) lead += '「确认诊断」是正式操作，需要你本人点击。';
+      const reply = [lead, ...c.says].filter(Boolean).join('\n') || '没有需要更新的内容。';
+      const chat = [...s.chat];
+      chat[ti] = { ...c, status: 'done', dur: (now - c.t) / 1000, finishAt: now, reply, steps: c.steps.map(x => x.kind === 'think' && x.state === 'running' ? { ...x, state: 'done', dur: Math.max(0.4, (now - c.t) / 1000) } : x) };
+      const s2 = { ...s, chat, copilot: 'idle', busyText: '', checkpoint: s.checkpoint + 1, unread: s.unread + 1 };
+      chat[ti].usage = { in: ctxTotal(s2), out: 90 + tk(reply) + c.steps.length * 38 };
+      return { ...s2, ctxReq: [...s.ctxReq, { t: now, label: c.trigger.text, parts: ctxParts(s2) }].slice(-30) };
+    }
+    case 'COPILOT_STOP': return { ...s, copilot: 'idle', busyText: '', chat: s.chat.map(c => {
+      if (c.status !== 'running') return c;
+      const done = c.steps.filter(x => x.kind === 'tool' && x.state === 'ok' && x.name === 'ui_act').length;
+      return { ...c, status: 'stopped', dur: (now - c.t) / 1000, finishAt: now, reply: done ? `已停止。已完成的 ${done} 个草稿操作保留，可在对应页签删除或撤回。` : '已停止，本轮没有写入任何草稿。', steps: c.steps.map(x => x.kind === 'think' && x.state === 'running' ? { ...x, state: 'stopped' } : x) };
+    }) };
+    case 'RUNQ': return { ...s, runQ: a.items };
+    case 'PENDING_EVENTS': return { ...s, pendingEvents: a.items };
+    case 'DEBOUNCE': return { ...s, debounce: a.v };
+    case 'AUTO': return { ...s, auto: !s.auto };
+    case 'CONN': return { ...s, conn: a.v };
+    case 'MODEL': return { ...s, model: { ...s.model, ...a.v } };
+    case 'FEEDBACK': return { ...s, chat: s.chat.map(c => c.id === a.id ? { ...c, fb: c.fb === a.v ? null : a.v } : c) };
+    case 'COMPACT': {
+      if (s.copilot === 'busy') return toast('info', '助手运行中，结束后再压缩');
+      const before = ctxTotal(s); const s2 = { ...s, compactedAt: s.chat.length }; const after = ctxTotal(s2);
+      const id = s.id + 1;
+      return { ...s2, id, chat: [...s.chat, { id, kind: 'compact', t: now, before, after, status: 'done', trigger: { kind: 'system', text: '上下文压缩' }, steps: [], reply: '' }], ctxReq: [...s.ctxReq, { t: now, label: '上下文压缩', cmp: true, parts: ctxParts(s2) }], toast: { kind: 'info', text: `上下文已压缩：${fmtK(before)} → ${fmtK(after)}`, t: now } };
+    }
+    case 'COMPLETE': {
+      const bad = gates(s).filter(g => !g.ok);
+      if (bad.length) return toast('crit', `服务端重验未通过：${bad.map(g => g.name).join('、')}，完诊被拒绝`);
+      return { ...s, status: 'completed', completedAt: now };
+    }
+    case 'ABANDON': return { ...s, status: 'abandoned' };
+    default: return s;
+  }
+}
+
+/* ================= runtime (timers stand in for Durable Objects / Bailian voice) ================= */
+const Ctx = createContext(null);
+const useC = () => useContext(Ctx);
+const agentState = (s, key) => { const t = s.halo[key]; if (!t) return 'idle'; const d = s.now - t; return d < 0 ? 'idle' : d < 1800 ? 'active' : d < 6000 ? 'recent' : 'idle'; };
+
+function answerFor(q, s) {
+  const rep = s.inv.filter(i => i.st === 'released').find(i => q.includes('@' + invOf(i.key).name));
+  if (rep) {
+    const r = rep.reports.at(-1);
+    const extra = { cxr: '- 右下肺实变，与右下肺湿啰音、铁锈色痰相符\n- 支持**社区获得性肺炎（右下叶）**', cbc: '- 白细胞、中性粒细胞升高，淋巴细胞比例下降\n- 提示**细菌感染**', crp: '- CRP 明显升高，支持细菌性感染', pct: '- PCT 升高，支持细菌感染，可作为抗菌药物使用依据' }[rep.key] || '- 结合临床综合判断';
+    return { think: `医生引用了「${invOf(rep.key).name}」第 ${r.v} 版报告，解读并结合临床。`, text: `**${invOf(rep.key).name}**（第 ${r.v} 版${r.ack ? '，已阅' : '，尚未确认已阅'}）：${reportShort(rep.key, r)}。\n${extra}` };
+  }
+  if (/鉴别/.test(q)) return { think: '基于发热、咳铁锈色痰、右侧胸痛和右下肺湿啰音，做下呼吸道感染的鉴别。', text: '鉴别诊断：\n1. **社区获得性肺炎**（细菌性，最可能）：铁锈色痰、寒战高热、右下肺湿啰音\n2. 急性支气管炎：通常无局灶体征与实变，需胸片排除\n3. 肺结核：亚急性病程、盗汗消瘦更常见，本例不支持\n4. 肺栓塞：胸痛气促需警惕，但发热咳脓痰不典型' };
+  if (/检查/.test(q)) return { think: '检查要回答两件事：是否肺炎、严重度如何。', text: '建议：\n- **血常规、CRP**：感染证据\n- **胸部正侧位 X 线**：确认实变\n- PCT 可选，用于判断细菌感染\n- 若 SpO₂ 继续下降再考虑血气分析' };
+  if (/药|抗生素|处方|抗菌|核查/.test(q)) {
+    const pen = s.rxDraft.filter(r => RED[drug(r.key).cls]).map(r => drug(r.key).name);
+    return { think: '对照过敏史核对处方草稿：青霉素过敏性休克 → 青霉素类禁用，头孢菌素慎用。', text: (pen.length ? `注意：草稿中的 **${pen.join('、')}** 属青霉素类，开具时会被红线拦截。\n` : '处方草稿未见青霉素类。\n') + '- 经验治疗推荐呼吸喹诺酮（`莫西沙星`）或 `多西环素`\n- 头孢菌素类有交叉过敏风险，需登记理由\n- 与氨氯地平无明显相互作用' };
+  }
+  if (/CURB|评分|住院|严重/.test(q)) return { think: '逐项计算 CURB-65。', text: '**CURB-65 = 0 分**\n- 意识：清 → 0\n- 尿素：未测\n- 呼吸 22 次/分 → 0\n- 血压 138/84 → 0\n- 年龄 58 → 0\n可门诊治疗；SpO₂ 94% 需 72 小时内复评。' };
+  if (/小结/.test(q)) return { think: '汇总当前正式与草稿状态。', text: `**就诊小结**\n- 主诉：${s.note.cc.text || '—'}\n- 已问诊 ${s.turns.filter(t => t.sp === 'doctor').length} 轮，查体 ${Object.keys(s.exams).length} 项\n- 检查 ${s.inv.length} 项（${s.inv.filter(i => i.st === 'released').length} 项已出报告）\n- 诊断${s.dxRevs.length ? '已确认' : '未确认'}，处方${s.rxIssued.length ? '已开具' : '未开具'}` };
+  return { think: '回答医生的问题，并给出当下最该做的事。', text: '我在持续看问诊和报告。目前建议：\n- 补问吸烟史\n- 完成肺部查体\n- 胸片出来后再定抗感染方案' };
+}
+
+function useRuntime() {
+  const [s, d] = useReducer(reducer, null, init);
+  const ref = useRef(s); ref.current = s;
+  const [confirm, setConfirm] = useState(null);
+  const R = useRef({ q: [], busy: false, timers: [], pending: [], deb: null, asr: [], ttsT: null, ptt: null });
+  useEffect(() => { const i = setInterval(() => d({ type: 'TICK' }), 250); return () => clearInterval(i); }, []);
+  useEffect(() => { if (!s.toast) return; const t = setTimeout(() => d({ type: 'TOAST_CLEAR' }), s.toast.undo ? 6000 : 3800); return () => clearTimeout(t); }, [s.toast]);
+  useEffect(() => { if (s.saved.state !== 'saving') return; const t = setTimeout(() => d({ type: 'SAVED' }), 700); return () => clearTimeout(t); }, [s.note, s.saved.state]);
+  const api = useMemo(() => {
+    const later = (ms, fn) => setTimeout(fn, ms);
+    const toast = (kind, text) => d({ type: 'TOAST', toast: { kind, text } });
+    const ask = (title, lines, onOk, danger, okLabel) => setConfirm({ title, lines, onOk, danger, okLabel });
+    const syncQ = () => d({ type: 'RUNQ', items: R.current.q.map(j => j.trigger) });
+    const pump = () => {
+      const Q = R.current;
+      if (Q.busy || !Q.q.length || ref.current.conn !== 'connected') { syncQ(); return; }
+      const job = Q.q.shift(); Q.busy = true; syncQ();
+      const think = resolve(job.think); const fx = resolve(job.fx);
+      d({ type: 'COPILOT_START', trigger: job.trigger, think, text: job.busy });
+      const sched = (ms, fn) => Q.timers.push(setTimeout(fn, ms));
+      let t = Math.min(2600, 500 + think.length * 16);
+      fx.forEach(f => { sched(t, () => d({ type: 'COPILOT_STEP', f })); t += (f.m === 'say' || f.m === 'warn') ? 80 : 380 + Math.random() * 200; });
+      sched(t + 220, () => { d({ type: 'COPILOT_FINISH' }); Q.busy = false; Q.timers = []; pump(); });
+    };
+    const enqueue = (job, front) => { front ? R.current.q.unshift(job) : R.current.q.push(job); pump(); };
+    const trigger = (job, debounce) => {
+      if (ref.current.status !== 'active') return;
+      if (!ref.current.auto) { R.current.pending.push(job); d({ type: 'PENDING_EVENTS', items: R.current.pending.map(j => j.trigger) }); return; }
+      if (debounce) {
+        if (R.current.deb) { clearTimeout(R.current.deb.t); enqueue(R.current.deb.job); }
+        const tm = later(1200, () => { R.current.deb = null; d({ type: 'DEBOUNCE', v: null }); enqueue(job); });
+        R.current.deb = { t: tm, job }; d({ type: 'DEBOUNCE', v: { label: job.trigger.text, until: Date.now() + 1200 } }); return;
+      }
+      enqueue(job);
+    };
+    const flushDebounce = run => { const D = R.current.deb; if (!D) return; clearTimeout(D.t); R.current.deb = null; d({ type: 'DEBOUNCE', v: null }); if (run) enqueue(D.job); };
+    const runPending = () => {
+      const P = R.current.pending; R.current.pending = []; d({ type: 'PENDING_EVENTS', items: [] }); if (!P.length) return;
+      enqueue(P.length === 1 ? P[0] : { trigger: { kind: 'event', text: `批量分析 ${P.length} 个事件` }, think: () => P.map(j => resolve(j.think)).join('\n'), fx: () => [{ m: 'snapshot' }, ...P.flatMap(j => resolve(j.fx).filter(f => f.m !== 'snapshot'))], busy: '正在批量分析' });
+    };
+    /* patient + TTS */
+    const playTTS = (id, text) => {
+      const dur = text.length * 0.21 + 0.6;
+      d({ type: 'TTS_PLAY', id, dur }); clearTimeout(R.current.ttsT);
+      R.current.ttsT = later(dur * 1000, () => d({ type: 'TTS_STOP', id }));
+    };
+    const send = (text, src = 'text', dur) => {
+      const st = ref.current; text = (text || '').trim(); if (!text || st.status !== 'active') return false;
+      if (st.pending) { toast('crit', '上一问尚未得到患者回答，暂不能提交新问题'); return false; }
+      if (st.tts.playing) d({ type: 'TTS_STOP', interrupted: true });
+      const did = Date.now(), pid = did + 1;
+      d({ type: 'SEND', text, did, pid, src, dur, conf: src === 'voice' ? +(0.9 + Math.random() * 0.08).toFixed(2) : undefined, latency: src === 'voice' ? Math.round(220 + Math.random() * 200) : undefined });
+      if (st.failNext) { d({ type: 'FAILNEXT' }); later(2600, () => d({ type: 'FAIL', pid })); return true; }
+      const idx = matchScript(text); const reply = idx >= 0 ? SCRIPT[idx].reply : FALLBACK;
+      later(700 + Math.random() * 500, () => {
+        d({ type: 'REPLY', pid, text: reply });
+        if (ref.current.tts.on) playTTS(pid, reply);
+        later(reply.length * 38 + 120, () => {
+          d({ type: 'FINAL', pid });
+          if (idx >= 0 && !ref.current.used[idx]) {
+            d({ type: 'USE', i: idx });
+            const n = ref.current.turns.filter(t => t.sp === 'doctor').length;
+            trigger({ fx: [{ m: 'snapshot' }, ...SCRIPT[idx].fx], trigger: { kind: 'event', text: `问诊第 ${n} 轮已定稿` }, think: THINKS[idx], busy: '正在整理本轮问诊' }, true);
+          }
+        });
+      });
+      return true;
+    };
+    /* ASR simulation */
+    const clearAsr = () => { R.current.asr.forEach(clearTimeout); R.current.asr = []; };
+    const streamInterim = (rough, cps, onDone) => {
+      clearAsr(); let n = 0;
+      const step = () => { n = Math.min(rough.length, n + 2); d({ type: 'INTERIM', text: rough.slice(0, n) }); if (n < rough.length) R.current.asr.push(later(2000 / cps, step)); else if (onDone) onDone(); };
+      step();
+    };
+    const voiceBlocked = () => {
+      const st = ref.current;
+      if (st.status !== 'active') return true;
+      if (st.pending) { toast('info', '等待患者回答后再提问'); return true; }
+      if (st.voice.asr !== 'connected') { toast('info', '语音识别重连中，请稍候或直接键入'); return true; }
+      return false;
+    };
+    const nextQuestion = () => QUESTIONS.find(q => { const i = matchScript(q.text); return i >= 0 && !ref.current.used[i]; }) || EXTRA_Q;
+    const speak = q => {
+      const st = ref.current;
+      if (R.current.asr.length || R.current.ptt || voiceBlocked()) return;
+      if (st.voice.mode === 'continuous' && !st.voice.live) { toast('info', '收音已暂停：恢复收音（M），或在下方直接键入'); return; }
+      if (st.tts.playing) d({ type: 'TTS_STOP', interrupted: true });
+      const t0 = Date.now();
+      streamInterim(q.rough, 9, () => R.current.asr.push(later(280, () => { d({ type: 'INTERIM', text: q.text, final: true }); R.current.asr.push(later(240, () => { R.current.asr = []; send(q.text, 'voice', (Date.now() - t0) / 1000); })); })));
+    };
+    const pttDown = () => {
+      const st = ref.current; if (R.current.ptt || voiceBlocked()) return;
+      if (st.tts.playing) d({ type: 'TTS_STOP', interrupted: true });
+      R.current.ptt = { q: nextQuestion(), t0: Date.now() };
+      d({ type: 'PTT', on: true }); clearAsr();
+      R.current.asr.push(later(380, () => streamInterim(R.current.ptt ? R.current.ptt.q.rough : '', 7)));
+    };
+    const pttCancel = v => { if (R.current.ptt && ref.current.voice.pttCancel !== v) d({ type: 'PTT', on: true, cancel: v }); };
+    const pttUp = cancel => {
+      const P = R.current.ptt; if (!P) return;
+      clearAsr(); R.current.ptt = null; const held = Date.now() - P.t0;
+      d({ type: 'PTT', on: false });
+      if (cancel) { d({ type: 'INTERIM', text: null }); toast('info', '已取消，本段语音未发送'); return; }
+      if (held < 600) { d({ type: 'INTERIM', text: null }); toast('info', '说话时间太短'); return; }
+      d({ type: 'INTERIM', text: P.q.text, final: true }); later(260, () => send(P.q.text, 'voice', held / 1000));
+    };
+    /* investigations */
+    const release = id => {
+      const i = ref.current.inv.find(x => x.id === id);
+      if (!i || i.st !== 'ordered') return;
+      d({ type: 'INV_RELEASE', id });
+      const r = mkReport(i.key, 1); const nm = invOf(i.key).name; const short = reportShort(i.key, r);
+      const fx = [{ m: 'read', key: i.key, text: short }, { m: 'note', k: 'pe', append: `${nm}：${short}。` }, { m: 'warn', text: `「${nm}」报告已发布，请在检验检查页**确认已阅**。` }];
+      trigger({ fx: i.key === 'cxr' ? [...fx, ...AFTER_CXR] : fx, trigger: { kind: 'event', text: `报告发布：${nm}` }, think: i.key === 'cxr' ? THINK_CXR : `${nm}已发布：${short}。只能读取已发布版本；需要提醒医生确认已阅。`, busy: `正在读取「${nm}」报告` });
+    };
+    const scheduleStages = id => {
+      const i = ref.current.inv.find(x => x.id === id); const c = invOf(i.key); const names = STAGES[c.cat].slice(1, -1);
+      names.forEach((n, k) => later(c.tat * 1000 * (k + 1) / (names.length + 1), () => d({ type: 'INV_STAGE', id, name: n })));
+      later(c.tat * 1000, () => release(id));
+    };
+    const copy = (text, label = '已复制') => {
+      try { navigator.clipboard.writeText(text).then(() => toast('info', label), () => toast('info', '复制失败，请手动选择文本')); } catch { toast('info', '复制失败，请手动选择文本'); }
+    };
+    return {
+      get: () => ref.current, send, speak, pttDown, pttUp, pttCancel, ask, copy, flushDebounce, runPending, release,
+      toggleMic: on => { clearAsr(); d({ type: 'MIC', on }); },
+      setMode: m => { clearAsr(); R.current.ptt = null; d({ type: 'VOICE_MODE', mode: m }); },
+      replay: id => { const t = ref.current.turns.find(x => x.id === id); if (t) playTTS(id, t.text); },
+      accept: id => d({ type: 'SUG_ACCEPT', id }), dismiss: id => d({ type: 'SUG_DISMISS', id }),
+      stop: () => { const Q = R.current; if (!Q.busy) return; Q.timers.forEach(clearTimeout); Q.timers = []; Q.busy = false; d({ type: 'COPILOT_STOP' }); pump(); },
+      exam: key => { if (ref.current.exams[key]) return; const e = EXAMS.find(x => x.key === key); d({ type: 'EXAM', key }); trigger({ fx: [{ m: 'note', k: 'pe', append: `${e.name}：${e.f}。` }], trigger: { kind: 'event', text: `查体完成：${e.name}` }, think: `查体「${e.name}」：${e.f}。属于客观发现，写入体格检查。`, busy: '正在记录查体发现' }); },
+      issueInv: ids => ask('开立检查', ids.map(id => { const c = invOf(ref.current.inv.find(i => i.id === id).key); return `${c.name} · ${c.specimen} · ${c.dept}`; }), () => { d({ type: 'INV_ISSUE', ids }); ids.forEach(scheduleStages); }, false, `确认开立 ${ids.length} 项`),
+      cancelInv: id => ask('取消检查', [invOf(ref.current.inv.find(i => i.id === id).key).name + '（仅首份报告发布前可取消）'], () => d({ type: 'INV_CANCEL', id }), true, '确认取消'),
+      ackInv: ids => ask('确认报告已阅', ids.map(id => { const i = ref.current.inv.find(x => x.id === id); const r = i.reports.at(-1); return `${invOf(i.key).name} · 第 ${r.v} 版（当前）：${reportShort(i.key, r)}`; }), () => d({ type: 'INV_ACK', ids }), false, ids.length > 1 ? `确认 ${ids.length} 份已阅` : '确认已阅'),
+      confirmDx: () => ask('确认诊断', ref.current.dxDraft.map(x => `${x.primary ? '主诊断' : '次诊断'} · ${x.code} ${icd(x.code).name}`), () => d({ type: 'DX_CONFIRM' }), false, '确认诊断'),
+      issueRx: () => ask('正式开具处方', ref.current.rxDraft.map(r => `${drug(r.key).name} ${r.dose} ${drug(r.key).doseUnit} ${r.route} ${FREQ[r.freq].t} × ${r.days} 天（共 ${rxTotal(r)}）`), () => d({ type: 'RX_ISSUE' }), false, '正式开具'),
+      noMed: () => ask('确认无需用药', ['本次门诊评估无需用药；与有效处方互斥'], () => d({ type: 'NOMED' }), false, '确认无需用药'),
+      signNote: () => ask('签署门诊病历', ['签署后形成不可覆盖的正式版本；之后的修改须追加签署', `签署人：${DOCTOR.name}（${DOCTOR.title}）`], () => d({ type: 'NOTE_SIGN' }), false, '签署'),
+      complete: () => ask('确认完诊', ['服务端将实时重验完诊清单', '确认后本次门诊结束，病例转为只读，并解锁病例复盘'], () => d({ type: 'COMPLETE' }), false, '确认完诊'),
+      abandon: () => ask('放弃本次就诊', ['就诊冻结写入，不解锁病例真值，不视为完诊'], () => d({ type: 'ABANDON' }), true, '确认放弃'),
+      releaseAll: () => ref.current.inv.filter(i => i.st === 'ordered').forEach(i => release(i.id)),
+      amendFirst: () => {
+        const i = ref.current.inv.find(x => x.st === 'released' && TRUTH[x.key].amend) || ref.current.inv.find(x => x.st === 'released');
+        if (!i) { toast('info', '还没有已发布的报告可以更正'); return; }
+        d({ type: 'INV_AMEND', id: i.id });
+        const nm = invOf(i.key).name, v = i.reports.length + 1;
+        trigger({ fx: [{ m: 'read', key: i.key, v, text: reportShort(i.key, mkReport(i.key, v, true)) }, { m: 'warn', text: `「${nm}」发布了**第 ${v} 版更正报告**。你对旧版本的已阅不覆盖新版本，需要重新确认。` }],
+          trigger: { kind: 'event', text: `报告更正：${nm} 第 ${v} 版` }, think: '检测到报告更正。旧版本已阅不能延续到新版本，需要提醒医生。', busy: '检测到报告更正' });
+      },
+      askCopilot: (text, front) => enqueue({ trigger: { kind: 'doctor', text }, think: () => answerFor(text, ref.current).think, fx: () => [{ m: 'say', text: answerFor(text, ref.current).text }], busy: '正在回答' }, front),
+      compact: () => d({ type: 'COMPACT' }),
+      disconnect: () => {
+        d({ type: 'CONN', v: 'reconnecting' }); d({ type: 'ASR', asr: 'reconnecting' });
+        later(2400, () => { d({ type: 'CONN', v: 'connected' }); d({ type: 'ASR', asr: 'connected' }); toast('info', `已重新连接：pi-durable 会话从检查点 #${ref.current.checkpoint} 恢复`); later(60, pump); });
+      },
+    };
+  }, []);
+  return { s, d, api, confirm, setConfirm };
+}
+
+/* ================= generic UI ================= */
+function Floating({ anchor, open, placement = 'bottom-start', width, children, onNode }) {
+  const [pos, setPos] = useState(null);
+  const el = useRef(null);
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const upd = () => {
+      const a = anchor.current; if (!a) return;
+      const sc = getScale(); const r = a.getBoundingClientRect();
+      const vw = innerWidth / sc, vh = innerHeight / sc;
+      const A = { l: r.left / sc, r: r.right / sc, t: r.top / sc, b: r.bottom / sc, w: r.width / sc };
+      const w = width === 'anchor' ? A.w : (el.current ? el.current.offsetWidth : 0); const h = el.current ? el.current.offsetHeight : 0;
+      let left = placement.endsWith('end') ? A.r - w : A.l; left = Math.max(8, Math.min(vw - w - 8, left));
+      let top = placement.startsWith('top') ? A.t - h - 6 : A.b + 6;
+      if (!placement.startsWith('top') && top + h > vh - 8 && A.t - h - 6 > 8) top = A.t - h - 6;
+      if (placement.startsWith('top') && top < 8) top = A.b + 6;
+      setPos({ left, top, width: width === 'anchor' ? A.w : undefined });
+    };
+    upd(); const raf = requestAnimationFrame(upd);
+    addEventListener('resize', upd); document.addEventListener('scroll', upd, true);
+    return () => { cancelAnimationFrame(raf); removeEventListener('resize', upd); document.removeEventListener('scroll', upd, true); };
+  }, [open]);
+  if (!open) return null;
+  return ReactDOM.createPortal(html`<div ref=${n => { el.current = n; onNode && onNode(n); }} className="floating" style=${{ left: (pos ? pos.left : -9999) + 'px', top: (pos ? pos.top : -9999) + 'px', width: pos && pos.width ? pos.width + 'px' : undefined }}>${children}</div>`, document.getElementById('float-root'));
+}
+function Pop({ trigger, children, placement = 'bottom-start', className = 'pop', style }) {
+  const [open, setOpen] = useState(false);
+  const a = useRef(null), f = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const md = e => { if (a.current?.contains(e.target) || f.current?.contains(e.target)) return; setOpen(false); };
+    const kd = e => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', md); document.addEventListener('keydown', kd);
+    return () => { document.removeEventListener('mousedown', md); document.removeEventListener('keydown', kd); };
+  }, [open]);
+  const close = () => setOpen(false);
+  return html`<span ref=${a} style=${{ display: 'inline-flex' }}>${trigger(open, setOpen)}<${Floating} anchor=${a} open=${open} placement=${placement} onNode=${n => { f.current = n; }}><div className=${className} style=${style}>${typeof children === 'function' ? children(close) : children}</div><//></span>`;
+}
+function Seg({ value, onChange, options, size = '', label }) {
+  return html`<div className=${'seg2 ' + size} role="radiogroup" aria-label=${label}>${options.map(([v, l, ic]) => html`<button key=${v} type="button" role="radio" aria-checked=${value === v} className=${value === v ? 'on' : ''} onClick=${() => onChange(v)}>${ic && html`<${Icon} n=${ic} size=${13} />`}${l}</button>`)}</div>`;
+}
+function Combo({ id, label, placeholder, items, match, render, onPick, disabled }) {
+  const [q, setQ] = useState(''); const [open, setOpen] = useState(false); const [hi, setHi] = useState(0);
+  const a = useRef(null);
+  const list = items.filter(it => !q.trim() || match(it, q.trim().toLowerCase())).slice(0, 8);
+  const pick = it => { onPick(it); setQ(''); setHi(0); };
+  return html`<div className="combo" ref=${a}>
+    <span className="combo-i"><${Icon} n="Search" size=${14} /></span>
+    <input id=${id} className="input sm" role="combobox" aria-expanded=${open} aria-controls=${id + '-lb'} aria-autocomplete="list" aria-label=${label} placeholder=${placeholder} value=${q} disabled=${disabled}
+      onFocus=${() => setOpen(true)} onBlur=${() => setTimeout(() => setOpen(false), 150)}
+      onInput=${e => { setQ(e.target.value); setHi(0); setOpen(true); }}
+      onKeyDown=${e => { if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHi(h => Math.min(list.length - 1, h + 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(0, h - 1)); } else if (e.key === 'Enter' && open && list[hi]) { e.preventDefault(); pick(list[hi]); } else if (e.key === 'Escape') setOpen(false); }} />
+    <${Floating} anchor=${a} open=${open} width="anchor"><div id=${id + '-lb'} className="lb" role="listbox">
+      ${list.length ? list.map((it, i) => html`<div key=${i} role="option" aria-selected=${i === hi} className=${'opt' + (i === hi ? ' on' : '')} onMouseDown=${e => { e.preventDefault(); pick(it); }} onMouseEnter=${() => setHi(i)}>${render(it)}</div>`) : html`<div className="opt mf">无匹配项</div>`}
+    </div><//>
+  </div>`;
+}
+function useStick(dep, stick = true) {
+  const box = useRef(null), inner = useRef(null), pin = useRef(true), user = useRef(0);
+  const [pinned, setPinned] = useState(true);
+  useEffect(() => {
+    const el = box.current, inn = inner.current; if (!el || !inn) return;
+    if (!stick) { el.scrollTop = 0; pin.current = false; setPinned(true); return; }
+    el.scrollTop = el.scrollHeight; pin.current = true; setPinned(true);
+    const ro = new ResizeObserver(() => { if (pin.current) el.scrollTop = el.scrollHeight; });
+    ro.observe(inn); ro.observe(el);
+    const mark = () => { user.current = Date.now(); };
+    el.addEventListener('wheel', mark, { passive: true }); el.addEventListener('touchmove', mark, { passive: true }); el.addEventListener('pointerdown', mark); el.addEventListener('keydown', mark);
+    return () => { ro.disconnect(); el.removeEventListener('wheel', mark); el.removeEventListener('touchmove', mark); el.removeEventListener('pointerdown', mark); el.removeEventListener('keydown', mark); };
+  }, [dep]);
+  const onScroll = () => {
+    if (!stick) return; const el = box.current;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    if (!atBottom && pin.current && Date.now() - user.current > 800) { el.scrollTop = el.scrollHeight; return; }
+    pin.current = atBottom; setPinned(atBottom);
+  };
+  const toBottom = () => { const el = box.current; el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); pin.current = true; setPinned(true); };
+  return { box, inner, pinned, onScroll, toBottom };
+}
+function useTicker(active, ms = 40) { const [, f] = useState(0); useEffect(() => { if (!active) return; const i = setInterval(() => f(x => x + 1), ms); return () => clearInterval(i); }, [active, ms]); }
+function Reveal({ text, t0, cps = 40, children }) {
+  const n = Math.max(0, Math.floor((Date.now() - t0) / 1000 * cps)); const going = n < text.length;
+  useTicker(going);
+  return children(text.slice(0, n), going);
+}
+function inline(t) {
+  return t.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, i) => p.length > 4 && p.startsWith('**') && p.endsWith('**') ? html`<strong key=${i}>${p.slice(2, -2)}</strong>` : p.length > 2 && p.startsWith('`') && p.endsWith('`') ? html`<code key=${i}>${p.slice(1, -1)}</code>` : p);
+}
+function Md({ text, caret }) {
+  const blocks = []; let list = null;
+  text.split('\n').forEach(ln => {
+    const m = ln.match(/^(\d+)\.\s+(.*)$/), b = ln.match(/^[-•]\s+(.*)$/);
+    if (m || b) { const type = m ? 'ol' : 'ul'; if (!list || list.type !== type) { list = { type, items: [] }; blocks.push(list); } list.items.push(m ? m[2] : b[1]); }
+    else { list = null; if (ln.trim()) blocks.push({ type: 'p', text: ln }); }
+  });
+  return html`<div className=${'md' + (caret ? ' caret' : '')}>${blocks.map((b, i) => b.type === 'p' ? html`<p key=${i}>${inline(b.text)}</p>` : React.createElement(b.type, { key: i }, b.items.map((it, j) => html`<li key=${j}>${inline(it)}</li>`)))}</div>`;
+}
+const AiBadge = () => html`<span className="badge info tiny"><${Icon} n="Sparkles" size=${11} />助手</span>`;
+function Ring({ pct, size = 18 }) { return html`<span className="ring" style=${{ width: size + 'px', height: size + 'px', background: `conic-gradient(var(--info) ${pct * 3.6}deg, var(--secondary) 0)` }} aria-hidden="true"><i></i></span>`; }
+function Review({ g }) {
+  const { api } = useC();
+  return html`<div className="review" role="group" aria-label="助手建议待人工确认">
+    <div className="row between"><span className="row" style=${{ gap: '6px' }}><${Icon} n="Sparkles" size=${13} style=${{ color: 'var(--info)' }} /><b>${g.label}</b></span><span className="xxs" style=${{ color: 'var(--info)' }}>待人工确认</span></div>
+    ${g.detail && html`<span className="xs">${g.detail}</span>`}
+    <div className="row"><button className="btn xs" onClick=${() => api.dismiss(g.id)}>不采用</button><button className="btn xs primary" onClick=${() => api.accept(g.id)}>采纳</button></div>
+  </div>`;
+}
+
+/* ================= top bar ================= */
+function statusText(s) {
+  if (s.conn !== 'connected') return { tone: 'warn', text: '助手重连中…' };
+  if (s.copilot === 'busy') return { tone: 'info', text: `助手${s.busyText}…` };
+  if (s.debounce) return { tone: 'info', text: `${Math.max(0, (s.debounce.until - s.now) / 1000).toFixed(1)}s 后分析新问诊` };
+  if (s.sugs.length) return { tone: 'warn', text: `${s.sugs.length} 项待人工确认` };
+  if (!s.auto && s.pendingEvents.length) return { tone: 'warn', text: `${s.pendingEvents.length} 个事件待分析` };
+  return { tone: 'ok', text: '助手就绪' };
+}
+function Shortcuts() {
+  const rows = [['按住 Space', '按住说话（按住说话模式）'], ['M', '暂停 / 恢复收音（持续收音模式）'], ['Alt + 1–4', '切换病历 / 检验检查 / 诊断 / 处方'], ['Ctrl + /', '聚焦临床助手输入框'], ['Esc', '停止助手当前运行'], ['Enter', '发送；Shift+Enter 换行']];
+  return html`<div style=${{ width: '310px', padding: '4px' }}><div className="menu-h">快捷键</div>${rows.map(([k, v]) => html`<div key=${k} className="row between nowrap xs" style=${{ padding: '5px 8px' }}><kbd>${k}</kbd><span className="mf">${v}</span></div>`)}</div>`;
+}
+function TopBar({ ai, setAi }) {
+  const { s } = useC();
+  const st = statusText(s);
+  const [theme, setTheme] = usePersist('cm.theme', null);
+  const [scale, setScale] = usePersist('cm.scale', 1);
+  useEffect(() => { const r = document.documentElement; if (theme) r.dataset.theme = theme; else delete r.dataset.theme; }, [theme]);
+  useEffect(() => { document.documentElement.style.setProperty('--scale', scale); }, [scale]);
+  const dark = theme ? theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const date = new Date(s.now).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' });
+  return html`<header className="top">
+    <span className="logo" aria-hidden="true">+</span><h1>门诊医生工作台</h1>
+    <span className="ctx">${HOSPITAL} · ${DEPT} · ${ROOM}</span>
+    <span className="ctx mono">${date} ${clock(s.now)}</span>
+    <div className="top-r">
+      <span className="status" aria-live="polite"><span className=${'dot ' + st.tone}></span><span className="ellip">${st.text}</span></span>
+      <${Pop} placement="bottom-end" trigger=${(o, set) => html`<button className="ibtn" onClick=${() => set(!o)} aria-label="快捷键" title="快捷键"><${Icon} n="Keyboard" /></button>`}>${() => html`<${Shortcuts} />`}<//>
+      <button className="ibtn" onClick=${() => setTheme(dark ? 'light' : 'dark')} aria-label="切换明暗主题" title="切换明暗主题"><${Icon} n=${dark ? 'Sun' : 'Moon'} /></button>
+      <button className=${'btn sm' + (ai ? ' info' : '')} onClick=${() => setAi(!ai)} aria-pressed=${ai} title="显示或隐藏临床助手（Ctrl+/ 聚焦输入）"><${Icon} n="Sparkles" size=${14} />临床助手${!ai && s.unread ? html`<span className="badge info tiny">${s.unread}</span>` : ''}</button>
+      <${Pop} placement="bottom-end" trigger=${(o, set) => html`<button className="doc-chip" onClick=${() => set(!o)} aria-label="医生菜单"><span className="avatar">${DOCTOR.name[0]}</span><span className="xs" style=${{ textAlign: 'left', lineHeight: 1.25 }}><b>${DOCTOR.name}</b><br /><span className="mf">${DOCTOR.title}</span></span><${Icon} n="ChevronDown" size=${13} /></button>`}>${() => html`<div style=${{ width: '250px' }}>
+        <div className="menu-h">字号</div>
+        <div style=${{ padding: '0 8px 6px' }}><${Seg} size="xs" value=${scale} onChange=${setScale} options=${[[1, '标准'], [1.125, '大'], [1.25, '特大']]} label="字号" /></div>
+        <div className="menu-h">主题</div>
+        <div style=${{ padding: '0 8px 6px' }}><${Seg} size="xs" value=${theme || 'system'} onChange=${v => setTheme(v === 'system' ? null : v)} options=${[['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']]} label="主题" /></div>
+        <div className="menu-note">单医生演示身份：每次正式写入都会记录 practitionerId（${DOCTOR.name}）。</div>
+      </div>`}<//>
+    </div>
+  </header>`;
+}
+
+/* ================= queue rail ================= */
+function QueueRail() {
+  const [qt, setQt] = useState('待诊');
+  return html`<nav className="rail" aria-label="候诊队列">
+    <${Pop} placement="bottom-start" trigger=${(o, set) => html`<button className="ibtn" onClick=${() => set(!o)} aria-expanded=${o} aria-label="候诊队列" title="候诊队列"><${Icon} n="Users" /></button>`}>${() => html`<div className="queue-pop">
+      <div className="row between" style=${{ padding: '2px 4px 6px' }}><b className="xs">候诊队列 · ${DEPT}</b><span className="xxs mf">${ROOM}</span></div>
+      <div className="qtabs" role="tablist">${[['在诊', 1], ['待诊', 3], ['完诊', 0]].map(([k, n]) => html`<button key=${k} role="tab" aria-selected=${qt === k} className=${qt === k ? 'on' : ''} onClick=${() => setQt(k)}>${k} ${n}</button>`)}</div>
+      ${CASES.filter(c => c.tag === qt).map(c => html`<div key=${c.id} className=${'qitem' + (c.live ? ' on' : '')}><span className="no">${c.no}</span><div className="grow"><div className="row" style=${{ gap: '6px' }}><b>${c.name}</b><span className="xs mf">${c.sex} ${c.age}</span><span className="badge outline tiny">${c.kind}</span></div><div className="xs mf">${c.cc}</div><div className="xxs mf">挂号 ${c.at}${c.live ? '' : ' · Golden Case · 原型未接入'}</div></div>${c.live && html`<span className="badge ok tiny">就诊中</span>`}</div>`)}
+      ${!CASES.some(c => c.tag === qt) && html`<div className="empty">暂无</div>`}
+      <div className="menu-note">叫号、过号与转诊不在 Phase 1 范围内；一次只能有一个进行中的就诊。</div>
+    </div>`}<//>
+    <span className="sep"></span>
+    ${CASES.map(c => html`<button key=${c.id} className=${'av-btn' + (c.live ? ' on' : '')} title=${`${c.no} 号 ${c.name} · ${c.cc}${c.live ? ' · 就诊中' : ' · 待诊'}`} aria-label=${`${c.no} 号 ${c.name}`} aria-current=${c.live ? 'true' : undefined}>${c.name[0]}<span className="n">${c.no}</span></button>`)}
+  </nav>`;
+}
+
+/* ================= consultation column ================= */
+function Level({ on, speaking }) {
+  const { s } = useC();
+  return html`<span className=${'level' + (on ? ' live' : '')} aria-hidden="true">${[0, 1, 2, 3, 4, 5, 6].map(i => { const h = !on ? 3 : speaking ? 6 + Math.abs(Math.sin(s.now / 130 + i * 1.7)) * 14 : 3 + Math.abs(Math.sin(s.now / 400 + i)) * 4; return html`<i key=${i} style=${{ height: h + 'px' }}></i>`; })}</span>`;
+}
+function TurnRow({ t }) {
+  const { s, d, api } = useC();
+  if (t.sp === 'exam') return html`<div className="exam-row"><span className="badge ok tiny"><${Icon} n="Stethoscope" size=${11} />查体</span><span className="grow">${t.text}</span><span className="t mono">${clock(t.t, true)}</span></div>`;
+  const playing = s.tts.playing && s.tts.playing.id === t.id;
+  const pct = playing ? Math.min(100, (s.now - s.tts.playing.t0) / (s.tts.playing.dur * 10)) : 0;
+  return html`<div className=${'turn ' + t.sp + (t.st === 'failed' ? ' failed' : '')}>
+    <span className="who" aria-hidden="true">${t.sp === 'doctor' ? '医' : '患'}</span>
+    <div style=${{ minWidth: 0 }}>
+      <div className="meta">
+        <b>${t.sp === 'doctor' ? DOCTOR.name : PATIENT.name}</b><span className="mono">${clock(t.t, true)}</span>
+        ${t.sp === 'doctor' && t.src === 'voice' && html`<span className="tag" title=${`paraformer-realtime-v2 · 置信度 ${t.conf}`}><${Icon} n="Mic" size=${11} />${(t.dur || 0).toFixed(1)}s</span>`}
+        ${t.sp === 'doctor' && t.src === 'text' && html`<span className="tag"><${Icon} n="Keyboard" size=${11} />键入</span>`}
+        ${playing && html`<span className="tag playing"><span className="eq"><i></i><i></i><i></i></span>播放中</span>`}
+        ${t.interrupted && html`<span className="tag warn" title="医生开口时自动停止播放">播放已打断</span>`}
+      </div>
+      <div className="text">${t.st === 'pending' ? html`<span className="row xs mf" style=${{ gap: '6px' }}><span className="typing"><i></i><i></i><i></i></span>模拟患者正在组织语言 · ${Math.floor((s.now - (s.pendingSince || s.now)) / 1000)}s</span>`
+        : t.sp === 'patient' && t.st !== 'failed' ? html`<${Reveal} text=${t.text} t0=${t.t} cps=${26}>${(x, go) => html`<span className=${go ? 'caret' : ''}>${x}</span>`}<//>` : t.text}</div>
+      ${playing && html`<div className="tts-bar"><span style=${{ width: pct + '%' }}></span></div>`}
+      ${t.st === 'failed' && html`<button className="btn xs" style=${{ marginTop: '4px' }} onClick=${() => api.send(t.q)}><${Icon} n="RefreshCw" size=${12} />重试这一问</button>`}
+    </div>
+    ${(t.st === 'final' || t.st === 'streaming') && t.text && html`<div className="hover-acts">
+      <button className="ibtn xs" title="复制" aria-label="复制" onClick=${() => api.copy(t.text)}><${Icon} n="Copy" size=${13} /></button>
+      ${t.sp === 'patient' && html`<button className="ibtn xs" title=${playing ? '停止播放' : '重播语音'} aria-label=${playing ? '停止播放' : '重播语音'} onClick=${() => playing ? d({ type: 'TTS_STOP' }) : api.replay(t.id)}><${Icon} n=${playing ? 'Square' : 'Play'} size=${13} /></button>`}
+      <${Pop} placement="bottom-end" trigger=${(o, set) => html`<button className="ibtn xs" title="引用到病历" aria-label="引用到病历" onClick=${() => set(!o)}><${Icon} n="Quote" size=${13} /></button>`}>${close => html`<div className="menu"><div className="menu-h">引用原话到病历</div>${SECTIONS.map(x => html`<button key=${x.key} onClick=${() => { d({ type: 'NOTE_APPEND', k: x.key, text: quoteText(t) }); close(); }}>${x.name}</button>`)}</div>`}<//>
+    </div>`}
+  </div>`;
+}
+function ConsultColumn({ collapsed, setCollapsed }) {
+  const { s, api } = useC();
+  const [filter, setFilter] = useState('all');
+  const st = useStick(collapsed ? 'c' : filter);
+  const nQ = s.turns.filter(t => t.sp === 'doctor').length;
+  const recording = s.voice.mode === 'continuous' ? s.voice.live : s.voice.ptt;
+  if (collapsed) return html`<section className="card pane consult collapsed-pane" aria-label="问诊记录（已收起）">
+    <button className="ibtn" onClick=${() => setCollapsed(false)} aria-label="展开问诊记录" title="展开问诊记录"><${Icon} n="PanelLeftOpen" /></button>
+    <span className=${'rec-dot' + (recording ? ' on' : '')} title=${recording ? '收音中' : '未收音'}></span>
+    <span className="vtext">问诊记录 · ${nQ} 问</span>
+    ${s.pending && html`<span className="typing" title="等待患者回答"><i></i><i></i><i></i></span>`}
+  </section>`;
+  const list = s.turns.filter(t => filter === 'all' || t.sp === filter);
+  return html`<section className="card pane consult" aria-label="问诊记录">
+    <div className="pane-h">
+      <div style=${{ minWidth: 0 }}><h3>问诊记录</h3><div className="consult-sub ellip" title="模拟患者只按版本固定的 Patient Persona 应答，不读取病例真值">模拟患者 · ${PATIENT.name} · ${PATIENT.persona}</div></div>
+      <div className="row nowrap" style=${{ gap: '4px' }}>
+        <${Seg} size="xs" value=${filter} onChange=${setFilter} options=${[['all', '全部'], ['doctor', '医'], ['patient', '患'], ['exam', '查体']]} label="筛选问诊记录" />
+        <button className="ibtn" onClick=${() => setCollapsed(true)} aria-label="收起问诊记录" title="收起问诊记录"><${Icon} n="PanelLeftClose" /></button>
+      </div>
+    </div>
+    ${s.voice.mode === 'continuous' && !s.voice.live && html`<div className="paused-bar"><${Icon} n="MicOff" size=${14} /><span className="grow">收音已暂停 · 私人谈话不会写入问诊记录</span><button className="btn xs" onClick=${() => api.toggleMic(true)}>恢复收音</button></div>`}
+    <div className="pane-b" ref=${st.box} onScroll=${st.onScroll}>
+      <div className="transcript" ref=${st.inner} aria-live="polite">
+        ${list.map(t => html`<${TurnRow} key=${t.id} t=${t} />`)}
+        ${s.voice.interim && filter !== 'patient' && filter !== 'exam' && html`<div className="turn doctor"><span className="who">医</span><div style=${{ minWidth: 0 }}>
+          <div className="meta"><b>${DOCTOR.name}</b><span className=${'tag' + (s.voice.interim.final ? '' : ' playing')}><${Icon} n="Mic" size=${11} />${s.voice.interim.final ? '已断句 · 定稿' : '实时识别中'}</span></div>
+          <div className=${'text' + (s.voice.interim.final ? '' : ' rough caret')}>${s.voice.interim.text}</div></div></div>`}
+      </div>
+      ${!st.pinned && html`<button className="jump" onClick=${st.toBottom}><${Icon} n="ArrowDown" size=${13} />最新</button>`}
+    </div>
+    <${ConsultFooter} />
+  </section>`;
+}
+function ConsultFooter() {
+  const { s, d, api } = useC();
+  const [examOpen, setExamOpen] = usePersist('cm.examOpen', true);
+  const [qOpen, setQOpen] = usePersist('cm.qOpen', true);
+  const [v, setV] = useState('');
+  const nExam = Object.keys(s.exams).length;
+  return html`<div className="pane-f">
+    <div className="foot-sec">
+      <button className="foot-h" onClick=${() => setExamOpen(!examOpen)} aria-expanded=${examOpen}><${Icon} n="ChevronRight" size=${13} className=${'rot' + (examOpen ? ' open' : '')} /><${Icon} n="Stethoscope" size=${13} />体格检查 <span className="mono">${nExam}/${EXAMS.length}</span></button>
+      ${examOpen && html`<div className="chips">${EXAMS.map(e => html`<button key=${e.key} className=${'chip' + (s.exams[e.key] ? ' used' : '')} disabled=${!!s.exams[e.key] || s.status !== 'active'} onClick=${() => api.exam(e.key)} aria-label=${'查体：' + e.name} title=${s.exams[e.key] ? e.f : '执行查体，结果来自病例真值'}>${s.exams[e.key] && html`<${Icon} n="Check" size=${12} />`}${e.name}</button>`)}</div>`}
+    </div>
+    <div className="foot-sec">
+      <button className="foot-h" onClick=${() => setQOpen(!qOpen)} aria-expanded=${qOpen}><${Icon} n="ChevronRight" size=${13} className=${'rot' + (qOpen ? ' open' : '')} />推荐问题 <span className="xxs">（原型：点击即模拟“说出”）</span></button>
+      ${qOpen && html`<div className="chips">${QUESTIONS.map(q => { const i = matchScript(q.text); const used = i >= 0 && s.used[i]; return html`<button key=${q.text} className=${'chip' + (used ? ' used' : '')} disabled=${s.pending || !!s.voice.interim || s.voice.ptt || s.status !== 'active'} onClick=${() => api.speak(q)}>${used && html`<${Icon} n="Check" size=${12} />`}${q.text}</button>`; })}</div>`}
+    </div>
+    <div className="voicebar">
+      <div className="row between nowrap">
+        <${Seg} size="xs" value=${s.voice.mode} onChange=${api.setMode} options=${[['continuous', '持续收音', 'Radio'], ['ptt', '按住说话', 'Hand']]} label="录音模式" />
+        <div className="row nowrap" style=${{ gap: '2px' }}>
+          <span className="asr" title="paraformer-realtime-v2 · 16 kHz 单声道 PCM">${s.voice.asr === 'connected' ? html`<span className="dot ok"></span>ASR ${s.voice.latency}ms` : html`<span className="spin-i"></span>重连中`}</span>
+          <button className=${'ibtn xs' + (s.tts.on ? ' on' : '')} onClick=${() => d({ type: 'TTS' })} aria-pressed=${s.tts.on} title=${s.tts.on ? '患者语音播放：开（sambert）' : '患者语音播放：关'} aria-label="患者语音播放开关"><${Icon} n=${s.tts.on ? 'Volume2' : 'VolumeX'} size=${14} /></button>
+          <${Pop} placement="top-end" trigger=${(o, set) => html`<button className="ibtn xs" onClick=${() => set(!o)} aria-label="语音设置" title="语音设置"><${Icon} n="Settings2" size=${14} /></button>`}>${close => html`<div className="menu" style=${{ width: '270px' }}>
+            <div className="menu-h">麦克风</div>
+            ${['内置麦克风阵列', 'USB 会议麦克风（Jabra 510）', '耳机麦克风'].map(dv => html`<button key=${dv} className=${s.voice.device === dv ? 'on' : ''} onClick=${() => { d({ type: 'DEVICE', device: dv }); close(); }}>${s.voice.device === dv ? html`<${Icon} n="Check" size=${13} />` : html`<span style=${{ width: '13px' }}></span>`}${dv}</button>`)}
+            <div className="menu-note">识别：paraformer-realtime-v2 · 中文普通话 · 16 kHz 单声道<br />患者语音：sambert（中年男声）· 医生开口即打断播放<br />无 BAILIAN_TOKEN 时本地回退到浏览器 Web Speech。</div>
+          </div>`}<//>
+        </div>
+      </div>
+      ${s.voice.mode === 'ptt' ? html`<${PttButton} />` : html`<${LiveButton} />`}
+      <form className="row nowrap" onSubmit=${e => { e.preventDefault(); if (api.send(v, 'text')) setV(''); }}>
+        <input id="ask-input" className="input sm" value=${v} onInput=${e => setV(e.target.value)} placeholder=${s.pending ? '等待患者回答…' : '键入问题（不经过语音）'} aria-label="键入向患者的提问" disabled=${s.status !== 'active'} />
+        <button className="btn sm" disabled=${s.pending || !v.trim()}>发送</button>
+      </form>
+    </div>
+  </div>`;
+}
+function LiveButton() {
+  const { s, api } = useC();
+  const live = s.voice.live; const speaking = !!s.voice.interim && !s.voice.interim.final;
+  return html`<button className=${'livebtn' + (live ? ' on' : '')} onClick=${() => api.toggleMic()} aria-pressed=${live} aria-label=${live ? '暂停收音' : '恢复收音'}>
+    <span className="rec-dot"></span>
+    <span className="grow lab"><b>${!live ? '收音已暂停' : speaking ? '正在识别…' : s.pending ? '收音中 · 等待患者回答' : '收音中'}</b><br /><span className="xs mf">${live ? `自动断句 · ${s.voice.device} · 点击暂停（M）` : '点击恢复（M）'}</span></span>
+    <${Level} on=${live} speaking=${speaking} />
+  </button>`;
+}
+function PttButton() {
+  const { s, api } = useC();
+  const on = s.voice.ptt, cancel = s.voice.pttCancel;
+  const held = on ? (s.now - s.voice.pttAt) / 1000 : 0;
+  const down = useRef(false);
+  const outside = (e, el) => { const r = el.getBoundingClientRect(); return e.clientY < r.top - 36 || e.clientX < r.left - 24 || e.clientX > r.right + 24; };
+  return html`<button className=${'pttbtn' + (on ? ' on' : '') + (cancel ? ' cancel' : '')} disabled=${s.pending || s.status !== 'active'} aria-label="按住说话" aria-pressed=${on}
+    onPointerDown=${e => { if (e.button !== 0) return; e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); down.current = true; api.pttDown(); }}
+    onPointerMove=${e => { if (down.current) api.pttCancel(outside(e, e.currentTarget)); }}
+    onPointerUp=${e => { if (!down.current) return; down.current = false; api.pttUp(outside(e, e.currentTarget)); }}
+    onPointerCancel=${() => { if (down.current) { down.current = false; api.pttUp(true); } }}
+    onContextMenu=${e => e.preventDefault()}>
+    <span className=${'rec-dot' + (on && !cancel ? ' on' : '')}></span>
+    ${on ? html`<b>${cancel ? '松开取消' : '松开发送'}</b><span className="mono xs">${held.toFixed(1)}s</span><span className="xs mf">${cancel ? '' : '上移取消'}</span><${Level} on=${!cancel} speaking=${!!s.voice.interim} />`
+      : html`<${Icon} n="Mic" size=${16} /><b>${s.pending ? '等待患者回答…' : '按住说话'}</b><span className="xs mf">或按住 <kbd>Space</kbd></span>`}
+  </button>`;
+}
+
+/* ================= case workspace ================= */
+function vitals(s) {
+  return s.exams.vitals
+    ? [{ k: 'T', v: '38.6', u: '℃', abn: 1 }, { k: 'P', v: '102', u: '次/分', abn: 1 }, { k: 'R', v: '22', u: '次/分', abn: 1 }, { k: 'BP', v: '138/84', u: 'mmHg' }, { k: 'SpO₂', v: '94', u: '%', abn: 1 }, { k: '身高', v: '172', u: 'cm' }, { k: '体重', v: '70', u: 'kg' }]
+    : [{ k: 'T', v: '38.4', u: '℃', abn: 1 }, { k: 'P', v: '98', u: '次/分' }, { k: 'R', v: '20', u: '次/分' }, { k: 'BP', v: '136/82', u: 'mmHg' }, { k: 'SpO₂', v: '95', u: '%' }, { k: '身高', v: '172', u: 'cm' }, { k: '体重', v: '70', u: 'kg' }];
+}
+function HealthRecord() {
+  const [t, setT] = useState('visits');
+  return html`<div style=${{ width: '430px', padding: '6px' }}>
+    <div className="row between" style=${{ marginBottom: '8px' }}><b className="xs">健康档案</b><${Seg} size="xs" value=${t} onChange=${setT} options=${[['visits', '既往就诊'], ['allergies', '过敏史'], ['chronic', '慢病'], ['meds', '既往用药']]} label="健康档案分类" /></div>
+    ${t === 'visits' && html`<table className="tbl"><tbody>${HISTORY.visits.map(v => html`<tr key=${v.date}><td className="mono xs mf" style=${{ whiteSpace: 'nowrap' }}>${v.date}</td><td><div>${v.reason}</div><div className="xs mf">${v.dx} · ${v.med}</div></td><td className="xs mf">${v.dept}</td></tr>`)}</tbody></table>`}
+    ${t === 'allergies' && html`<table className="tbl"><tbody>${HISTORY.allergies.map(a => html`<tr key=${a.agent}><td><span className="badge dest">${a.agent}</span></td><td>${a.reaction}</td><td className="xs mf">${a.when} · ${a.source}</td></tr>`)}</tbody></table>`}
+    ${t === 'chronic' && html`<table className="tbl"><tbody>${HISTORY.chronic.map(c => html`<tr key=${c.name}><td>${c.name}</td><td className="xs mf">${c.since} 起</td><td className="xs">${c.status}</td></tr>`)}</tbody></table>`}
+    ${t === 'meds' && html`<table className="tbl"><tbody>${HISTORY.meds.map(m => html`<tr key=${m.name}><td>${m.name}</td><td className="xs">${m.dose}</td><td className="xs mf">${m.since}</td></tr>`)}</tbody></table>`}
+    <div className="menu-note">来源：本院既往记录（Visible Source History）。不含本次就诊结论，也不含病例真值。</div>
+  </div>`;
+}
+function PatientBanner({ onJump }) {
+  const { s, api } = useC();
+  const [open, setOpen] = usePersist('cm.checklist', false);
+  const gs = gates(s);
+  return html`<header className="banner" aria-label="患者信息">
+    <div className="row between">
+      <div className="row" style=${{ gap: '6px' }}>
+        <h2>${PATIENT.name}</h2><span className="xs mf">${PATIENT.sex} · ${PATIENT.age} 岁</span>
+        <span className="badge outline">${PATIENT.kind}</span><span className="badge warn">分诊 ${PATIENT.triage} 级</span>
+        ${PATIENT.allergies.map(a => html`<span key=${a.name} className="badge dest" title=${`${a.year} 年 ${a.reaction}`}><span className="sr">过敏信息 · </span><${Icon} n="TriangleAlert" size=${12} />过敏：${a.name}（${a.reaction}）</span>`)}
+        ${PATIENT.chronic.map(c => html`<span key=${c} className="badge warn-o">慢病：${c}</span>`)}
+        <span className="badge secondary">${s.status === 'active' ? '就诊中' : s.status === 'completed' ? '已完诊 · 只读' : '已放弃'}</span>
+      </div>
+      <div className="row" style=${{ gap: '6px' }}>
+        <span className="xs mf mono row" style=${{ gap: '4px' }} title="本次就诊时长"><${Icon} n="Clock" size=${13} />${fmtDur((s.completedAt || s.now) - s.startedAt)}</span>
+        <${Pop} placement="bottom-end" trigger=${(o, set) => html`<button className="btn xs" onClick=${() => set(!o)} aria-expanded=${o}><${Icon} n="History" size=${13} />健康档案</button>`}>${() => html`<${HealthRecord} />`}<//>
+      </div>
+    </div>
+    <div className="row xs mf" style=${{ gap: '4px 14px' }}>
+      <span className="row" style=${{ gap: '2px' }}>门诊号 <span className="mono" style=${{ color: 'var(--foreground)' }}>${PATIENT.opNo}</span><button className="ibtn xs" onClick=${() => api.copy(PATIENT.opNo, '已复制门诊号')} aria-label="复制门诊号" title="复制门诊号"><${Icon} n="Copy" size=${12} /></button></span>
+      <span>挂号 ${PATIENT.visitAt}</span><span>${DEPT}</span><span>${PATIENT.insurance}</span>
+      <span className="ellip" style=${{ maxWidth: '100%' }}>主诉：<span style=${{ color: 'var(--foreground)' }}>${s.note.cc.text || '—'}</span></span>
+    </div>
+    <div className="vitals" aria-label="生命体征">${vitals(s).map(v => html`<div key=${v.k} className=${'vt' + (v.abn ? ' abn' : '')}><span className="vk">${v.k}</span><span className="vv num">${v.v}</span><span className="vu">${v.u}</span></div>`)}
+      <span className="xxs mf" style=${{ alignSelf: 'center' }}>${s.exams.vitals ? '查体 ' + clock(s.exams.vitals) : '分诊 08:20'}</span></div>
+    <div>
+      <button className="btn xs ghost" style=${{ paddingLeft: 0 }} onClick=${() => setOpen(!open)} aria-expanded=${open}><${Icon} n="ListChecks" size=${13} />完诊清单 <b className="mono">${gs.filter(g => g.ok).length}/5</b><${Icon} n="ChevronRight" size=${12} className=${'rot' + (open ? ' open' : '')} /></button>
+      ${open && html`<div className="checklist">${gs.map(g => html`<div key=${g.n} className="item"><span className=${'dot ' + (g.ok ? 'ok' : 'warn')}></span><span className="grow">${g.name} <span className="mf">· ${g.why}</span></span>${!g.ok && html`<button className="lnk" onClick=${() => onJump(g.tab)}>前往${TABS.find(t => t.k === g.tab)?.name}</button>`}</div>`)}</div>`}
+    </div>
+  </header>`;
+}
+const TABS = [{ k: 'note', name: '病历记录', ic: 'FileText' }, { k: 'inv', name: '检验检查', ic: 'FlaskConical' }, { k: 'dx', name: '诊断', ic: 'ClipboardList' }, { k: 'rx', name: '处方', ic: 'Pill' }];
+function tabBadges(s) {
+  const unacked = s.inv.filter(i => i.st === 'released' && !i.reports.at(-1).ack).length;
+  const sg = m => s.sugs.filter(g => g.m === m).length;
+  const noteAgent = SECTIONS.filter(x => s.note[x.key].text && !s.note[x.key].edited).length;
+  return {
+    note: { pend: s.noteRevs.length ? 0 : 1, ai: sg('note') + noteAgent },
+    inv: { pend: s.inv.filter(i => i.st === 'draft').length + unacked, ai: s.inv.filter(i => i.st === 'draft' && i.by === 'copilot').length + sg('inv') },
+    dx: { pend: s.dxDraft.length, ai: s.dxDraft.filter(x => x.by === 'copilot').length + sg('dx') },
+    rx: { pend: s.rxDraft.length, ai: s.rxDraft.filter(x => x.by === 'copilot').length + sg('rx') },
+  };
+}
+function WorkspaceTabs({ tab, setTab }) {
+  const { s } = useC();
+  const b = tabBadges(s); const gs = gates(s);
+  const done = { dx: gs[0].ok, inv: gs[1].ok && s.inv.some(i => i.st === 'released'), rx: gs[2].ok, note: gs[3].ok };
+  return html`<nav className="tabs" role="tablist" aria-label="病例页签">
+    ${TABS.map((t, i) => html`<button key=${t.k} role="tab" aria-selected=${tab === t.k} className=${'tab' + (tab === t.k ? ' on' : '')} onClick=${() => setTab(t.k)} title=${`Alt+${i + 1}`} data-agent=${tab === t.k ? 'idle' : agentState(s, t.k)}>
+      <${Icon} n=${t.ic} size=${15} />${t.name}${done[t.k] && html`<span className="st-ok" aria-label="已满足"><${Icon} n="Check" size=${11} /></span>`}
+      ${b[t.k].pend > 0 && html`<span className="badge warn tiny" aria-label=${'待处理 ' + b[t.k].pend}>${b[t.k].pend}</span>`}
+      ${b[t.k].ai > 0 && html`<span className="badge info tiny" aria-label=${'助手 ' + b[t.k].ai}>助手 ${b[t.k].ai}</span>`}
+    </button>`)}
+  </nav>`;
+}
+function SaveState() {
+  const { s } = useC();
+  return html`<span className="save-state" aria-live="polite">${s.saved.state === 'saving' ? html`<span className="spin-i"></span>保存中…` : html`<${Icon} n="Check" size=${13} />草稿已自动保存 ${clock(s.saved.t, true)}`}</span>`;
+}
+function NoteFieldRow({ x }) {
+  const { s, d } = useC();
+  const f = s.note[x.key]; const agent = !!f.text && !f.edited; const len = f.text.length;
+  const lastPatient = [...s.turns].reverse().find(t => t.sp === 'patient' && t.st === 'final');
+  return html`<div className="nf">
+    <label htmlFor=${'note-' + x.key} className="nf-l">${x.name}${x.req && html`<span className="req" aria-label="必填">*</span>`}</label>
+    <div className="col" style=${{ gap: '6px' }}>
+      <div className=${'draft-field' + (agent ? ' agent' : '')} data-agent=${agentState(s, 'note.' + x.key)}>
+        <textarea id=${'note-' + x.key} className="input" rows=${x.rows} value=${f.text} aria-label=${x.name} disabled=${s.status !== 'active'}
+          onFocus=${() => d({ type: 'FOCUS', k: x.key })} onBlur=${() => d({ type: 'FOCUS', k: null })} onInput=${e => d({ type: 'NOTE_EDIT', k: x.key, text: e.target.value })}
+          placeholder=${x.key === 'pe' ? '执行查体或出报告后，助手会写入客观发现' : '等待助手起草，或直接书写'}></textarea>
+        ${agent && html`<span className="abadge"><${AiBadge} /></span>`}
+        <div className="nf-tools">
+          ${PHRASES[x.key] && html`<${Pop} placement="bottom-start" trigger=${(o, set) => html`<button className="lnk" onClick=${() => set(!o)}>常用语</button>`}>${close => html`<div className="menu" style=${{ width: '260px' }}>${PHRASES[x.key].map(p => html`<button key=${p} onClick=${() => { d({ type: 'NOTE_APPEND', k: x.key, text: p, silent: true }); close(); }}>${p}</button>`)}</div>`}<//>`}
+          ${x.key === 'hpi' && lastPatient && html`<button className="lnk" onClick=${() => d({ type: 'NOTE_APPEND', k: 'hpi', text: quoteText(lastPatient) })} title=${lastPatient.text}>引用最近患者原话</button>`}
+          <span className=${'cnt num' + (len > 500 ? ' over' : '')}>${len}/500</span>
+        </div>
+      </div>
+      ${s.sugs.filter(g => g.k === x.key).map(g => html`<${Review} key=${g.id} g=${g} />`)}
+    </div>
+  </div>`;
+}
+function NoteTab() {
+  const { s, api } = useC();
+  const last = s.noteRevs.at(-1);
+  const dirty = last && SECTIONS.some(x => last.snap[x.key] !== s.note[x.key].text);
+  const stale = last && s.dxRevs.at(-1) && last.seq < s.dxRevs.at(-1).seq;
+  return html`<section className="card sect" data-agent=${agentState(s, 'note')}>
+    <div className="sect-h">
+      <div className="row"><h3>门诊病历</h3><${SaveState} /></div>
+      <div className="row" style=${{ gap: '6px' }}>
+        ${last && html`<span className="badge ok">第 ${s.noteRevs.length} 版已签署 · ${clock(last.t)}</span>`}${dirty && html`<span className="badge warn">有未签署修改</span>`}${stale && html`<span className="badge crit">签署早于诊断修改</span>`}
+        <${Pop} placement="bottom-end" trigger=${(o, set) => html`<button className="btn xs" disabled=${!last} onClick=${() => set(!o)}><${Icon} n="History" size=${13} />签署历史${last ? ` (${s.noteRevs.length})` : ''}</button>`}>${() => html`<div style=${{ width: '330px' }}>${[...s.noteRevs].reverse().map((r, i) => html`<details key=${r.seq} className="cb" open=${i === 0}><summary><b className="xs">第 ${s.noteRevs.length - i} 版</b><span className="xs mf" style=${{ marginLeft: 'auto' }}>${clock(r.t, true)} · ${r.by}</span></summary><div className="xs" style=${{ padding: '0 4px 8px', display: 'flex', flexDirection: 'column', gap: '2px' }}>${SECTIONS.map(x => html`<div key=${x.key}><span className="mf">${x.name}：</span>${r.snap[x.key] || '—'}</div>`)}</div></details>`)}<div className="menu-note">签署版本不可覆盖；修改须追加签署。</div></div>`}<//>
+        <button className="btn sm primary" data-agent-confirm="" onClick=${api.signNote} disabled=${s.status !== 'active'}><${Icon} n="PenLine" size=${14} />${last ? '追加签署' : '签署病历'}</button>
+      </div>
+    </div>
+    <div className="col" style=${{ gap: '12px' }}>${SECTIONS.map(x => html`<${NoteFieldRow} key=${x.key} x=${x} />`)}</div>
+  </section>`;
+}
+function ReportView({ r, abnOnly }) {
+  if (r.kind === 'text') return html`<div className="xs" style=${{ lineHeight: 1.75 }}><div><span className="mf">检查所见：</span>${r.findings}</div><div><span className="mf">检查结论：</span><b>${r.impression}</b></div></div>`;
+  const rows = abnOnly ? r.rows.filter(x => x.flag !== 'N') : r.rows;
+  return html`<div className="tblwrap"><table className="tbl"><thead><tr><th>项目</th><th style=${{ textAlign: 'right' }}>结果</th><th>单位</th><th>参考范围</th><th>提示</th></tr></thead>
+    <tbody>${rows.map(x => html`<tr key=${x.name}><td>${x.name}</td><td className="num" style=${{ textAlign: 'right', ...(x.flag !== 'N' ? { color: 'var(--warning)', fontWeight: 600 } : {}) }}>${x.value}${x.flag === 'H' ? ' ↑' : x.flag === 'L' ? ' ↓' : ''}</td><td className="mf">${x.unit}</td><td className="mf num">${x.ref}</td>
+      <td>${x.flag === 'N' ? html`<span className="mf xs">正常</span>` : html`<span className="badge warn tiny">${x.flag === 'H' ? '偏高' : '偏低'}</span>`}</td></tr>`)}
+    ${!rows.length && html`<tr><td colSpan="5" className="mf xs">无异常指标</td></tr>`}</tbody></table></div>`;
+}
+function OrderCard({ i, abnOnly }) {
+  const { s, api } = useC();
+  const c = invOf(i.key); const r = i.reports.at(-1);
+  const [open, setOpen] = useState(true);
+  const names = STAGES[c.cat];
+  const cur = i.st === 'ordered' ? names.find(n => !i.stages.some(x => x.name === n)) : null;
+  const eta = i.st === 'ordered' ? Math.max(0, Math.ceil(c.tat - (s.now - i.orderedAt) / 1000)) : 0;
+  return html`<div className="order">
+    <div className="row between">
+      <div className="row" style=${{ gap: '6px' }}>
+        <b>${c.name}</b><span className="badge outline tiny">${c.cat}</span>
+        ${i.st === 'cancelled' ? html`<span className="badge outline">已取消</span>` : r ? html`<span className="badge outline tiny">第 ${r.v} 版（当前）</span>${r.ack ? html`<span className="badge ok">医生已阅</span>` : html`<span className="badge crit">待阅</span>`}` : html`<span className="badge warn num">${cur} · 约 ${eta}s</span>`}
+      </div>
+      <div className="row" style=${{ gap: '4px' }}>
+        ${i.st === 'ordered' && html`<button className="btn xs" onClick=${() => api.release(i.id)} title="原型：跳过周转时间">立即出报告</button><button className="btn xs dest" onClick=${() => api.cancelInv(i.id)}>取消</button>`}
+        ${r && !r.ack && html`<button className="btn xs primary" data-agent-confirm="" onClick=${() => api.ackInv([i.id])} disabled=${s.status !== 'active'}>确认已阅</button>`}
+        ${r && html`<button className="ibtn xs" onClick=${() => setOpen(!open)} aria-expanded=${open} aria-label="展开或收起报告"><${Icon} n="ChevronRight" size=${14} className=${'rot' + (open ? ' open' : '')} /></button>`}
+      </div>
+    </div>
+    <div className="stepper" aria-label="执行进度">${(i.st === 'cancelled' ? i.stages.map(x => x.name) : names).map(n => { const st = i.stages.find(x => x.name === n); return html`<div key=${n} className=${'stp' + (st ? ' done' : n === cur ? ' cur' : '')}><span className="nm">${n}</span><span className="tm">${st ? clock(st.t, true) : '—'}</span></div>`; })}</div>
+    ${r && open && html`<div className="col" style=${{ gap: '6px' }}>
+      <div className="rmeta"><span>${c.cat === '检验' ? '标本' : '部位'}：${c.specimen}</span><span>报告：${r.staff.reporter}</span><span>审核：${r.staff.reviewer}</span><span>报告时间 ${clock(r.t, true)}</span>${r.ack && html`<span>已阅 ${clock(r.ackAt, true)} · ${r.ackBy}</span>`}${r.baseline && html`<span>目录基线规则</span>`}</div>
+      ${r.reason && html`<div className="xs row" style=${{ color: 'var(--warning)', gap: '4px' }}><${Icon} n="TriangleAlert" size=${12} />更正原因：${r.reason}。旧版本的已阅不延续到本版本。</div>`}
+      <${ReportView} r=${r} abnOnly=${abnOnly} />
+      ${i.reports.length > 1 && html`<div className="xs mf">历史版本：${i.reports.slice(0, -1).map(x => `第 ${x.v} 版（已替代）${x.ack ? ' · 曾已阅' : ''}`).join('；')}</div>`}
+    </div>`}
+  </div>`;
+}
+function InvTab() {
+  const { s, d, api } = useC();
+  const [cat, setCat] = useState('全部'); const [q, setQ] = useState(''); const [abnOnly, setAbnOnly] = usePersist('cm.abnOnly', false);
+  const drafts = s.inv.filter(i => i.st === 'draft');
+  const ordered = s.inv.filter(i => i.st !== 'draft');
+  const unacked = ordered.filter(i => i.st === 'released' && !i.reports.at(-1).ack);
+  const qq = q.trim().toLowerCase();
+  const list = CATALOG.filter(c => (cat === '全部' || c.cat === cat) && (!qq || c.name.toLowerCase().includes(qq) || c.py.some(p => p.startsWith(qq))));
+  return html`<div className="col" style=${{ gap: '14px' }}>
+    <section className="card sect" data-agent=${agentState(s, 'inv')} style=${{ containerType: 'inline-size' }}>
+      <div className="sect-h"><h3>开立检查</h3><span className="xs mf">开立后仅在首份报告发布前可取消</span></div>
+      <div className="composer2">
+        <div className="catalog">
+          <div className="combo"><span className="combo-i"><${Icon} n="Search" size=${14} /></span><input id="cat-q" className="input sm" placeholder="搜索项目或拼音首字母，如 xcg" value=${q} onInput=${e => setQ(e.target.value)} aria-label="搜索检查项目" /></div>
+          <${Seg} size="xs" value=${cat} onChange=${setCat} options=${['全部', '检验', '放射', '功能'].map(x => [x, x])} label="检查类别" />
+          <div className="cat-list">${list.map(c => { const ex = s.inv.find(i => i.key === c.key && i.st !== 'cancelled'); return html`<div key=${c.key} className="cat-row">
+            <div className="grow"><div>${c.name}</div><div className="xxs mf">${c.specimen} · ${c.dept} · 预计 ${c.tatText}</div></div>
+            ${ex ? html`<span className="xxs mf">${ex.st === 'draft' ? '已在待开立' : '已开立'}</span>` : html`<button className="btn xs" onClick=${() => d({ type: 'INV_ADD', key: c.key, by: 'doctor' })} disabled=${s.status !== 'active'}><${Icon} n="Plus" size=${12} />加入</button>`}
+          </div>`; })}${!list.length && html`<div className="cat-row mf">无匹配项目</div>`}</div>
+        </div>
+        <div className="pendinglist">
+          <div className="row between"><b className="xs">待开立 ${drafts.length}</b>${drafts.length > 0 && html`<button className="lnk" onClick=${() => drafts.forEach(i => d({ type: 'INV_DROP', id: i.id }))}>清空</button>`}</div>
+          ${drafts.length === 0 ? html`<div className="empty">从左侧目录加入，或等待助手起草</div>` : html`<ul className="list">${drafts.map(i => { const c = invOf(i.key); return html`<li key=${i.id} className="li" style=${{ background: 'var(--card)' }}><div className="grow"><div className="row" style=${{ gap: '6px' }}><b className="xs">${c.name}</b>${i.by === 'copilot' && html`<${AiBadge} />`}</div><div className="xxs mf">${c.specimen} · ${c.dept}</div></div><button className="ibtn xs" onClick=${() => d({ type: 'INV_DROP', id: i.id })} aria-label=${'移除 ' + c.name} title="移除"><${Icon} n="X" size=${13} /></button></li>`; })}</ul>`}
+          ${s.sugs.filter(g => g.m === 'inv').map(g => html`<${Review} key=${g.id} g=${g} />`)}
+          <button className="btn sm primary w100" data-agent-confirm="" disabled=${!drafts.length || s.status !== 'active'} onClick=${() => api.issueInv(drafts.map(i => i.id))}>开立 ${drafts.length || ''} 项</button>
+        </div>
+      </div>
+    </section>
+    <section className="card sect">
+      <div className="sect-h"><h3>已开立与报告 <span className="mf xs mono">${ordered.length}</span></h3>
+        <div className="row" style=${{ gap: '10px' }}><label className="xs row" style=${{ gap: '4px', cursor: 'pointer' }}><input type="checkbox" checked=${abnOnly} onChange=${e => setAbnOnly(e.target.checked)} />仅看异常</label>
+          ${unacked.length > 1 && html`<button className="btn xs primary" data-agent-confirm="" onClick=${() => api.ackInv(unacked.map(i => i.id))}>全部确认已阅 (${unacked.length})</button>`}</div></div>
+      ${ordered.length === 0 ? html`<div className="empty">尚未开立检查</div>` : ordered.map(i => html`<${OrderCard} key=${i.id} i=${i} abnOnly=${abnOnly} />`)}
+    </section>
+  </div>`;
+}
+function DxTab() {
+  const { s, d, api } = useC();
+  const last = s.dxRevs.at(-1);
+  const common = ['J18.9', 'J20.9', 'J06.9', 'I10'];
+  return html`<section className="card sect" data-agent=${agentState(s, 'dx')}>
+    <div className="sect-h"><h3>诊断</h3><span className="xs mf">ICD-10 · 首项为主诊断，最多 8 项</span></div>
+    <div className="col">
+      ${last && html`<div className="li" style=${{ background: 'color-mix(in srgb, var(--success) 7%, transparent)' }}><div className="grow col" style=${{ gap: '4px' }}>
+        <span className="xs mf">已确认 · 第 ${s.dxRevs.length} 次 · ${clock(last.t, true)} · ${last.by}</span>
+        ${last.items.map(i => html`<div key=${i.code} className="row" style=${{ gap: '6px' }}><span className=${'badge ' + (i.primary ? 'secondary' : 'outline')}>${i.primary ? '主诊断' : '次诊断'}</span><span>${icd(i.code).name}</span><span className="mono xs mf">${i.code}</span></div>`)}
+        ${s.dxRevs.length > 1 && html`<span className="xxs mf">历次确认：${s.dxRevs.slice(0, -1).map((r, k) => `第 ${k + 1} 次 ${r.items.find(x => x.primary) ? icd(r.items.find(x => x.primary).code).name : ''}`).join('；')}</span>`}</div>
+        ${!s.dxDraft.length && html`<button className="btn xs" onClick=${() => d({ type: 'DX_REVISE' })} disabled=${s.status !== 'active'}>修改已确认诊断</button>`}</div>`}
+      ${s.dxDraft.length > 0 ? html`<div className="tblwrap"><table className="tbl"><thead><tr><th style=${{ width: '64px' }}>主诊断</th><th>诊断名称</th><th>ICD-10</th><th>来源</th><th></th></tr></thead><tbody>
+        ${s.dxDraft.map(x => html`<tr key=${x.code}><td><input type="radio" name="dx-primary" checked=${x.primary} onChange=${() => d({ type: 'DX_PRIMARY', code: x.code })} aria-label=${'设为主诊断 ' + icd(x.code).name} /></td><td>${icd(x.code).name}</td><td className="mono xs">${x.code}</td><td>${x.by === 'copilot' ? html`<${AiBadge} />` : html`<span className="xs mf">医生</span>`}</td>
+          <td style=${{ textAlign: 'right' }}><button className="ibtn xs" onClick=${() => d({ type: 'DX_DROP', code: x.code })} aria-label=${'删除诊断草稿 ' + icd(x.code).name}><${Icon} n="Trash2" size=${13} /></button></td></tr>`)}
+      </tbody></table></div>` : !last ? html`<div className="empty">暂无诊断草稿。搜索 ICD-10，或等待助手起草候选诊断。</div>` : null}
+      ${s.sugs.filter(g => g.m === 'dx').map(g => html`<${Review} key=${g.id} g=${g} />`)}
+      <div className="row">
+        <${Combo} id="icd-q" label="搜索 ICD-10 诊断" placeholder="搜索诊断名称、编码或拼音，如 fy、J18" items=${ICD} disabled=${s.status !== 'active'}
+          match=${(it, q) => it.code.toLowerCase().includes(q) || it.name.includes(q) || it.py.some(p => p.startsWith(q))}
+          render=${it => html`<span className="mono xs mf" style=${{ width: '48px' }}>${it.code}</span><span className="grow">${it.name}</span>${s.dxDraft.some(x => x.code === it.code) && html`<span className="xxs mf">已在草稿</span>`}`}
+          onPick=${it => d({ type: 'DX_ADD', code: it.code, primary: !s.dxDraft.length, by: 'doctor' })} />
+        ${s.dxDraft.length > 0 && html`<button className="btn sm ghost" onClick=${() => d({ type: 'DX_CLEAR' })}>清空草稿</button>`}
+        <button className="btn sm primary" data-agent-confirm="" disabled=${!s.dxDraft.length || s.status !== 'active'} onClick=${api.confirmDx}>确认诊断</button>
+      </div>
+      <div className="row xs"><span className="mf">常用：</span>${common.map(c => html`<button key=${c} className="chip" onClick=${() => d({ type: 'DX_ADD', code: c, primary: !s.dxDraft.length, by: 'doctor' })} disabled=${s.status !== 'active'}>${icd(c).name}</button>`)}</div>
+    </div>
+  </section>`;
+}
+function DrugInsert({ dr }) {
+  return html`<dl className="insert"><b>${dr.name} <span className="xs mf">${dr.spec}</span></b><dt>适应证</dt><dd>${dr.insert.ind}</dd><dt>禁忌</dt><dd style=${RED[dr.cls] ? { color: 'var(--destructive)' } : null}>${dr.insert.contra}</dd><dt>注意事项</dt><dd>${dr.insert.note}</dd><span className="xxs mf" style=${{ marginTop: '4px' }}>来源：药品说明书摘要（合成）</span></dl>`;
+}
+function RxTab() {
+  const { s, d, api } = useC();
+  const [reason, setReason] = useState(''); const [why, setWhy] = useState('');
+  const allergyTag = dr => RED[dr.cls] ? html`<span className="badge crit tiny">与过敏史冲突</span>` : WARN[dr.cls] ? html`<span className="badge warn tiny">交叉过敏风险</span>` : null;
+  return html`<section className="card sect" data-agent=${agentState(s, 'rx')}>
+    <div className="sect-h"><h3>处方</h3><div className="row"><span className="xs mf">用药结论</span><${Seg} size="xs" value=${s.rxMode} onChange=${m => d({ type: 'RX_MODE', mode: m })} options=${[['rx', '处方'], ['nomed', '无需用药']]} label="用药结论" /></div></div>
+    <div className="col">
+      ${s.redline && html`<div className="redline" role="alert"><b className="row" style=${{ gap: '4px' }}><${Icon} n="TriangleAlert" size=${14} />药事安全红线拦截（不可越权）</b><div>${s.redline.items.join('、')}：患者有<b>青霉素过敏性休克史</b>（2015）。整张处方未开具，请删除该药品后重新提交。</div><div><span className="badge crit tiny mono">MEDICATION_ALLERGY_CONFLICT</span></div></div>`}
+      ${s.warnline && html`<div className="warnline" role="alert"><b className="row" style=${{ color: 'var(--warning)', gap: '4px' }}><${Icon} n="TriangleAlert" size=${14} />临床质控警示（需补齐依据或登记原因）</b><span>${s.warnline.items.join('、')} 与青霉素存在交叉过敏风险。</span>
+        <select className="input sm" value=${reason} onChange=${e => setReason(e.target.value)} aria-label="登记原因"><option value="">选择登记原因…</option>${OVERRIDE_REASONS.map(r => html`<option key=${r} value=${r}>${r}</option>`)}</select>
+        <textarea className="input" style=${{ minHeight: '48px', paddingBottom: '7px' }} placeholder="补充说明（至少 4 字）" value=${why} onInput=${e => setWhy(e.target.value)} aria-label="补充说明"></textarea>
+        <div className="row"><button className="btn xs" disabled=${!reason || why.trim().length < 4} onClick=${() => { d({ type: 'RX_ISSUE', override: { reason, note: why.trim() } }); setReason(''); setWhy(''); }}>登记说明并重新提交</button><span className="xxs mf">登记内容进入审计记录</span></div></div>`}
+      ${s.noMed && html`<div className="li" style=${{ background: 'color-mix(in srgb, var(--success) 7%, transparent)' }}><span className="row" style=${{ gap: '6px' }}><${Icon} n="Check" size=${14} />已确认无需用药</span></div>`}
+      ${s.rxIssued.length > 0 && html`<div><div className="xs mf" style=${{ marginBottom: '4px' }}>已开具</div><div className="tblwrap"><table className="tbl"><thead><tr><th>药品</th><th>用法用量</th><th>总量</th><th>状态</th></tr></thead><tbody>${s.rxIssued.map(r => { const dr = drug(r.key); return html`<tr key=${r.key}><td>${dr.name}<div className="xxs mf">${dr.spec}</div></td><td className="xs">${r.dose} ${dr.doseUnit} ${r.route} ${FREQ[r.freq].t} × ${r.days} 天</td><td className="num xs">${rxTotal(r)}</td><td><span className="badge ok">已开具 ${clock(r.t)}</span>${r.override && html`<div className="xxs mf">已登记：${r.override.reason}</div>`}</td></tr>`; })}</tbody></table></div></div>`}
+      ${s.rxMode === 'rx' && !s.noMed && html`<${Fragment}>
+        ${s.rxDraft.length > 0 ? html`<div className="tblwrap"><table className="tbl rx-table"><thead><tr><th>药品</th><th>单次剂量</th><th>用法</th><th>频次</th><th>天数</th><th>总量</th><th></th></tr></thead><tbody>
+          ${s.rxDraft.map(r => { const dr = drug(r.key); return html`<tr key=${r.key} style=${RED[dr.cls] ? { background: 'color-mix(in srgb, var(--destructive) 6%, transparent)' } : null}>
+            <td><div className="row" style=${{ gap: '4px' }}><span>${dr.name}</span>${r.by === 'copilot' && html`<${AiBadge} />`}${allergyTag(dr)}</div><div className="xxs mf row" style=${{ gap: '6px' }}>${dr.spec} · ${dr.clsName}<${Pop} placement="bottom-start" trigger=${(o, set) => html`<button className="lnk" style=${{ fontSize: '11px' }} onClick=${() => set(!o)}><${Icon} n="BookOpen" size=${11} />说明书</button>`}>${() => html`<${DrugInsert} dr=${dr} />`}<//></div></td>
+            <td><span className="row nowrap" style=${{ gap: '4px' }}><input className="input num-in" type="number" min="0" step="0.5" value=${r.dose} onInput=${e => d({ type: 'RX_EDIT', key: r.key, field: 'dose', value: +e.target.value || 0 })} aria-label=${dr.name + ' 单次剂量'} /><span className="xs mf">${dr.doseUnit}</span></span></td>
+            <td><select className="input" value=${r.route} onChange=${e => d({ type: 'RX_EDIT', key: r.key, field: 'route', value: e.target.value })} aria-label=${dr.name + ' 用法'}>${['口服', '含服', '外用'].map(x => html`<option key=${x} value=${x}>${x}</option>`)}</select></td>
+            <td><select className="input" value=${r.freq} onChange=${e => d({ type: 'RX_EDIT', key: r.key, field: 'freq', value: e.target.value })} aria-label=${dr.name + ' 频次'}>${Object.entries(FREQ).map(([k, f]) => html`<option key=${k} value=${k}>${k} ${f.t}</option>`)}</select></td>
+            <td><input className="input num-in" type="number" min="1" max="30" value=${r.days} onInput=${e => d({ type: 'RX_EDIT', key: r.key, field: 'days', value: Math.max(1, +e.target.value || 1) })} aria-label=${dr.name + ' 天数'} /></td>
+            <td className="num xs">${rxTotal(r)}</td>
+            <td><button className="ibtn xs" onClick=${() => d({ type: 'RX_DROP', key: r.key })} aria-label=${'删除处方草稿 ' + dr.name}><${Icon} n="Trash2" size=${13} /></button></td></tr>`; })}
+        </tbody></table></div>` : !s.rxIssued.length ? html`<div className="empty">暂无处方草稿。须先确认诊断才能开具。</div>` : null}
+        ${s.sugs.filter(g => g.m === 'rx').map(g => html`<${Review} key=${g.id} g=${g} />`)}
+        <div className="row">
+          <${Combo} id="drug-q" label="搜索药品（本院药房）" placeholder="搜索药品名称或拼音，如 mxsx" items=${DRUGS} disabled=${s.status !== 'active'}
+            match=${(it, q) => it.name.includes(q) || it.py.some(p => p.startsWith(q)) || it.clsName.includes(q)}
+            render=${it => html`<span className="grow">${it.name} <span className="xxs mf">${it.spec} · ${it.clsName}</span></span>${allergyTag(it)}`}
+            onPick=${it => d({ type: 'RX_ADD', key: it.key, by: 'doctor' })} />
+          <button className="btn sm primary" data-agent-confirm="" disabled=${!s.rxDraft.length || s.status !== 'active'} onClick=${api.issueRx}>正式开具处方</button>
+        </div><//>`}
+      ${s.rxMode === 'nomed' && !s.noMed && html`<div className="row"><span className="xs mf grow">适用于自限性疾病等无需药物治疗的情况；与有效处方互斥，开具前须先确认诊断。</span><button className="btn sm primary" data-agent-confirm="" onClick=${api.noMed} disabled=${s.status !== 'active'}>确认无需用药</button></div>`}
+    </div>
+  </section>`;
+}
+function ActionBar({ onJump }) {
+  const { s, api } = useC();
+  const gs = gates(s); const ok = gs.every(g => g.ok);
+  return html`<div className=${'actionbar' + (ok ? ' ready' : '')}>
+    <${Pop} placement="top-start" trigger=${(o, set) => html`<button className="btn xs ghost" onClick=${() => set(!o)} aria-expanded=${o}><${Icon} n="ListChecks" size=${14} /><b>完诊 ${gs.filter(g => g.ok).length}/5</b></button>`}>${close => html`<div style=${{ width: '340px', padding: '4px' }}><div className="menu-h">完诊清单（提交时服务端原子重验）</div>${gs.map(g => html`<div key=${g.n} className="row nowrap xs" style=${{ padding: '5px 8px' }}><span className=${'dot ' + (g.ok ? 'ok' : 'warn')}></span><span className="grow">${g.name}<div className="mf">${g.why}</div></span>${!g.ok && html`<button className="lnk" onClick=${() => { onJump(g.tab); close(); }}>前往</button>`}</div>`)}</div>`}<//>
+    <span className="xs mf ellip grow">${ok ? '全部满足，可以办理完诊' : '未满足：' + gs.filter(g => !g.ok).map(g => g.name).join('、')}</span>
+    <button className="btn sm ghost dest" onClick=${api.abandon} disabled=${s.status !== 'active'}>放弃就诊</button>
+    <button className=${'btn sm primary' + (ok ? '' : ' notready')} data-agent-confirm="" onClick=${api.complete} disabled=${s.status !== 'active'} title=${ok ? '' : '可以点：演示服务端重验拒绝'}>确认完诊</button>
+  </div>`;
+}
+
+/* ================= clinical copilot panel ================= */
+function StepMark({ st }) {
+  if (st === 'running') return html`<span className="mark running"><span className="spin-i"></span></span>`;
+  if (st === 'think') return html`<span className="mark think"><${Icon} n="Sparkles" size=${12} /></span>`;
+  const ic = { ok: 'Check', denied: 'X', approval: 'Hand', stopped: 'Square' }[st] || 'Check';
+  return html`<span className=${'mark ' + st}><${Icon} n=${ic} size=${9} /></span>`;
+}
+function ThinkStep({ x, t0 }) {
+  const { s } = useC();
+  const [o, setO] = useState(false);
+  const running = x.state === 'running';
+  return html`<div className="step"><button className="step-h" onClick=${() => setO(!o)} aria-expanded=${o || running}>
+      <${StepMark} st=${running ? 'running' : x.state === 'stopped' ? 'stopped' : 'think'} /><span className="sub">${running ? `思考中 ${((s.now - t0) / 1000).toFixed(1)}s` : x.state === 'stopped' ? '思考已停止' : `已思考 ${(x.dur || 1).toFixed(1)}s`}</span><${Icon} n="ChevronRight" size=${12} className=${'rot mf' + (o || running ? ' open' : '')} /></button>
+    ${(o || running) && html`<div className="think">${running ? html`<${Reveal} text=${x.text} t0=${t0} cps=${55}>${(v, go) => html`<span className=${go ? 'caret' : ''}>${v}</span>`}<//>` : x.text}</div>`}</div>`;
+}
+function ToolStep({ x }) {
+  const { s } = useC();
+  const [o, setO] = useState(false);
+  const running = s.now < x.t + x.dur * 1000;
+  return html`<div className=${'step ' + (running ? 'running' : x.state)}><button className="step-h" onClick=${() => setO(!o)} aria-expanded=${o}>
+      <${StepMark} st=${running ? 'running' : x.state} /><span className="nm">${x.name}</span><span className="sub">${x.subject}</span><span className="meta">${running ? '执行中' : x.meta}${!running && x.dur ? ` · ${x.dur.toFixed(1)}s` : ''}</span><${Icon} n="ChevronRight" size=${12} className=${'rot mf' + (o ? ' open' : '')} /></button>
+    ${o && html`<div className="step-b"><span className="code-l">参数</span><pre className="code">${JSON.stringify(x.args, null, 2)}</pre><span className="code-l">结果</span><pre className="code out">${x.result}</pre></div>`}</div>`;
+}
+function ChatTurn({ c, idx, last, onJump, onEdit }) {
+  const { s, d, api } = useC();
+  const [open, setOpen] = useState(null);
+  if (c.kind === 'compact') return html`<div className="compact-card"><span className="row nowrap" style=${{ gap: '6px' }}><${Icon} n="Layers" size=${13} /><b>上下文已压缩</b><span className="mono">${fmtK(c.before)} → ${fmtK(c.after)} tokens</span><span className="mono" style=${{ marginLeft: 'auto' }}>${clock(c.t)}</span></span><span>此前 ${idx} 轮的回复与工具结果已合并为摘要；问诊与 HIS 状态每次重新注入，不受影响。</span></div>`;
+  const tools = c.steps.filter(x => x.kind === 'tool'); const think = c.steps.find(x => x.kind === 'think');
+  const den = tools.filter(x => x.state === 'denied').length, ap = tools.filter(x => x.state === 'approval').length;
+  const running = c.status === 'running';
+  const isOpen = open ?? (running || !!(last && (den || ap)));
+  const sugs = s.sugs.filter(g => g.turnId === c.id);
+  const lastTool = tools.at(-1);
+  const head = running ? (lastTool ? `正在执行 ${lastTool.name} · ${lastTool.subject}` : '思考中…') : `思考 ${(think?.dur || 0).toFixed(1)}s · 工具 ${tools.length}`;
+  return html`<article className="cturn" aria-label=${`第 ${idx + 1} 轮`}>
+    ${c.trigger.kind === 'doctor'
+      ? html`<div className="prompt"><span className="av">${DOCTOR.name[0]}</span><div className="grow"><div className="md">${c.trigger.text}</div></div>
+          <div className="hover-acts"><button className="ibtn xs" title="编辑后重新发送" aria-label="编辑后重新发送" onClick=${() => onEdit(c.trigger.text)}><${Icon} n="Pencil" size=${12} /></button><button className="ibtn xs" title="复制" aria-label="复制提问" onClick=${() => api.copy(c.trigger.text)}><${Icon} n="Copy" size=${12} /></button></div></div>`
+      : html`<div className="evt"><span className="line"></span><span className="evt-pill" title=${c.trigger.text}><${Icon} n=${/报告/.test(c.trigger.text) ? 'FlaskConical' : /查体/.test(c.trigger.text) ? 'Stethoscope' : /批量/.test(c.trigger.text) ? 'Layers' : 'Mic'} size=${12} />${c.trigger.text}<span className="mono">· ${clock(c.t)} · 自动</span></span><span className="line"></span></div>`}
+    <div className="reply">
+      <button className="act-h" onClick=${() => setOpen(!isOpen)} aria-expanded=${isOpen}>${running ? html`<span className="spin-i"></span>` : html`<${Icon} n="ChevronRight" size=${13} className=${'rot' + (isOpen ? ' open' : '')} />`}<span className="ellip">${head}</span>
+        ${den > 0 && html`<span className="badge warn tiny">${den} 被拦截</span>`}${ap > 0 && html`<span className="badge info tiny">${ap} 待确认</span>`}</button>
+      ${isOpen && html`<div className="steps">${c.steps.map((x, i) => x.kind === 'think' ? html`<${ThinkStep} key=${i} x=${x} t0=${c.t} />` : html`<${ToolStep} key=${i} x=${x} />`)}</div>`}
+      ${running ? html`<div className="live"><span>${s.busyText || '思考中'} · ${((s.now - c.t) / 1000).toFixed(1)}s</span><button className="btn xs" onClick=${api.stop}><${Icon} n="Square" size=${10} />停止</button></div>`
+        : c.status === 'stopped' ? html`<div className="md mf">${c.reply}</div>`
+        : html`<${Reveal} text=${c.reply} t0=${c.finishAt} cps=${48}>${(v, go) => html`<${Md} text=${v} caret=${go} />`}<//>`}
+      ${sugs.map(g => html`<div key=${g.id} className="approval"><div className="row between nowrap"><span className="row nowrap" style=${{ gap: '6px', minWidth: 0 }}><${Icon} n="Hand" size=${14} style=${{ color: 'var(--info)' }} /><b className="ellip">需要你确认 · ${g.label}</b></span><button className="lnk" onClick=${() => onJump(g.m)}>查看</button></div>
+        ${g.detail && html`<div className="xs mf">${g.detail}</div>`}
+        <div className="row"><button className="btn xs" onClick=${() => api.dismiss(g.id)}>不采用</button><button className="btn xs primary" onClick=${() => api.accept(g.id)}>采纳</button></div></div>`)}
+      ${!running && html`<div className="turn-foot">
+        ${c.usage && html`<span className="usage" title="输入 / 输出 tokens · 耗时 · 轮次">↑${fmtK(c.usage.in)} ↓${c.usage.out} · ${(c.dur || 0).toFixed(1)}s · #${idx + 1}</span>`}
+        <span className="acts">
+          <button className="ibtn xs" title="复制回复" aria-label="复制回复" onClick=${() => api.copy(c.reply)}><${Icon} n="Copy" size=${13} /></button>
+          ${c.trigger.kind === 'doctor' && html`<button className="ibtn xs" title="重新生成" aria-label="重新生成" onClick=${() => api.askCopilot(c.trigger.text)}><${Icon} n="RefreshCw" size=${13} /></button>`}
+          <button className=${'ibtn xs' + (c.fb === 'up' ? ' on' : '')} title="有帮助" aria-label="有帮助" aria-pressed=${c.fb === 'up'} onClick=${() => d({ type: 'FEEDBACK', id: c.id, v: 'up' })}><${Icon} n="ThumbsUp" size=${13} /></button>
+          <button className=${'ibtn xs' + (c.fb === 'down' ? ' on' : '')} title="没帮助" aria-label="没帮助" aria-pressed=${c.fb === 'down'} onClick=${() => d({ type: 'FEEDBACK', id: c.id, v: 'down' })}><${Icon} n="ThumbsDown" size=${13} /></button>
+        </span></div>`}
+    </div>
+  </article>`;
+}
+function mentionables(s) {
+  return [
+    ...s.inv.filter(i => i.st === 'released').map(i => ({ label: invOf(i.key).name, kind: '报告', ic: 'FlaskConical' })),
+    ...SECTIONS.filter(x => s.note[x.key].text).map(x => ({ label: '病历·' + x.name, kind: '病历', ic: 'FileText' })),
+    ...EXAMS.filter(e => s.exams[e.key]).map(e => ({ label: '查体·' + e.name, kind: '查体', ic: 'Stethoscope' })),
+    ...s.dxDraft.map(x => ({ label: '诊断·' + icd(x.code).name, kind: '诊断草稿', ic: 'ClipboardList' })),
+    ...s.rxDraft.map(x => ({ label: '处方·' + drug(x.key).name, kind: '处方草稿', ic: 'Pill' })),
+  ];
+}
+function ModelMenu() {
+  const { s, d } = useC();
+  return html`<div className="menu" style=${{ width: '270px' }}>
+    <div className="menu-h">模型</div>
+    ${MODELS.map(m => html`<button key=${m.name} className=${s.model.name === m.name ? 'on' : ''} onClick=${() => d({ type: 'MODEL', v: { name: m.name } })}>${s.model.name === m.name ? html`<${Icon} n="Check" size=${13} />` : html`<span style=${{ width: '13px' }}></span>`}<span className="grow mono xs">${m.name}</span><span className="xxs mf">${m.note}</span></button>`)}
+    <div className="menu-h">思考强度</div>
+    <div style=${{ padding: '0 8px 6px' }}><${Seg} size="xs" value=${s.model.effort} onChange=${v => d({ type: 'MODEL', v: { effort: v } })} options=${Object.entries(EFFORT)} label="思考强度" /></div>
+    <div className="menu-note">默认值来自环境变量（COPILOT_MODEL / COPILOT_THINKING）；此处仅影响本会话。</div>
+  </div>`;
+}
+function Composer({ v, setV, setTab, inputRef }) {
+  const { s, api } = useC();
+  const [mode, setMode] = useState('steer'); const [hi, setHi] = useState(0);
+  const busy = s.copilot === 'busy';
+  const total = ctxTotal(s), pct = Math.round(total / CTX_WINDOW * 1000) / 10;
+  const tok = v.match(/(?:^|\s)([\/@])([^\s]*)$/);
+  const kind = tok ? (tok[1] === '/' && v.trimStart().startsWith('/') && !v.trim().includes(' ') ? 'slash' : tok[1] === '@' ? 'mention' : null) : null;
+  const q = tok ? tok[2] : '';
+  const items = kind === 'slash' ? SLASH.filter(c => c.cmd.slice(1).startsWith(q)) : kind === 'mention' ? mentionables(s).filter(m => m.label.includes(q)) : [];
+  const submit = text => {
+    text = (text ?? v).trim(); if (!text) return;
+    if (text === '/上下文') { setTab('ctx'); setV(''); return; }
+    api.askCopilot(text, busy && mode === 'steer'); setV('');
+  };
+  const pick = it => { if (kind === 'slash') submit(it.cmd); else setV(v.replace(/@[^\s]*$/, '@' + it.label + ' ')); setHi(0); inputRef.current?.focus(); };
+  const onKey = e => {
+    if (items.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); setHi(h => (h + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length); return; }
+    if (items.length && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) { e.preventDefault(); pick(items[hi % items.length]); return; }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); }
+    if (e.key === 'Escape' && busy) api.stop();
+  };
+  useLayoutEffect(() => { const el = inputRef.current; if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(160, el.scrollHeight) + 'px'; }, [v]);
+  return html`<div className="composer">
+    ${s.runQ.length > 0 && html`<div className="queued" aria-label="排队中">${s.runQ.map((t, i) => html`<div key=${i} className="xs row nowrap"><span className="badge outline tiny">${t.kind === 'doctor' ? '排队' : '事件'}</span><span className="grow ellip">${t.text}</span></div>`)}</div>`}
+    ${items.length > 0 && html`<div className="cmdmenu" role="listbox" aria-label=${kind === 'slash' ? '命令' : '引用 HIS 对象'}>${kind === 'mention' && html`<div className="menu-h">引用 HIS 对象（助手只读）</div>`}${items.map((it, i) => html`<button key=${it.cmd || it.label} role="option" aria-selected=${i === hi % items.length} className=${i === hi % items.length ? 'on' : ''} onMouseDown=${e => { e.preventDefault(); pick(it); }}>${kind === 'slash' ? html`<b className="mono xs">${it.cmd}</b><span className="mf xs">${it.desc}</span>` : html`<${Icon} n=${it.ic} size=${13} /><span>${it.label}</span><span className="mf xxs" style=${{ marginLeft: 'auto' }}>${it.kind}</span>`}</button>`)}</div>`}
+    <div className="box">
+      <textarea id="copilot-input" ref=${inputRef} rows="2" value=${v} onInput=${e => { setV(e.target.value); setHi(0); }} onKeyDown=${onKey} placeholder=${busy ? '助手运行中：可以插话或排队…' : '问临床助手…'} aria-label="向临床助手提问"></textarea>
+      <div className="row nowrap" style=${{ gap: '4px' }}>
+        <button className="ibtn" title="引用 HIS 对象（@）" aria-label="引用 HIS 对象" onClick=${() => { setV(v + (v && !v.endsWith(' ') ? ' @' : '@')); inputRef.current?.focus(); }}><${Icon} n="AtSign" size=${15} /></button>
+        <button className="ibtn" title="命令（/）" aria-label="命令" onClick=${() => { setV('/'); inputRef.current?.focus(); }}><span className="mono" style=${{ fontSize: '14px' }}>/</span></button>
+        <${Pop} placement="top-start" trigger=${(o, set) => html`<button className="chipm" style=${{ maxWidth: busy ? '96px' : '170px', overflow: 'hidden' }} onClick=${() => set(!o)} aria-label="选择模型" title=${s.model.name + ' · 思考 ' + EFFORT[s.model.effort]}><span className="mono ellip">${s.model.name}</span> · ${EFFORT[s.model.effort]}<${Icon} n="ChevronDown" size=${12} /></button>`}>${() => html`<${ModelMenu} />`}<//>
+        <button className="chipm" onClick=${() => setTab('ctx')} title=${`${total} / ${CTX_WINDOW} tokens in context`} aria-label="查看上下文"><${Ring} pct=${pct} size=${12} />${pct}%</button>
+        <span className="grow"></span>
+        ${busy && html`<${Seg} size="xs" value=${mode} onChange=${setMode} options=${[['steer', '插话'], ['queue', '排队']]} label="运行中发送方式" /><button className="stopbtn" onClick=${api.stop} title="停止（Esc）" aria-label="停止"><${Icon} n="Square" size=${11} /></button>`}
+        <button className="send" disabled=${!v.trim()} onClick=${() => submit()} aria-label="发送"><${Icon} n="ArrowUp" size=${16} /></button>
+      </div>
+    </div>
+    <div className="hint">${busy ? (mode === 'steer' ? '插话：助手在下一步之前读取' : '排队：本轮结束后处理') : html`<kbd>Enter</kbd> 发送 · <kbd>Shift+Enter</kbd> 换行 · <kbd>/</kbd> 命令 · <kbd>@</kbd> 引用`}</div>
+  </div>`;
+}
+function ContextView() {
+  const { s, api } = useC();
+  const parts = ctxParts(s); const total = parts.reduce((a, c) => a + c.tok, 0);
+  const prev = s.ctxReq.at(-2)?.parts;
+  const pct = x => x / CTX_WINDOW * 100;
+  const maxT = Math.max(...s.ctxReq.map(r => r.parts.reduce((a, c) => a + c.tok, 0)), 1);
+  return html`<div className="ctx">
+    <div className="row between"><div className="row nowrap" style=${{ gap: '10px' }}><${Ring} pct=${pct(total)} size=${36} /><div><div style=${{ fontSize: '18px', fontWeight: 600 }} className="num">${fmtK(total)} <span className="mf" style=${{ fontSize: '13px', fontWeight: 400 }}>/ 128k</span></div><div className="xs mf">${pct(total).toFixed(1)}% · 估算值 · 预留压缩与输出 ${fmtK(CTX_RESERVE)}</div></div></div>
+      <button className="btn xs" onClick=${api.compact} disabled=${s.copilot === 'busy'}><${Icon} n="Layers" size=${13} />压缩</button></div>
+    <div className="stackbar" role="img" aria-label="上下文构成">${parts.map(c => c.tok > 0 && html`<span key=${c.k} style=${{ width: pct(c.tok) + '%', background: c.color }} title=${`${c.name} ${c.tok}`}></span>`)}<span className="free"></span><span className="reserve" style=${{ width: pct(CTX_RESERVE) + '%' }} title="自动压缩与输出预留"></span></div>
+    <table className="tbl"><tbody>${parts.map(c => { const p = prev?.find(x => x.k === c.k)?.tok ?? c.tok; const dlt = c.tok - p; return html`<tr key=${c.k}>
+      <td><span className="row nowrap" style=${{ gap: 0 }}><span className="sw" style=${{ background: c.color }}></span>${c.name}</span></td><td className="num" style=${{ textAlign: 'right' }}>${fmtK(c.tok)}</td><td className="num mf" style=${{ textAlign: 'right' }}>${(c.tok / total * 100).toFixed(0)}%</td>
+      <td style=${{ textAlign: 'right' }}>${dlt > 0 ? html`<span className="badge info tiny num">+${fmtK(dlt)}</span>` : dlt < 0 ? html`<span className="badge ok tiny num">${fmtK(dlt)}</span>` : ''}</td></tr>`; })}</tbody></table>
+    <div className="iso"><${Icon} n="ShieldCheck" size=${15} style=${{ color: 'var(--success)', marginTop: '1px' }} /><span><b>Case Truth · 0 tokens · 已隔离</b><span className="mf"> — 隐藏诊断与未开立检查的结果不在上下文中，也没有能读取它们的工具（ADR-0002）。</span></span></div>
+    <div><h4 className="xs mf" style=${{ margin: '4px 0 6px', fontWeight: 500 }}>上下文时间线 · 每次请求</h4>
+      <div className="tl">${s.ctxReq.map((r, i) => { const t = r.parts.reduce((a, c) => a + c.tok, 0); return html`<div key=${i} className=${'tlbar' + (r.cmp ? ' cmp' : '')} title=${`#${i + 1} ${r.label} · ${t} tokens`} style=${{ height: (t / maxT * 100) + '%' }}>${r.parts.map(c => c.tok > 0 && html`<span key=${c.k} style=${{ flex: c.tok, background: c.color, display: 'block' }}></span>`)}</div>`; })}</div>
+      <div className="xxs mf row between nowrap"><span>#1</span><span className="ellip">${s.ctxReq.length} 次请求 · 最近：${s.ctxReq.at(-1)?.label}</span></div></div>
+    <div><h4 className="xs mf" style=${{ margin: '4px 0 6px', fontWeight: 500 }}>上下文浏览</h4>
+      ${parts.map(c => html`<details key=${c.k} className="cb"><summary><span className="sw" style=${{ background: c.color }}></span>${c.name}<span className="mf num xs" style=${{ marginLeft: 'auto' }}>${c.items.length} 项 · ${fmtK(c.tok)}</span></summary>
+        <ul>${c.items.map((it, i) => html`<li key=${i}><span className=${it[1] === 0 ? 'mf' : ''}>${it[0]}</span><span className="num mf">${it[1]}</span></li>`)}</ul></details>`)}
+    </div>
+    <div className="xxs mf">估算：1 token ≈ 0.74 个汉字。每轮回复下方的 ↑↓ 为提供商回报值。</div>
+  </div>`;
+}
+function AgentPanel({ onClose, onJump, inputRef }) {
+  const { s, d, api } = useC();
+  const [tab, setTab] = useState('chat');
+  const [v, setV] = useState('');
+  const st = useStick(tab, tab === 'chat');
+  const total = ctxTotal(s), pct = Math.round(total / CTX_WINDOW * 1000) / 10;
+  useEffect(() => { if (s.unread) d({ type: 'READ' }); }, [s.unread]);
+  const dl = s.debounce ? Math.max(0, (s.debounce.until - s.now) / 1000) : 0;
+  return html`<aside className="card pane agent" aria-label="临床助手" data-agent=${s.copilot === 'busy' ? 'active' : 'idle'}>
+    <div className="pane-h">
+      <div className="row nowrap" style=${{ gap: '8px', minWidth: 0 }}><span className="agent-logo"><${Icon} n="Sparkles" size=${15} /></span><div style=${{ minWidth: 0 }}><h3>临床助手</h3><div className="xxs mf mono ellip">pi-durable · copilot/${PATIENT.opNo} · 检查点 #${s.checkpoint}</div></div></div>
+      <div className="row nowrap" style=${{ gap: '2px' }}>
+        <span className="asr" title=${s.conn === 'connected' ? 'WebSocket 已连接' : '连接中断，正在重连'}>${s.conn === 'connected' ? html`<span className="dot ok"></span>` : html`<span className="spin-i"></span>重连中`}</span>
+        <label className="row nowrap xs" style=${{ gap: '5px', margin: '0 6px', cursor: 'pointer' }} title="自动分析问诊、查体与报告事件"><button className=${'switch' + (s.auto ? ' on' : '')} role="switch" aria-checked=${s.auto} aria-label="自动分析" onClick=${() => d({ type: 'AUTO' })}></button><span className="mf" style=${{ whiteSpace: 'nowrap' }}>自动</span></label>
+        <${Pop} placement="bottom-end" trigger=${(o, set) => html`<button className="ibtn" onClick=${() => set(!o)} aria-label="更多操作" title="更多操作"><${Icon} n="Ellipsis" /></button>`}>${close => html`<div className="menu" style=${{ width: '240px' }}>
+          <button onClick=${() => { setTab('ctx'); close(); }}><${Icon} n="Gauge" size=${14} />查看上下文</button>
+          <button onClick=${() => { api.compact(); close(); }}><${Icon} n="Layers" size=${14} />压缩上下文</button>
+          <button onClick=${() => { api.copy('copilot/' + PATIENT.opNo, '已复制会话 ID'); close(); }}><${Icon} n="Copy" size=${14} />复制会话 ID</button>
+          <div className="menu-note">每次就诊一个 pi-durable 会话；刷新或断线后从最近检查点恢复。助手只能写草稿。</div></div>`}<//>
+        <button className="ibtn" onClick=${onClose} aria-label="收起临床助手" title="收起临床助手"><${Icon} n="PanelRightClose" /></button>
+      </div>
+    </div>
+    <div className="atabs" role="tablist"><button role="tab" aria-selected=${tab === 'chat'} className=${tab === 'chat' ? 'on' : ''} onClick=${() => setTab('chat')}>会话</button>
+      <button role="tab" aria-selected=${tab === 'ctx'} className=${tab === 'ctx' ? 'on' : ''} onClick=${() => setTab('ctx')}>上下文 <span className="mf num xs">${pct}%</span></button></div>
+    <div className="pane-b" ref=${st.box} onScroll=${st.onScroll}>
+      <div ref=${st.inner}>
+        ${tab === 'chat' ? html`<div className="chat">
+          <div className="chat-intro">助手在后台观察问诊、查体与报告，只写草稿；诊断、检查、处方、签署等正式操作需要你本人确认。</div>
+          ${s.chat.map((c, i) => html`<${ChatTurn} key=${c.id} c=${c} idx=${i} last=${i === s.chat.length - 1} onJump=${onJump} onEdit=${t => { setV(t); inputRef.current?.focus(); }} />`)}
+          ${s.debounce && html`<div className="evt"><span className="line"></span><span className="evt-pill"><${Icon} n="Timer" size=${12} />${s.debounce.label} · ${dl.toFixed(1)}s 后分析</span><button className="lnk" onClick=${() => api.flushDebounce(true)}>立即</button><button className="lnk" onClick=${() => api.flushDebounce(false)}>跳过</button><span className="line"></span></div>`}
+          ${!s.auto && html`<div className="approval" style=${{ borderStyle: 'dashed' }}><div className="row between"><span className="xs"><b>自动分析已关闭</b> · ${s.pendingEvents.length} 个事件待分析</span><button className="btn xs" disabled=${!s.pendingEvents.length} onClick=${api.runPending}>立即分析</button></div>${s.pendingEvents.length > 0 && html`<div className="xxs mf">${s.pendingEvents.map(e => e.text).join(' · ')}</div>`}</div>`}
+        </div>` : html`<${ContextView} />`}
+      </div>
+      ${!st.pinned && tab === 'chat' && html`<button className="jump" onClick=${st.toBottom}><${Icon} n="ArrowDown" size=${13} />回到最新</button>`}
+    </div>
+    <${Composer} v=${v} setV=${setV} setTab=${setTab} inputRef=${inputRef} />
+    <div className="statusline"><span>上下文 ${fmtK(total)}/128k</span><span>缓存 ${Math.min(96, 58 + s.chat.length * 3)}%</span><span>本次就诊 ¥${(s.chat.length * 0.0021).toFixed(4)}</span></div>
+  </aside>`;
+}
+
+/* ================= layout ================= */
+function Splitter({ value, set, min, max, dir, reset, label, cls = '' }) {
+  const [drag, setDrag] = useState(false);
+  const start = useRef(null);
+  const clamp = v => Math.round(Math.max(min, Math.min(max, v)));
+  const end = () => { start.current = null; setDrag(false); document.body.classList.remove('resizing'); };
+  return html`<div className=${'splitter ' + cls + (drag ? ' drag' : '')} role="separator" aria-orientation="vertical" aria-label=${label} aria-valuenow=${value} aria-valuemin=${min} aria-valuemax=${max} tabIndex="0" title=${label + '（拖动调整，双击复位，方向键微调）'}
+    onPointerDown=${e => { if (e.button !== 0) return; e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); start.current = { x: e.clientX, v: value, sc: getScale() }; setDrag(true); document.body.classList.add('resizing'); }}
+    onPointerMove=${e => { const S = start.current; if (S) set(clamp(S.v + dir * (e.clientX - S.x) / S.sc)); }}
+    onPointerUp=${end} onPointerCancel=${end} onDoubleClick=${() => set(reset)}
+    onKeyDown=${e => { if (e.key === 'ArrowLeft') { e.preventDefault(); set(clamp(value - dir * 16)); } else if (e.key === 'ArrowRight') { e.preventDefault(); set(clamp(value + dir * 16)); } else if (e.key === 'Home') { e.preventDefault(); set(dir > 0 ? min : max); } else if (e.key === 'End') { e.preventDefault(); set(dir > 0 ? max : min); } }}>
+    <span className="grip"><${Icon} n="GripVertical" size=${10} /></span>
+    ${drag && html`<span className="size-tip">${value}px</span>`}
+  </div>`;
+}
+function Workbench() {
+  const { s, d, api } = useC();
+  const [tab, setTab] = useState('note');
+  const [ai, setAi] = usePersist('cm.ai', true);
+  const [wc, setWc] = usePersist('cm.wc', 340);
+  const [wa, setWa] = usePersist('cm.wa', 420);
+  const [cc, setCc] = usePersist('cm.cc', false);
+  const inputRef = useRef(null);
+  useEffect(() => {
+    const field = el => el && el.closest && el.closest('input, textarea, select, [contenteditable="true"]');
+    const down = e => {
+      const st = api.get();
+      if (e.code === 'Space' && st.voice.mode === 'ptt' && !field(e.target) && !e.target.closest?.('.floating')) { e.preventDefault(); if (!e.repeat) api.pttDown(); return; }
+      if ((e.key === 'm' || e.key === 'M') && !field(e.target) && !e.ctrlKey && !e.metaKey && !e.altKey && st.voice.mode === 'continuous') { api.toggleMic(); return; }
+      if (e.altKey && /^[1-4]$/.test(e.key)) { e.preventDefault(); setTab(TABS[+e.key - 1].k); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') { e.preventDefault(); setAi(true); setTimeout(() => inputRef.current?.focus(), 30); return; }
+      if (e.key === 'Escape' && st.copilot === 'busy' && !field(e.target)) api.stop();
+    };
+    const up = e => { if (e.code === 'Space' && api.get().voice.mode === 'ptt' && !field(e.target)) { e.preventDefault(); api.pttUp(false); } };
+    addEventListener('keydown', down); addEventListener('keyup', up);
+    return () => { removeEventListener('keydown', down); removeEventListener('keyup', up); };
+  }, []);
+  const Tab = { note: NoteTab, inv: InvTab, dx: DxTab, rx: RxTab }[tab];
+  const jump = k => setTab(['note', 'inv', 'dx', 'rx'].includes(k) ? k : 'note');
+  return html`<div className="app">
+    <${TopBar} ai=${ai} setAi=${setAi} />
+    ${s.status === 'abandoned' && html`<div className="paused-bar" style=${{ justifyContent: 'center' }}>本次就诊已放弃：写入冻结，病例真值未解锁。<button className="btn xs" onClick=${() => d({ type: 'RESET' })}>开始新的就诊</button></div>`}
+    <div className=${'wb' + (ai ? '' : ' noai')} style=${{ '--wc': (cc ? 48 : wc) + 'px', '--wa': wa + 'px' }}>
+      <${QueueRail} />
+      <${ConsultColumn} collapsed=${cc} setCollapsed=${setCc} />
+      ${cc ? html`<div></div>` : html`<${Splitter} value=${wc} set=${setWc} min=${260} max=${560} dir=${1} reset=${340} label="调整问诊记录宽度" />`}
+      <main className="card main" aria-label="病例工作区">
+        <${PatientBanner} onJump=${jump} />
+        <${WorkspaceTabs} tab=${tab} setTab=${setTab} />
+        <div className="panel"><${Tab} /></div>
+        <${ActionBar} onJump=${jump} />
+      </main>
+      ${ai && html`<${Splitter} cls="agent-split" value=${wa} set=${setWa} min=${340} max=${680} dir=${-1} reset=${420} label="调整临床助手宽度" />`}
+      ${ai && html`<${AgentPanel} onClose=${() => setAi(false)} onJump=${jump} inputRef=${inputRef} />`}
+    </div>
+  </div>`;
+}
+
+/* ================= overlays + app ================= */
+function ConfirmDialog({ c, close }) {
+  useEffect(() => { if (!c) return; const k = e => { if (e.key === 'Escape') close(); }; addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [c]);
+  if (!c) return null;
+  return html`<div className="scrim" onMouseDown=${close}><div className="dialog" role="alertdialog" aria-modal="true" aria-labelledby="cm-t" onMouseDown=${e => e.stopPropagation()}>
+    <div className="xxs mf" style=${{ letterSpacing: '.04em' }}>CLINICAL CONFIRMATION · 医生本人确认</div>
+    <h3 id="cm-t" style=${{ fontSize: '16px' }}>${c.title}</h3>
+    <ul style=${{ margin: 0, paddingLeft: '18px', fontSize: '14px', display: 'flex', flexDirection: 'column', gap: '3px' }}>${c.lines.map((l, i) => html`<li key=${i}>${l}</li>`)}</ul>
+    <p className="xs mf">此按钮带 <code className="mono">data-agent-confirm</code>，助手无法代为点击；确认后由服务端原子校验并记录 practitionerId（${DOCTOR.name}）。</p>
+    <div className="row" style=${{ justifyContent: 'flex-end' }}><button className="btn sm" onClick=${close} autoFocus>返回</button>
+      <button className="btn sm primary" style=${c.danger ? { background: 'var(--destructive)', borderColor: 'var(--destructive)', color: 'var(--card)' } : null} onClick=${() => { c.onOk(); close(); }}>${c.okLabel || '确认'}</button></div>
+  </div></div>`;
+}
+function Debrief() {
+  const { s, d } = useC();
+  const last = s.dxRevs.at(-1);
+  const rows = [
+    ['主诊断', last ? last.items.filter(i => i.primary).map(i => `${i.code} ${icd(i.code).name}`).join('') : '—', 'J18.9 社区获得性肺炎（右下叶）'],
+    ['次诊断', last ? last.items.filter(i => !i.primary).map(i => icd(i.code).name).join('、') || '—' : '—', '原发性高血压；青霉素过敏个人史'],
+    ['关键检查', s.inv.filter(i => i.st === 'released').map(i => invOf(i.key).name).join('、') || '—', '血常规、CRP、胸部 X 线（PCT 可选）'],
+    ['肺部查体', s.exams.lung ? '已查：右下肺湿啰音' : '未查', '右下肺呼吸音减低伴湿啰音'],
+    ['用药结论', s.noMed ? '无需用药' : s.rxIssued.map(r => drug(r.key).name).join('、') || '—', '莫西沙星或多西环素；避开青霉素类'],
+    ['过敏史问诊', s.used[4] ? '已问到' : '未在问诊中追问', '青霉素过敏性休克'],
+    ['吸烟史', s.used[6] ? '已问到' : '未问', '吸烟 30 年'],
+    ['严重度评估', /CURB/.test(s.noteRevs.at(-1)?.snap.assess || '') ? '病历记录了 CURB-65' : '病历未记录', 'CURB-65 0 分，可门诊治疗'],
+  ];
+  return html`<div className="scrim"><div className="dialog wide" role="dialog" aria-modal="true" aria-labelledby="db-t">
+    <div className="row between"><h3 id="db-t" style=${{ fontSize: '18px' }}>病例复盘 · ${PATIENT.name}</h3><span className="badge ok">已完诊 · ${clock(s.completedAt)} · 用时 ${fmtDur(s.completedAt - s.startedAt)} · 只读</span></div>
+    <p className="xs mf">逐项并排对照本次正式记录与 Golden Case 参考，不打分。</p>
+    <div className="tblwrap"><table className="tbl"><thead><tr><th>项目</th><th>本次正式记录</th><th>Golden 参考</th></tr></thead>
+      <tbody>${rows.map(r => html`<tr key=${r[0]}>${r.map((c, i) => html`<td key=${i} style=${i === 0 ? { fontWeight: 500 } : null}>${c}</td>`)}</tr>`)}</tbody></table></div>
+    <div className="row" style=${{ justifyContent: 'flex-end' }}><button className="btn sm primary" onClick=${() => d({ type: 'RESET' })}>为同一病例开始新的就诊</button></div>
+  </div></div>`;
+}
+function App() {
+  const rt = useRuntime();
+  const [dev, setDev] = useState(false);
+  const { s, d, api } = rt;
+  return html`<${Ctx.Provider} value=${rt}>
+    <${Workbench} />
+    ${s.toast && html`<div className=${'toast ' + (s.toast.kind === 'crit' ? 'crit' : '')} role="status"><span>${s.toast.text}</span>${s.toast.undo && html`<button className="lnk" onClick=${() => { d(s.toast.undo); d({ type: 'TOAST_CLEAR' }); }}><${Icon} n="Undo2" size=${12} />撤销</button>`}</div>`}
+    <${ConfirmDialog} c=${rt.confirm} close=${() => rt.setConfirm(null)} />
+    ${s.status === 'completed' && html`<${Debrief} />`}
+    ${dev && html`<div className="devpanel" aria-label="原型控制台">
+      <b>原型控制台（不属于设计）</b>
+      <div className="row" style=${{ gap: '6px' }}><button onClick=${api.releaseAll}>已开立检查立即出报告</button><button onClick=${api.amendFirst}>发布一份更正报告</button></div>
+      <div className="row" style=${{ gap: '6px' }}><button onClick=${() => d({ type: 'FAILNEXT' })}>下一问患者超时：${s.failNext ? '开' : '关'}</button><button onClick=${api.disconnect}>模拟断线重连</button></div>
+      <div className="row" style=${{ gap: '6px' }}><button onClick=${() => d({ type: 'RESET' })}>重置病例</button><button onClick=${() => { ['cm.wc', 'cm.wa', 'cm.cc', 'cm.ai'].forEach(k => { try { localStorage.removeItem(k); } catch {} }); location.reload(); }}>重置布局</button></div>
+      <div style=${{ color: '#aaa' }}>完诊 ${gates(s).map(g => (g.ok ? '●' : '○')).join(' ')} · 草稿 检查${s.inv.filter(i => i.st === 'draft').length}/诊断${s.dxDraft.length}/处方${s.rxDraft.length} · 待确认 ${s.sugs.length} · 上下文 ${fmtK(ctxTotal(s))}</div>
+    </div>`}
+    <button className="devbtn" onClick=${() => setDev(!dev)} aria-expanded=${dev}>原型控制台</button>
+  <//>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+</script>
+</body>
+</html>
