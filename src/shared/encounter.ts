@@ -103,6 +103,8 @@ export type AuditEventType =
   | 'investigation-issued'
   | 'investigation-released-instantly'
   | 'report-acknowledged'
+  | 'consultation-question-asked'
+  | 'patient-reply-retried'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -130,6 +132,9 @@ export type EncounterErrorCode =
   | 'report-not-found'
   | 'report-superseded'
   | 'report-already-acknowledged'
+  | 'consultation-turn-not-found'
+  | 'patient-turn-pending'
+  | 'patient-turn-not-retryable'
 
 export interface EncounterError {
   code: EncounterErrorCode

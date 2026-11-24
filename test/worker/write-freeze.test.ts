@@ -4,6 +4,7 @@ import type { AuditEventsResponse, EncounterResponse, ErrorResponse } from '../.
 import type { InvestigationsResponse } from '../../src/shared/investigation'
 import type { PhysicalExaminationsResponse } from '../../src/shared/physical-examination'
 import { app } from '../../src/worker/app'
+import { asked, settled, transcript } from './support/clinic'
 
 const api = (path: string, init?: RequestInit) => exports.default.fetch(`http://clinmesh.test${path}`, init)
 const send = (method: string, path: string, body?: unknown) =>
@@ -17,6 +18,7 @@ interface FrozenEncounter {
   encounterId: string
   pendingInvestigationId: string
   releasedReportId: string
+  failedPatientTurnId: string
 }
 
 // Every command that writes to one Encounter, each with a request that would succeed on an active Encounter.
@@ -31,9 +33,14 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
     send('POST', `/api/encounters/${encounterId}/investigations/${pendingInvestigationId}/instant-release`),
   'POST /api/encounters/:encounterId/report-acknowledgements': ({ encounterId, releasedReportId }) =>
     send('POST', `/api/encounters/${encounterId}/report-acknowledgements`, { reportIds: [releasedReportId] }),
+  'POST /api/encounters/:encounterId/consultation/doctor-turns': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/consultation/doctor-turns`, { clientTurnId: 'frozen', text: '还有哪里不舒服？' }),
+  'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry': ({ encounterId, failedPatientTurnId }) =>
+    send('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/retry`),
 }
 
-// An Encounter with one released, unacknowledged Report and one pending Investigation, then abandoned.
+// An Encounter with one released, unacknowledged Report, one pending Investigation and one failed patient reply
+// (no model is configured, so it fails, and a failed reply is what a retry is asked of), then abandoned.
 async function frozenEncounter(): Promise<FrozenEncounter> {
   const started = await send('POST', '/api/encounters', { caseId: 'golden-case-01' })
   const { encounterId } = ((await started.json()) as EncounterResponse).encounter
@@ -41,8 +48,14 @@ async function frozenEncounter(): Promise<FrozenEncounter> {
   const [cbc, crp] = ((await issued.json()) as InvestigationsResponse).investigations
   const released = await send('POST', `/api/encounters/${encounterId}/investigations/${cbc.investigationId}/instant-release`)
   const [cbcReleased] = ((await released.json()) as InvestigationsResponse).investigations
+  const failed = await settled(encounterId, (await asked(encounterId, '您哪里不舒服？')).patientTurn.turnId)
   await send('POST', `/api/encounters/${encounterId}/abandonment`)
-  return { encounterId, pendingInvestigationId: crp.investigationId, releasedReportId: cbcReleased.reports[0].reportId }
+  return {
+    encounterId,
+    pendingInvestigationId: crp.investigationId,
+    releasedReportId: cbcReleased.reports[0].reportId,
+    failedPatientTurnId: failed.turnId,
+  }
 }
 
 const isEncounterWrite = (route: { method: string; path: string }) =>
@@ -65,6 +78,7 @@ describe('frozen Encounters', () => {
         .examinations,
       investigations: ((await (await api(`/api/encounters/${encounterId}/investigations`)).json()) as InvestigationsResponse)
         .investigations,
+      consultation: await transcript(encounterId),
     })
     const frozen = await read()
     expect(frozen.encounter.status).toBe('abandoned')

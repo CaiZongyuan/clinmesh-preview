@@ -1,3 +1,5 @@
+import { applyMigrations } from './sqlite-migrations'
+
 // Append-only: each entry runs once per workspace, in order, recorded in schema_migration.
 const MIGRATIONS: readonly string[] = [
   // Tables made before migrations were tracked held only case-pack data, which reconcile restores, so rebuild.
@@ -70,13 +72,32 @@ const MIGRATIONS: readonly string[] = [
      practitioner_id TEXT NOT NULL,
      acknowledged_at TEXT NOT NULL
    );`,
+  // The Consultation: doctor utterances and Simulated Patient replies in strict order. A patient turn is one
+  // reply attempt to a doctor turn; a failed attempt stays and a retry appends the next one. The partial unique
+  // index makes "one pending patient turn per Encounter" a storage invariant too.
+  `CREATE TABLE consultation_turn (
+     turn_id TEXT PRIMARY KEY,
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     seq INTEGER NOT NULL,
+     speaker TEXT NOT NULL CHECK (speaker IN ('doctor', 'patient')),
+     source TEXT NOT NULL,
+     attribution TEXT NOT NULL,
+     text TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('final', 'pending', 'failed')),
+     reply_to TEXT REFERENCES consultation_turn (turn_id),
+     attempt INTEGER NOT NULL DEFAULT 1,
+     client_turn_id TEXT,
+     practitioner_id TEXT,
+     created_at TEXT NOT NULL,
+     settled_at TEXT,
+     deadline_at TEXT,
+     failure_reason TEXT,
+     UNIQUE (encounter_id, seq),
+     UNIQUE (encounter_id, client_turn_id)
+   );
+   CREATE UNIQUE INDEX consultation_single_pending ON consultation_turn (encounter_id) WHERE status = 'pending';`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {
-  sql.exec('CREATE TABLE IF NOT EXISTS schema_migration (version INTEGER PRIMARY KEY)')
-  const applied = sql.exec<{ version: number | null }>('SELECT max(version) AS version FROM schema_migration').one().version ?? 0
-  MIGRATIONS.slice(applied).forEach((migration, index) => {
-    sql.exec(migration)
-    sql.exec('INSERT INTO schema_migration (version) VALUES (?)', applied + index + 1)
-  })
+  applyMigrations(sql, 'schema_migration', MIGRATIONS)
 }

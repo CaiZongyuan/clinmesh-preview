@@ -6,7 +6,15 @@ export default defineConfig({
   test: {
     projects: [
       {
-        plugins: [cloudflareTest({ wrangler: { configPath: './wrangler.jsonc' } })],
+        plugins: [
+          cloudflareTest({
+            wrangler: { configPath: './wrangler.jsonc' },
+            // Tests drive the agents with a scripted LLM provider and short patient-turn deadlines.
+            miniflare: {
+              bindings: { LLM_PROVIDER: 'scripted', PATIENT_TURN_TIMEOUT_MS: '1500', PATIENT_TURN_EXPIRY_GRACE_MS: '400' },
+            },
+          }),
+        ],
         test: {
           name: 'worker',
           include: ['test/worker/**/*.test.ts'],

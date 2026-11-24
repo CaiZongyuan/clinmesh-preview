@@ -6,6 +6,7 @@ import {
   type ResizableStorage,
 } from '@ui-sdk/react/resizable'
 import { useState, type MouseEvent, type ReactNode } from 'react'
+import { useConsultation } from '../consultation/use-consultation'
 import { ConsultationColumn, ConsultationStrip, type EncounterContext } from './consultation-column'
 import { CopilotPanel } from './copilot-panel'
 
@@ -32,6 +33,8 @@ const browserLayoutStorage: ResizableStorage = {
 
 export function WorkbenchColumns({ caseWorkspace, encounter }: { caseWorkspace: ReactNode; encounter?: EncounterContext }) {
   const [columns] = useState(createResizableController)
+  // Lives above the column so the collapsed strip still knows when the patient is answering.
+  const consultation = useConsultation(encounter?.encounter.encounterId ?? null)
 
   const resetConsultation = (event: MouseEvent) => {
     event.preventDefault()
@@ -61,9 +64,13 @@ export function WorkbenchColumns({ caseWorkspace, encounter }: { caseWorkspace: 
       >
         {({ collapsed }) =>
           collapsed ? (
-            <ConsultationStrip onExpand={() => columns.expand(CONSULTATION.id)} />
+            <ConsultationStrip consultation={consultation} onExpand={() => columns.expand(CONSULTATION.id)} />
           ) : (
-            <ConsultationColumn encounter={encounter} onCollapse={() => columns.collapse(CONSULTATION.id)} />
+            <ConsultationColumn
+              encounter={encounter}
+              consultation={consultation}
+              onCollapse={() => columns.collapse(CONSULTATION.id)}
+            />
           )
         }
       </ResizablePanel>

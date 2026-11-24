@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import type { AskPatientResponse, ConsultationResponse, RetryPatientTurnResponse } from '../shared/consultation'
 import type {
   ActiveEncounterResponse,
   AuditEventsResponse,
@@ -18,7 +19,7 @@ import {
 import type { InvestigationCatalogResponse, InvestigationsResponse } from '../shared/investigation'
 import type { InvestigationsResult } from './investigation-repository'
 
-const WORKSPACE_NAME = 'default'
+import { WORKSPACE_NAME } from './workspace-name'
 
 const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'invalid-request': 400,
@@ -34,6 +35,9 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'report-not-found': 404,
   'report-superseded': 409,
   'report-already-acknowledged': 409,
+  'consultation-turn-not-found': 404,
+  'patient-turn-pending': 409,
+  'patient-turn-not-retryable': 409,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -131,4 +135,38 @@ app.post('/encounters/:encounterId/report-acknowledgements', async (c) => {
     return refuse(c, { code: 'invalid-request', message: '请求体须为 { "reportIds": string[] }，且不重复、不为空' })
   }
   return investigationsOr(c, await workspace(c).acknowledgeReports(c.req.param('encounterId'), reportIds))
+})
+
+app.get('/encounters/:encounterId/consultation', async (c) => {
+  const result = await workspace(c).getConsultation(c.req.param('encounterId'))
+  return result.ok ? c.json<ConsultationResponse>({ turns: result.turns }) : refuse(c, result.error)
+})
+
+app.post('/encounters/:encounterId/consultation/doctor-turns', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { clientTurnId?: unknown; text?: unknown } | null
+  if (typeof body?.clientTurnId !== 'string' || typeof body.text !== 'string') {
+    return refuse(c, { code: 'invalid-request', message: '请求体须为 { "clientTurnId": string, "text": string }' })
+  }
+  const result = await workspace(c).askPatient(c.req.param('encounterId'), {
+    clientTurnId: body.clientTurnId,
+    text: body.text,
+  })
+  if (!result.ok) return refuse(c, result.error)
+  return c.json<AskPatientResponse>({ doctorTurn: result.doctorTurn, patientTurn: result.patientTurn }, 201)
+})
+
+app.post('/encounters/:encounterId/consultation/patient-turns/:turnId/retry', async (c) => {
+  const result = await workspace(c).retryPatientTurn(c.req.param('encounterId'), c.req.param('turnId'))
+  return result.ok ? c.json<RetryPatientTurnResponse>({ patientTurn: result.patientTurn }, 201) : refuse(c, result.error)
+})
+
+// Streams the Simulated Patient's replies for one Encounter (see src/shared/agent-wire.ts).
+app.get('/encounters/:encounterId/patient/socket', async (c) => {
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json<ErrorResponse>({ error: { code: 'invalid-request', message: '需要 WebSocket 升级请求' } }, 426)
+  }
+  const encounterId = c.req.param('encounterId')
+  const found = await workspace(c).getEncounter(encounterId)
+  if (!found.ok) return refuse(c, found.error)
+  return c.env.SIMULATED_PATIENT.getByName(encounterId).fetch(c.req.raw)
 })

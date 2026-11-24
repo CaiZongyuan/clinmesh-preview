@@ -1,3 +1,5 @@
+import type { AgentEvent, ClientMessage, ServerMessage } from '../../src/shared/agent-wire'
+import type { ConsultationTurn, PatientTurnFailure } from '../../src/shared/consultation'
 import type { EncounterError, EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
 import { BODY_SYSTEM_NAME, isBodySystem, type PhysicalExaminationView } from '../../src/shared/physical-examination'
@@ -18,6 +20,9 @@ const STATUS: Record<EncounterError['code'], number> = {
   'encounter-not-active': 409,
   'body-system-already-examined': 409,
   'case-version-retired': 409,
+  'consultation-turn-not-found': 404,
+  'patient-turn-pending': 409,
+  'patient-turn-not-retryable': 409,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })
@@ -33,22 +38,64 @@ export function encounterFor(overrides: Partial<EncounterView> = {}): EncounterV
   }
 }
 
-// Stands in for the Worker at the fetch boundary, following the HTTP contract the Worker seam tests pin down.
 export function examinationFor(system: keyof typeof goldenCase1Findings, examinedAt = new Date().toISOString()): PhysicalExaminationView {
   return { system, ...goldenCase1Findings[system], practitionerId: goldenCase1Chart.practitionerId, examinedAt }
 }
 
+let turnIds = 0
+export function turnFor(overrides: Partial<ConsultationTurn> & Pick<ConsultationTurn, 'seq' | 'speaker'>): ConsultationTurn {
+  const doctor = overrides.speaker === 'doctor'
+  return {
+    turnId: `turn-${++turnIds}`,
+    source: doctor ? 'typed' : 'simulated',
+    attribution: doctor ? 'workbench-input' : 'simulated-patient',
+    text: '',
+    status: 'final',
+    replyTo: null,
+    attempt: 1,
+    createdAt: '2026-11-24T00:41:05.000Z',
+    settledAt: '2026-11-24T00:41:06.000Z',
+    deadlineAt: null,
+    failure: null,
+    ...overrides,
+  }
+}
+
+// A socket that never connects: the default for tests that don't exercise the patient stream.
+export class SilentWebSocket {
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onclose: (() => void) | null = null
+  send() {}
+  close() {}
+}
+
+// Stands in for the Worker at the fetch and WebSocket boundaries, following the HTTP and socket contracts the
+// Worker seam tests pin down. `patient` plays the Simulated Patient.
 export function createFakeClinicApi({
   encounters = [] as EncounterView[],
   examinations = {} as Record<string, PhysicalExaminationView[]>,
+  consultations = {} as Record<string, ConsultationTurn[]>,
 } = {}) {
-  const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0 }
+  const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
+  const turns = new Map(Object.entries(consultations).map(([id, list]) => [id, [...list]]))
+  const log: { encounterId: string; seq: number; event: AgentEvent }[] = []
+  const runOf = new Map<string, string>()
+  const sockets = new Set<FakePatientSocket>()
   const active = () => state.encounters.find((e) => e.status === 'active') ?? null
   const investigations = createFakeInvestigations(refuse)
+  const turnsOf = (encounterId: string) => turns.get(encounterId) ?? turns.set(encounterId, []).get(encounterId)!
+  const pendingOf = (encounterId: string) => turnsOf(encounterId).find((t) => t.status === 'pending')
 
   const queue = (): GoldenCaseQueueEntry[] => [
     { ...goldenCase1QueueEntry, queueStatus: active()?.caseId === goldenCase1QueueEntry.caseId ? 'in-encounter' : 'waiting' },
   ]
+
+  function emit(encounterId: string, event: AgentEvent) {
+    const entry = { encounterId, seq: log.length + 1, event }
+    log.push(entry)
+    for (const socket of sockets) if (socket.encounterId === encounterId) socket.deliver(entry.seq, event)
+  }
 
   function startEncounter(caseId: string) {
     if (caseId !== goldenCase1QueueEntry.caseId) return refuse('golden-case-not-found', `找不到 Golden Case ${caseId}`)
@@ -56,6 +103,45 @@ export function createFakeClinicApi({
     const encounter = encounterFor({ encounterId: `started-${++state.started}`, startedAt: new Date().toISOString() })
     state.encounters.push(encounter)
     return Response.json({ encounter }, { status: 201 })
+  }
+
+  function replyAttempt(encounterId: string, doctorTurnId: string, attempt: number): ConsultationTurn {
+    const now = new Date()
+    const list = turnsOf(encounterId)
+    const turn = turnFor({
+      seq: list.length + 1,
+      speaker: 'patient',
+      status: 'pending',
+      replyTo: doctorTurnId,
+      attempt,
+      createdAt: now.toISOString(),
+      settledAt: null,
+      deadlineAt: new Date(now.getTime() + 30_000).toISOString(),
+    })
+    list.push(turn)
+    const runId = `run-${++state.runs}`
+    runOf.set(turn.turnId, runId)
+    emit(encounterId, { type: 'run.started', runId, ref: turn.turnId })
+    return turn
+  }
+
+  function askPatient(encounter: EncounterView, body: { clientTurnId: string; text: string }) {
+    if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
+    if (pendingOf(encounter.encounterId)) return refuse('patient-turn-pending', '患者还在回答上一个问题，请稍候再问。')
+    const list = turnsOf(encounter.encounterId)
+    const doctorTurn = turnFor({ seq: list.length + 1, speaker: 'doctor', text: body.text.trim(), createdAt: new Date().toISOString() })
+    list.push(doctorTurn)
+    const patientTurn = replyAttempt(encounter.encounterId, doctorTurn.turnId, 1)
+    return Response.json({ doctorTurn, patientTurn }, { status: 201 })
+  }
+
+  function retry(encounter: EncounterView, turnId: string) {
+    if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
+    const list = turnsOf(encounter.encounterId)
+    const turn = list.find((t) => t.turnId === turnId)
+    if (!turn) return refuse('consultation-turn-not-found', `找不到问诊记录 ${turnId}`)
+    if (turn.status !== 'failed' || turn !== list.at(-1)) return refuse('patient-turn-not-retryable', '只能重试最近一条未成功的患者回答。')
+    return Response.json({ patientTurn: replyAttempt(encounter.encounterId, turn.replyTo!, turn.attempt + 1) }, { status: 201 })
   }
 
   async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -93,14 +179,77 @@ export function createFakeClinicApi({
     const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined
     const answered = action && investigations.handle(method, encounter, action, body)
     if (answered) return answered
+    if (method === 'GET' && action === 'consultation') return Response.json({ turns: turnsOf(encounter.encounterId) })
+    if (method === 'POST' && action === 'consultation/doctor-turns') return askPatient(encounter, JSON.parse(String(init?.body)))
+    const retried = action?.match(/^consultation\/patient-turns\/([^/]+)\/retry$/)
+    if (method === 'POST' && retried) return retry(encounter, retried[1])
     throw new Error(`The fake clinic API has no route for ${method} ${path}`)
   }
 
+  function settle(encounterId: string, update: Partial<ConsultationTurn>, status: 'done' | 'failed', error: string | null) {
+    const turn = pendingOf(encounterId)
+    if (!turn) throw new Error('No patient turn is pending')
+    Object.assign(turn, { deadlineAt: null, settledAt: new Date().toISOString(), ...update })
+    emit(encounterId, { type: 'run.finished', runId: runOf.get(turn.turnId)!, ref: turn.turnId, status, error })
+  }
+
+  class FakePatientSocket {
+    onopen: (() => void) | null = null
+    onmessage: ((event: { data: string }) => void) | null = null
+    onclose: (() => void) | null = null
+    readonly encounterId: string
+    private ready = false
+    private closed = false
+
+    constructor(url: string) {
+      this.encounterId = decodeURIComponent(url.match(/\/api\/encounters\/([^/]+)\/patient\/socket$/)![1])
+      sockets.add(this)
+      setTimeout(() => !this.closed && this.onopen?.(), 0)
+    }
+
+    send(data: string) {
+      const message = JSON.parse(data) as ClientMessage
+      if (message.type !== 'hello') return
+      const mine = log.filter((entry) => entry.encounterId === this.encounterId)
+      const latest = mine.at(-1)?.seq ?? 0
+      for (const entry of mine) if (entry.seq > message.afterSeq) this.push({ type: 'event', seq: entry.seq, event: entry.event })
+      this.push({ type: 'replay.done', seq: latest })
+      this.ready = true
+    }
+
+    deliver(seq: number, event: AgentEvent) {
+      if (this.ready) this.push({ type: 'event', seq, event })
+    }
+
+    close() {
+      if (this.closed) return
+      this.closed = true
+      sockets.delete(this)
+      setTimeout(() => this.onclose?.(), 0)
+    }
+
+    private push(message: ServerMessage) {
+      setTimeout(() => !this.closed && this.onmessage?.({ data: JSON.stringify(message) }), 0)
+    }
+  }
+
+  const pendingRun = (encounterId: string) => runOf.get(pendingOf(encounterId)!.turnId)!
+
   return {
     handle,
+    WebSocket: FakePatientSocket,
     encounters: () => state.encounters,
     investigations: investigations.list,
+    turns: (encounterId: string) => turnsOf(encounterId),
     // Another browser tab starting an Encounter behind this one's back.
     startElsewhere: (caseId: string) => startEncounter(caseId),
+    openSockets: () => [...sockets],
+    patient: {
+      stream: (encounterId: string, text: string) => emit(encounterId, { type: 'text.delta', runId: pendingRun(encounterId), text }),
+      answer: (encounterId: string, text: string) => settle(encounterId, { status: 'final', text }, 'done', null),
+      fail: (encounterId: string, failure: PatientTurnFailure) => settle(encounterId, { status: 'failed', failure }, 'failed', failure),
+      // A network drop: every open socket closes, and the page has to reconnect.
+      dropConnections: () => [...sockets].forEach((socket) => socket.close()),
+    },
   }
 }

@@ -3,6 +3,7 @@ import type { EncounterError, EncounterView, PriorMedication } from '../shared/e
 import type { Sex, VisitKind } from '../shared/golden-case-queue'
 import type { BodySystem, PhysicalExaminationView } from '../shared/physical-examination'
 import { vitalSigns, vitalSignsSentence } from './vital-signs'
+import type { PatientPersona } from './simulated-patient/patient-context'
 
 export interface GoldenCaseRegistration {
   caseId: string
@@ -104,6 +105,27 @@ export function physicalExaminationFinding({ physicalExamination }: CaseTruth, s
   const { spo2Condition, ...readings } = physicalExamination.vitals
   const vitals = vitalSigns(readings)
   return { finding: vitalSignsSentence(vitals, spo2Condition), vitals }
+}
+
+export type PatientPersonaResult = { ok: true; persona: PatientPersona } | { ok: false; error: EncounterError }
+
+// The only part of a Golden Case the Simulated Patient is given: its Patient Persona and who the patient is.
+// Like Case Truth, it is read at the version the Encounter is bound to, or not at all.
+export function personaFor(caseId: string, personaVersion: string): PatientPersonaResult {
+  const goldenCase = casePack.cases.find((c) => c.id === caseId)
+  if (!goldenCase || goldenCase.persona.version !== personaVersion) {
+    const message = `本次就诊绑定 Patient Persona 版本 ${personaVersion}，当前病例包中已无该版本，模拟患者无法继续应答；请放弃本次就诊后重新开始。`
+    return { ok: false, error: { code: 'case-version-retired', message } }
+  }
+  const { patient, registration, persona } = goldenCase
+  return {
+    ok: true,
+    persona: {
+      version: persona.version,
+      identity: { name: patient.name, sex: patient.gender as Sex, age: ageOn(patient.birthDate, registration.registeredAt) },
+      content: persona.content,
+    },
+  }
 }
 
 // Both inputs carry the clinic-local calendar date in their first ten characters.
