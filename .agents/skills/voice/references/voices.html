@@ -1,0 +1,2502 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TTS 音色库 · Sambert / MiniMax</title>
+<style>
+:root{
+  --bg:#0a0a0b; --panel:#131316; --panel-hover:#17171b; --border:#232329; --border-hi:#3f3f46;
+  --text:#ececee; --muted:#8f8f98; --dim:#5c5c64;
+  --green:#34d399; --amber:#fbbf24; --mono:ui-monospace,Consolas,"Cascadia Mono",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{color-scheme:dark}
+body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+::selection{background:#2e2e38}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#26262c;border-radius:6px;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+
+header{position:sticky;top:0;z-index:20;background:rgba(10,10,11,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+.header-inner{max-width:1160px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:18px}
+.logo{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.logo-mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#2dd4bf,#6366f1);display:grid;place-items:center;font-weight:700;font-size:13px;color:#0a0a0b}
+.logo h1{font-size:15px;font-weight:600;letter-spacing:.2px}
+.logo small{display:block;font-size:11px;color:var(--muted);font-weight:400}
+.search{flex:1;max-width:460px;margin-left:auto;position:relative}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:var(--dim)}
+.search input{width:100%;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:8px 12px 8px 33px;color:var(--text);outline:none;font-size:13px;transition:border-color .15s}
+.search input:focus{border-color:var(--border-hi)}
+.search input::placeholder{color:var(--dim)}
+.kbd{font-size:11px;color:var(--dim);border:1px solid var(--border);border-radius:5px;padding:1px 6px}
+
+.layout{max-width:1160px;margin:0 auto;padding:20px;display:grid;grid-template-columns:230px 1fr;gap:22px;align-items:start}
+aside{position:sticky;top:76px;display:flex;flex-direction:column;gap:18px}
+.provider{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.provider button{border:1px solid var(--border);border-radius:11px;padding:10px 8px;text-align:left;transition:.15s;background:var(--panel)}
+.provider button .p-name{font-weight:600;font-size:13px}
+.provider button .p-meta{font-size:11px;color:var(--muted);margin-top:2px}
+.provider button.active{border-color:var(--border-hi);background:var(--panel-hover)}
+.provider button .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.dot-free{background:var(--green)} .dot-paid{background:var(--amber)}
+.filter-group h3{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--border);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted);transition:.12s;background:transparent}
+.chip:hover{color:var(--text);border-color:var(--border-hi)}
+.chip.on{background:#1e1e24;border-color:var(--border-hi);color:var(--text)}
+.chip .n{color:var(--dim);font-size:11px;margin-left:4px}
+.clear-btn{font-size:12px;color:var(--dim);text-decoration:underline;text-underline-offset:3px;padding:2px 0}
+.clear-btn:hover{color:var(--muted)}
+
+.list-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+.list-head .title{font-size:13px;font-weight:600}
+.list-head .count{font-size:12px;color:var(--muted)}
+.voice-list{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--panel)}
+.row{display:flex;align-items:center;gap:13px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s;position:relative}
+.row:last-child{border-bottom:none}
+.row:hover{background:var(--panel-hover)}
+.row.selected{background:#191920}
+.row.selected::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--green)}
+.avatar{width:40px;height:40px;border-radius:50%;flex:none;display:grid;place-items:center;font-weight:600;font-size:14px;color:#0b0b0c}
+.a-male{background:linear-gradient(135deg,#7dd3fc,#818cf8)}
+.a-female{background:linear-gradient(135deg,#f9a8d4,#c4b5fd)}
+.a-child{background:linear-gradient(135deg,#fde68a,#fca5a5)}
+.a-other{background:linear-gradient(135deg,#a7f3d0,#93c5fd)}
+.a-lang{background:linear-gradient(135deg,#d4d4d8,#71717a);font-size:17px}
+.v-main{flex:1;min-width:0}
+.v-name{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+.v-id{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v-num{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--border);border-radius:5px;padding:0 5px;line-height:1.6}
+.v-tags{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end;max-width:44%;flex:none}
+.tag{font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:1px 7px;white-space:nowrap}
+.tag.green{color:var(--green);border-color:#14532d55}
+.tag.amber{color:var(--amber);border-color:#713f1255}
+.actions{display:flex;align-items:center;gap:8px;flex:none}
+.play{width:36px;height:36px;border-radius:50%;border:1px solid var(--border);display:grid;place-items:center;transition:.15s;background:var(--bg)}
+.play:hover{background:var(--text);border-color:var(--text)}
+.play:hover svg{fill:#0a0a0b;stroke:#0a0a0b}
+.play svg{width:13px;height:13px;fill:var(--text);stroke:none;transition:.15s}
+.play.disabled{opacity:.35;cursor:not-allowed}
+.play.disabled:hover{background:var(--bg);border-color:var(--border)}
+.play.disabled:hover svg{fill:var(--text)}
+.row.playing .play{background:var(--text);border-color:var(--text)}
+.eq{display:none;align-items:flex-end;gap:2px;height:14px}
+.row.playing .eq{display:flex}
+.row.playing .eq i{width:3px;background:#0a0a0b;border-radius:1px;animation:eq 1s ease-in-out infinite}
+.row.playing .eq i:nth-child(1){height:60%;animation-delay:-.3s}
+.row.playing .eq i:nth-child(2){height:100%;animation-delay:-.15s}
+.row.playing .eq i:nth-child(3){height:45%}
+@keyframes eq{0%,100%{transform:scaleY(.45)}50%{transform:scaleY(1)}}
+.icon-btn{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--dim);transition:.12s}
+.icon-btn:hover{color:var(--text);background:#1e1e24}
+.icon-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.empty{padding:60px 20px;text-align:center;color:var(--muted);border:1px dashed var(--border);border-radius:14px}
+.empty b{color:var(--text)}
+
+.detail{position:fixed;left:0;right:0;bottom:0;z-index:30;transform:translateY(110%);transition:transform .22s cubic-bezier(.2,.8,.2,1);background:rgba(15,15,17,.92);backdrop-filter:blur(14px);border-top:1px solid var(--border-hi)}
+.detail.show{transform:translateY(0)}
+.detail-inner{max-width:1160px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:14px}
+.d-close{color:var(--dim);font-size:18px;line-height:1;padding:4px 6px;border-radius:8px}
+.d-close:hover{color:var(--text);background:#1e1e24}
+.d-name{font-weight:600;white-space:nowrap}
+.d-name small{display:block;font-family:var(--mono);font-weight:400;font-size:11px;color:var(--muted)}
+.d-cmd{flex:1;min-width:0;display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:9px 12px}
+.d-cmd code{flex:1;font-family:var(--mono);font-size:12px;color:#d8d8de;white-space:nowrap;overflow-x:auto;scrollbar-width:thin}
+.d-copy{flex:none;border:1px solid var(--border-hi);border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:500;transition:.15s}
+.d-copy:hover{background:var(--text);color:#0a0a0b;border-color:var(--text)}
+.d-note{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.d-note .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px}
+
+footer{max-width:1160px;margin:26px auto 110px;padding:0 20px;color:var(--dim);font-size:12px;line-height:1.8}
+footer a{color:var(--muted)}
+
+@media (max-width:900px){
+  .layout{grid-template-columns:1fr;gap:14px}
+  aside{position:static;flex-direction:row;flex-wrap:wrap;gap:14px}
+  .provider{min-width:220px}
+  .filter-group{flex:1;min-width:150px}
+  .v-tags{display:none}
+  .header-inner{flex-wrap:wrap}
+  .search{max-width:none;min-width:100%;order:3}
+  .detail-inner{flex-wrap:wrap}
+  .d-cmd{min-width:100%;order:4}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="logo">
+      <div class="logo-mark">TTS</div>
+      <h1>音色库<small>Sambert 免费 · MiniMax 付费</small></h1>
+    </div>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="搜索名称 / 模型 / 特色 / 语言…" autocomplete="off">
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="provider" role="tablist">
+      <button id="tab-sambert" class="active"><span class="p-name"><span class="dot dot-free"></span>Sambert</span><span class="p-meta">百炼 · 免费额度 · 43</span></button>
+      <button id="tab-minimax"><span class="p-name"><span class="dot dot-paid"></span>MiniMax</span><span class="p-meta">T2A · 按字符计费 · 332</span></button>
+    </div>
+    <div id="filters"></div>
+  </aside>
+  <main>
+    <div class="list-head">
+      <span class="title" id="provider-title"></span>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="voice-list" id="list"></div>
+    <div class="empty" id="empty" hidden>没有匹配的音色，换个关键词或清除筛选试试</div>
+  </main>
+</div>
+
+<div class="detail" id="detail">
+  <div class="detail-inner">
+    <button class="d-close" id="d-close" title="关闭">×</button>
+    <div class="d-name" id="d-name"></div>
+    <div class="d-cmd"><code id="d-cmd"></code><button class="d-copy" id="d-copy">复制命令</button></div>
+    <div class="d-note" id="d-note"></div>
+  </div>
+</div>
+
+<footer>
+  数据快照：Sambert 43 个音色（含官方标注与试听）来自阿里云百炼文档 · <a href="https://help.aliyun.com/zh/model-studio/sambert-java-sdk" target="_blank">Sambert 音色列表</a>；
+  MiniMax 332 个系统音色来自 <a href="https://platform.minimax.io/docs/faq/system-voice-id" target="_blank">System Voice ID List</a>（付费服务：hd 约 $100 / 百万字符，turbo 约 $60 / 百万字符）。
+  点击行选中音色后在底部复制对应合成命令；试听音频为阿里云官方样音。数据快照生成于 <span id="gen-date"></span>
+</footer>
+
+<script>
+const SAMBERT=[
+  {
+    "number": "01",
+    "model": "sambert-zhide-v1",
+    "name": "知德",
+    "ssml": true,
+    "scene": "新闻播报",
+    "feature": "新闻男声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/bfcm/知德.wav"
+  },
+  {
+    "number": "02",
+    "model": "sambert-zhida-v1",
+    "name": "知达",
+    "ssml": true,
+    "scene": "新闻播报",
+    "feature": "标准男声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/wfjx/知达.wav"
+  },
+  {
+    "number": "03",
+    "model": "sambert-zhishu-v1",
+    "name": "知树",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "资讯男声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/pzzm/知树.wav"
+  },
+  {
+    "number": "04",
+    "model": "sambert-zhiyue-v1",
+    "name": "知悦",
+    "ssml": true,
+    "scene": "客服",
+    "feature": "温柔女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/ejzf/知悦.wav"
+  },
+  {
+    "number": "05",
+    "model": "sambert-eva-v1",
+    "name": "Eva",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "陪伴女声",
+    "language": "美式英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/gtbq/Eva.wav"
+  },
+  {
+    "number": "06",
+    "model": "sambert-beth-v1",
+    "name": "Beth",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "咨询女声",
+    "language": "美式英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/zgct/Beth.wav"
+  },
+  {
+    "number": "07",
+    "model": "sambert-zhiye-v1",
+    "name": "知晔",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "青年男声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/xewu/知晔.wav"
+  },
+  {
+    "number": "08",
+    "model": "sambert-zhiya-v1",
+    "name": "知雅",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "严厉女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/ofma/知雅.wav"
+  },
+  {
+    "number": "09",
+    "model": "sambert-indah-v1",
+    "name": "Indah",
+    "ssml": false,
+    "scene": "通用场景",
+    "feature": "印尼语女声",
+    "language": "印尼语",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/cgun/Indah.wav"
+  },
+  {
+    "number": "10",
+    "model": "sambert-cindy-v1",
+    "name": "Cindy",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "对话女声",
+    "language": "美式英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/xoac/Cindy.wav"
+  },
+  {
+    "number": "11",
+    "model": "sambert-zhiying-v1",
+    "name": "知颖",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "软萌童声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/lrbj/知颖.wav"
+  },
+  {
+    "number": "12",
+    "model": "sambert-zhistella-v1",
+    "name": "知莎",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "知性女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/rtbv/知莎.wav"
+  },
+  {
+    "number": "13",
+    "model": "sambert-perla-v1",
+    "name": "Perla",
+    "ssml": false,
+    "scene": "通用场景",
+    "feature": "意大利语女声",
+    "language": "意大利语",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/lzji/Perla.wav"
+  },
+  {
+    "number": "14",
+    "model": "sambert-zhihao-v1",
+    "name": "知浩",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "咨询男声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/bmnx/知浩.wav"
+  },
+  {
+    "number": "15",
+    "model": "sambert-zhilun-v1",
+    "name": "知伦",
+    "ssml": true,
+    "scene": "配音解说",
+    "feature": "悬疑解说",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/lxag/知伦.wav"
+  },
+  {
+    "number": "16",
+    "model": "sambert-zhichu-v1",
+    "name": "知厨",
+    "ssml": true,
+    "scene": "新闻播报",
+    "feature": "舌尖男声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/enuf/知厨.wav"
+  },
+  {
+    "number": "17",
+    "model": "sambert-zhimao-v1",
+    "name": "知猫",
+    "ssml": true,
+    "scene": "阅读产品简介、配音解说、数字人、直播",
+    "feature": "直播女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/vwtv/知猫.wav"
+  },
+  {
+    "number": "18",
+    "model": "sambert-zhigui-v1",
+    "name": "知柜",
+    "ssml": true,
+    "scene": "阅读产品简介",
+    "feature": "直播女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/ytij/知柜.wav"
+  },
+  {
+    "number": "19",
+    "model": "sambert-zhinan-v1",
+    "name": "知楠",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "广告男声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/cymq/知楠.wav"
+  },
+  {
+    "number": "20",
+    "model": "sambert-zhixiao-v1",
+    "name": "知笑",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "资讯女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/mrcm/知笑.wav"
+  },
+  {
+    "number": "21",
+    "model": "sambert-zhimo-v1",
+    "name": "知墨",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "情感男声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/ipxx/知墨.wav"
+  },
+  {
+    "number": "22",
+    "model": "sambert-zhiming-v1",
+    "name": "知茗",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "诙谐男声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/enps/知茗.wav"
+  },
+  {
+    "number": "23",
+    "model": "sambert-brian-v1",
+    "name": "Brian",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "客服男声",
+    "language": "美式英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/jcwr/Brian.wav"
+  },
+  {
+    "number": "24",
+    "model": "sambert-betty-v1",
+    "name": "Betty",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "客服女声",
+    "language": "美式英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/cshl/Betty.wav"
+  },
+  {
+    "number": "25",
+    "model": "sambert-donna-v1",
+    "name": "Donna",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "教育女声",
+    "language": "美式英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/olzr/Donna.wav"
+  },
+  {
+    "number": "26",
+    "model": "sambert-zhiru-v1",
+    "name": "知茹",
+    "ssml": true,
+    "scene": "新闻播报",
+    "feature": "新闻女声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/motm/知茹.wav"
+  },
+  {
+    "number": "27",
+    "model": "sambert-hanna-v1",
+    "name": "Hanna",
+    "ssml": false,
+    "scene": "通用场景",
+    "feature": "德语女声",
+    "language": "德语",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/usrq/Hanna.wav"
+  },
+  {
+    "number": "28",
+    "model": "sambert-zhiqi-v1",
+    "name": "知琪",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "温柔女声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/wnqs/知琪.wav"
+  },
+  {
+    "number": "29",
+    "model": "sambert-zhiting-v1",
+    "name": "知婷",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "电台女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/wwpw/知婷.wav"
+  },
+  {
+    "number": "30",
+    "model": "sambert-zhiyuan-v1",
+    "name": "知媛",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "知心姐姐",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/lkvm/知媛.wav"
+  },
+  {
+    "number": "31",
+    "model": "sambert-zhixiang-v1",
+    "name": "知祥",
+    "ssml": true,
+    "scene": "配音解说",
+    "feature": "磁性男声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/jdjf/知祥.wav"
+  },
+  {
+    "number": "32",
+    "model": "sambert-zhifei-v1",
+    "name": "知飞",
+    "ssml": true,
+    "scene": "配音解说",
+    "feature": "激昂解说",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/bbqy/知飞.wav"
+  },
+  {
+    "number": "33",
+    "model": "sambert-zhijia-v1",
+    "name": "知佳",
+    "ssml": true,
+    "scene": "新闻播报",
+    "feature": "标准女声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/acre/知佳.wav"
+  },
+  {
+    "number": "34",
+    "model": "sambert-clara-v1",
+    "name": "Clara",
+    "ssml": false,
+    "scene": "通用场景",
+    "feature": "法语女声",
+    "language": "法语",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/bssi/Clara.wav"
+  },
+  {
+    "number": "35",
+    "model": "sambert-waan-v1",
+    "name": "Waan",
+    "ssml": false,
+    "scene": "通用场景",
+    "feature": "泰语女声",
+    "language": "泰语",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/ealm/Waan.wav"
+  },
+  {
+    "number": "36",
+    "model": "sambert-camila-v1",
+    "name": "Camila",
+    "ssml": false,
+    "scene": "通用场景",
+    "feature": "西班牙语女声",
+    "language": "西班牙语",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/kfkc/Camila.wav"
+  },
+  {
+    "number": "37",
+    "model": "sambert-zhiwei-v1",
+    "name": "知薇",
+    "ssml": true,
+    "scene": "阅读产品简介",
+    "feature": "萝莉女声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/grnn/知薇.wav"
+  },
+  {
+    "number": "38",
+    "model": "sambert-zhijing-v1",
+    "name": "知婧",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "严厉女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/lmgc/知婧.wav"
+  },
+  {
+    "number": "39",
+    "model": "sambert-cally-v1",
+    "name": "Cally",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "自然女声",
+    "language": "美式英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/ggtn/Cally.wav"
+  },
+  {
+    "number": "40",
+    "model": "sambert-zhimiao-emo-v1",
+    "name": "知妙（多情感）",
+    "ssml": true,
+    "scene": "阅读产品简介、数字人、直播",
+    "feature": "多种情感女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/vept/知妙.wav"
+  },
+  {
+    "number": "41",
+    "model": "sambert-zhiqian-v1",
+    "name": "知倩",
+    "ssml": true,
+    "scene": "配音解说、新闻播报",
+    "feature": "资讯女声",
+    "language": "中文+英文",
+    "sampleRate": "48k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/trye/知倩.wav"
+  },
+  {
+    "number": "42",
+    "model": "sambert-zhishuo-v1",
+    "name": "知硕",
+    "ssml": true,
+    "scene": "数字人",
+    "feature": "自然男声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230712/cxae/知硕.wav"
+  },
+  {
+    "number": "43",
+    "model": "sambert-zhina-v1",
+    "name": "知娜",
+    "ssml": true,
+    "scene": "通用场景",
+    "feature": "浙普女声",
+    "language": "中文+英文",
+    "sampleRate": "16k",
+    "preview": "https://static-aliyun-doc.oss-cn-hangzhou.aliyuncs.com/file-manage-files/zh-CN/20230713/zyza/知娜.wav"
+  }
+];
+const MINIMAX=[
+  {
+    "language": "English",
+    "voiceId": "English_expressive_narrator",
+    "name": "Expressive Narrator"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_radiant_girl",
+    "name": "Radiant Girl"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_magnetic_voiced_man",
+    "name": "Magnetic-voiced Male"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_compelling_lady1",
+    "name": "Compelling Lady"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Aussie_Bloke",
+    "name": "Aussie Bloke"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_captivating_female1",
+    "name": "Captivating Female"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Upbeat_Woman",
+    "name": "Upbeat Woman"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Trustworth_Man",
+    "name": "Trustworthy Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_CalmWoman",
+    "name": "Calm Woman"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_UpsetGirl",
+    "name": "Upset Girl"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Gentle-voiced_man",
+    "name": "Gentle-voiced Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Whispering_girl",
+    "name": "Whispering girl"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Diligent_Man",
+    "name": "Diligent Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Graceful_Lady",
+    "name": "Graceful Lady"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_ReservedYoungMan",
+    "name": "Reserved Young Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_PlayfulGirl",
+    "name": "Playful Girl"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_ManWithDeepVoice",
+    "name": "Man With Deep Voice"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_MaturePartner",
+    "name": "Mature Partner"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_FriendlyPerson",
+    "name": "Friendly Guy"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_MatureBoss",
+    "name": "Bossy Lady"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Debator",
+    "name": "Male Debater"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_LovelyGirl",
+    "name": "Lovely Girl"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Steadymentor",
+    "name": "Reliable Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Deep-VoicedGentleman",
+    "name": "Deep-voiced Gentleman"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Wiselady",
+    "name": "Wise Lady"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_CaptivatingStoryteller",
+    "name": "Captivating Storyteller"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_DecentYoungMan",
+    "name": "Decent Young Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_SentimentalLady",
+    "name": "Sentimental Lady"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_ImposingManner",
+    "name": "Imposing Queen"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_SadTeen",
+    "name": "Teen Boy"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_PassionateWarrior",
+    "name": "Passionate Warrior"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_WiseScholar",
+    "name": "Wise Scholar"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Soft-spokenGirl",
+    "name": "Soft-Spoken Girl"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_SereneWoman",
+    "name": "Serene Woman"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_ConfidentWoman",
+    "name": "Confident Woman"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_PatientMan",
+    "name": "Patient Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Comedian",
+    "name": "Comedian"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_BossyLeader",
+    "name": "Bossy Leader"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Strong-WilledBoy",
+    "name": "Strong-Willed Boy"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_StressedLady",
+    "name": "Stressed Lady"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_AssertiveQueen",
+    "name": "Assertive Queen"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_AnimeCharacter",
+    "name": "Female Narrator"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Jovialman",
+    "name": "Jovial Man"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_WhimsicalGirl",
+    "name": "Whimsical Girl"
+  },
+  {
+    "language": "English",
+    "voiceId": "English_Kind-heartedGirl",
+    "name": "Kind-Hearted Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Reliable_Executive",
+    "name": "Reliable Executive"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_News_Anchor",
+    "name": "News Anchor"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Unrestrained_Young_Man",
+    "name": "Unrestrained Young Man"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Mature_Woman",
+    "name": "Mature Woman"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Arrogant_Miss",
+    "name": "Arrogant Miss"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Robot_Armor",
+    "name": "Robot Armor"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Kind-hearted_Antie",
+    "name": "Kind-hearted Antie"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_HK_Flight_Attendant",
+    "name": "HK Flight Attendant"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Humorous_Elder",
+    "name": "Humorous Elder"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Gentleman",
+    "name": "Gentleman"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Warm_Bestie",
+    "name": "Warm Bestie"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Stubborn_Friend",
+    "name": "Stubborn Friend"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Sweet_Lady",
+    "name": "Sweet Lady"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Southern_Young_Man",
+    "name": "Southern Young Man"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Wise_Women",
+    "name": "Wise Women"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Gentle_Youth",
+    "name": "Gentle Youth"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Warm_Girl",
+    "name": "Warm Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Male_Announcer",
+    "name": "Male Announcer"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Kind-hearted_Elder",
+    "name": "Kind-hearted Elder"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Cute_Spirit",
+    "name": "Cute Spirit"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Radio_Host",
+    "name": "Radio Host"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Lyrical_Voice",
+    "name": "Lyrical Voice"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Straightforward_Boy",
+    "name": "Straightforward Boy"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Sincere_Adult",
+    "name": "Sincere Adult"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Gentle_Senior",
+    "name": "Gentle Senior"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Crisp_Girl",
+    "name": "Crisp Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Pure-hearted_Boy",
+    "name": "Pure-hearted Boy"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Soft_Girl",
+    "name": "Soft Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_IntellectualGirl",
+    "name": "Intellectual Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Warm_HeartedGirl",
+    "name": "Warm-hearted Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Laid_BackGirl",
+    "name": "Laid-back Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_ExplorativeGirl",
+    "name": "Explorative Girl"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_Warm-HeartedAunt",
+    "name": "Warm-hearted Aunt"
+  },
+  {
+    "language": "Chinese (Mandarin)",
+    "voiceId": "Chinese (Mandarin)_BashfulGirl",
+    "name": "Bashful Girl"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_IntellectualSenior",
+    "name": "Intellectual Senior"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_DecisivePrincess",
+    "name": "Decisive Princess"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_LoyalKnight",
+    "name": "Loyal Knight"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_DominantMan",
+    "name": "Dominant Man"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_SeriousCommander",
+    "name": "Serious Commander"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_ColdQueen",
+    "name": "Cold Queen"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_DependableWoman",
+    "name": "Dependable Woman"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_GentleButler",
+    "name": "Gentle Butler"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_KindLady",
+    "name": "Kind Lady"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_CalmLady",
+    "name": "Calm Lady"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_OptimisticYouth",
+    "name": "Optimistic Youth"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_GenerousIzakayaOwner",
+    "name": "Generous Izakaya Owner"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_SportyStudent",
+    "name": "Sporty Student"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_InnocentBoy",
+    "name": "Innocent Boy"
+  },
+  {
+    "language": "Japanese",
+    "voiceId": "Japanese_GracefulMaiden",
+    "name": "Graceful Maiden"
+  },
+  {
+    "language": "Cantonese",
+    "voiceId": "Cantonese_ProfessionalHost (F)",
+    "name": "Professional Female Host"
+  },
+  {
+    "language": "Cantonese",
+    "voiceId": "Cantonese_GentleLady",
+    "name": "Gentle Lady"
+  },
+  {
+    "language": "Cantonese",
+    "voiceId": "Cantonese_ProfessionalHost (M)",
+    "name": "Professional Male Host"
+  },
+  {
+    "language": "Cantonese",
+    "voiceId": "Cantonese_PlayfulMan",
+    "name": "Playful Man"
+  },
+  {
+    "language": "Cantonese",
+    "voiceId": "Cantonese_CuteGirl",
+    "name": "Cute Girl"
+  },
+  {
+    "language": "Cantonese",
+    "voiceId": "Cantonese_KindWoman",
+    "name": "Kind Woman"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_AirheadedGirl",
+    "name": "Airheaded Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_AthleticGirl",
+    "name": "Athletic Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_AthleticStudent",
+    "name": "Athletic Student"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_BraveAdventurer",
+    "name": "Brave Adventurer"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_BraveFemaleWarrior",
+    "name": "Brave Female Warrior"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_BraveYouth",
+    "name": "Brave Youth"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CalmGentleman",
+    "name": "Calm Gentleman"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CalmLady",
+    "name": "Calm Lady"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CaringWoman",
+    "name": "Caring Woman"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CharmingElderSister",
+    "name": "Charming Elder Sister"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CharmingSister",
+    "name": "Charming Sister"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CheerfulBoyfriend",
+    "name": "Cheerful Boyfriend"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CheerfulCoolJunior",
+    "name": "Cheerful Cool Junior"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CheerfulLittleSister",
+    "name": "Cheerful Little Sister"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ChildhoodFriendGirl",
+    "name": "Childhood Friend Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_CockyGuy",
+    "name": "Cocky Guy"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ColdGirl",
+    "name": "Cold Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ColdYoungMan",
+    "name": "Cold Young Man"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ConfidentBoss",
+    "name": "Confident Boss"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ConsiderateSenior",
+    "name": "Considerate Senior"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_DecisiveQueen",
+    "name": "Decisive Queen"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_DominantMan",
+    "name": "Dominant Man"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ElegantPrincess",
+    "name": "Elegant Princess"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_EnchantingSister",
+    "name": "Enchanting Sister"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_EnthusiasticTeen",
+    "name": "Enthusiastic Teen"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_FriendlyBigSister",
+    "name": "Friendly Big Sister"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_GentleBoss",
+    "name": "Gentle Boss"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_GentleWoman",
+    "name": "Gentle Woman"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_HaughtyLady",
+    "name": "Haughty Lady"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_InnocentBoy",
+    "name": "Innocent Boy"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_IntellectualMan",
+    "name": "Intellectual Man"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_IntellectualSenior",
+    "name": "Intellectual Senior"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_LonelyWarrior",
+    "name": "Lonely Warrior"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_MatureLady",
+    "name": "Mature Lady"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_MysteriousGirl",
+    "name": "Mysterious Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_OptimisticYouth",
+    "name": "Optimistic Youth"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_PlayboyCharmer",
+    "name": "Playboy Charmer"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_PossessiveMan",
+    "name": "Possessive Man"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_QuirkyGirl",
+    "name": "Quirky Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ReliableSister",
+    "name": "Reliable Sister"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ReliableYouth",
+    "name": "Reliable Youth"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_SassyGirl",
+    "name": "Sassy Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ShyGirl",
+    "name": "Shy Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_SoothingLady",
+    "name": "Soothing Lady"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_StrictBoss",
+    "name": "Strict Boss"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_SweetGirl",
+    "name": "Sweet Girl"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_ThoughtfulWoman",
+    "name": "Thoughtful Woman"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_WiseElf",
+    "name": "Wise Elf"
+  },
+  {
+    "language": "Korean",
+    "voiceId": "Korean_WiseTeacher",
+    "name": "Wise Teacher"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_SereneWoman",
+    "name": "Serene Woman"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_MaturePartner",
+    "name": "Mature Partner"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_CaptivatingStoryteller",
+    "name": "Captivating Storyteller"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Narrator",
+    "name": "Narrator"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_WiseScholar",
+    "name": "Wise Scholar"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Kind-heartedGirl",
+    "name": "Kind-hearted Girl"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_DeterminedManager",
+    "name": "Determined Manager"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_BossyLeader",
+    "name": "Bossy Leader"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_ReservedYoungMan",
+    "name": "Reserved Young Man"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_ConfidentWoman",
+    "name": "Confident Woman"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_ThoughtfulMan",
+    "name": "Thoughtful Man"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Strong-WilledBoy",
+    "name": "Strong-willed Boy"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_SophisticatedLady",
+    "name": "Sophisticated Lady"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_RationalMan",
+    "name": "Rational Man"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_AnimeCharacter",
+    "name": "Anime Character"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Deep-tonedMan",
+    "name": "Deep-toned Man"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Fussyhostess",
+    "name": "Fussy hostess"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_SincereTeen",
+    "name": "Sincere Teen"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_FrankLady",
+    "name": "Frank Lady"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Comedian",
+    "name": "Comedian"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Debator",
+    "name": "Debator"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_ToughBoss",
+    "name": "Tough Boss"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Wiselady",
+    "name": "Wise Lady"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Steadymentor",
+    "name": "Steady Mentor"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Jovialman",
+    "name": "Jovial Man"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_SantaClaus",
+    "name": "Santa Claus"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Rudolph",
+    "name": "Rudolph"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Intonategirl",
+    "name": "Intonate Girl"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Arnold",
+    "name": "Arnold"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_Ghost",
+    "name": "Ghost"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_HumorousElder",
+    "name": "Humorous Elder"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_EnergeticBoy",
+    "name": "Energetic Boy"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_WhimsicalGirl",
+    "name": "Whimsical Girl"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_StrictBoss",
+    "name": "Strict Boss"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_ReliableMan",
+    "name": "Reliable Man"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_SereneElder",
+    "name": "Serene Elder"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_AngryMan",
+    "name": "Angry Man"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_AssertiveQueen",
+    "name": "Assertive Queen"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_CaringGirlfriend",
+    "name": "Caring Girlfriend"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_PowerfulSoldier",
+    "name": "Powerful Soldier"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_PassionateWarrior",
+    "name": "Passionate Warrior"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_ChattyGirl",
+    "name": "Chatty Girl"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_RomanticHusband",
+    "name": "Romantic Husband"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_CompellingGirl",
+    "name": "Compelling Girl"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_PowerfulVeteran",
+    "name": "Powerful Veteran"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_SensibleManager",
+    "name": "Sensible Manager"
+  },
+  {
+    "language": "Spanish",
+    "voiceId": "Spanish_ThoughtfulLady",
+    "name": "Thoughtful Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SentimentalLady",
+    "name": "Sentimental Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_BossyLeader",
+    "name": "Bossy Leader"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Wiselady",
+    "name": "Wise lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Strong-WilledBoy",
+    "name": "Strong-willed Boy"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Deep-VoicedGentleman",
+    "name": "Deep-voiced Gentleman"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_UpsetGirl",
+    "name": "Upset Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_PassionateWarrior",
+    "name": "Passionate Warrior"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_AnimeCharacter",
+    "name": "Anime Character"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ConfidentWoman",
+    "name": "Confident Woman"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_AngryMan",
+    "name": "Angry Man"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_CaptivatingStoryteller",
+    "name": "Captivating Storyteller"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Godfather",
+    "name": "Godfather"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ReservedYoungMan",
+    "name": "Reserved Young Man"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SmartYoungGirl",
+    "name": "Smart Young Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Kind-heartedGirl",
+    "name": "Kind-hearted Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Pompouslady",
+    "name": "Pompous lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Grinch",
+    "name": "Grinch"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Debator",
+    "name": "Debator"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SweetGirl",
+    "name": "Sweet Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_AttractiveGirl",
+    "name": "Attractive Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ThoughtfulMan",
+    "name": "Thoughtful Man"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_PlayfulGirl",
+    "name": "Playful Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_GorgeousLady",
+    "name": "Gorgeous Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_LovelyLady",
+    "name": "Lovely Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SereneWoman",
+    "name": "Serene Woman"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SadTeen",
+    "name": "Sad Teen"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_MaturePartner",
+    "name": "Mature Partner"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Comedian",
+    "name": "Comedian"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_NaughtySchoolgirl",
+    "name": "Naughty Schoolgirl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Narrator",
+    "name": "Narrator"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ToughBoss",
+    "name": "Tough Boss"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Fussyhostess",
+    "name": "Fussy hostess"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Dramatist",
+    "name": "Dramatist"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Steadymentor",
+    "name": "Steady Mentor"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Jovialman",
+    "name": "Jovial Man"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_CharmingQueen",
+    "name": "Charming Queen"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SantaClaus",
+    "name": "Santa Claus"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Rudolph",
+    "name": "Rudolph"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Arnold",
+    "name": "Arnold"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_CharmingSanta",
+    "name": "Charming Santa"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_CharmingLady",
+    "name": "Charming Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Ghost",
+    "name": "Ghost"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_HumorousElder",
+    "name": "Humorous Elder"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_CalmLeader",
+    "name": "Calm Leader"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_GentleTeacher",
+    "name": "Gentle Teacher"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_EnergeticBoy",
+    "name": "Energetic Boy"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ReliableMan",
+    "name": "Reliable Man"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SereneElder",
+    "name": "Serene Elder"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_GrimReaper",
+    "name": "Grim Reaper"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_AssertiveQueen",
+    "name": "Assertive Queen"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_WhimsicalGirl",
+    "name": "Whimsical Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_StressedLady",
+    "name": "Stressed Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_FriendlyNeighbor",
+    "name": "Friendly Neighbor"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_CaringGirlfriend",
+    "name": "Caring Girlfriend"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_PowerfulSoldier",
+    "name": "Powerful Soldier"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_FascinatingBoy",
+    "name": "Fascinating Boy"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_RomanticHusband",
+    "name": "Romantic Husband"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_StrictBoss",
+    "name": "Strict Boss"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_InspiringLady",
+    "name": "Inspiring Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_PlayfulSpirit",
+    "name": "Playful Spirit"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ElegantGirl",
+    "name": "Elegant Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_CompellingGirl",
+    "name": "Compelling Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_PowerfulVeteran",
+    "name": "Powerful Veteran"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_SensibleManager",
+    "name": "Sensible Manager"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ThoughtfulLady",
+    "name": "Thoughtful Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_TheatricalActor",
+    "name": "Theatrical Actor"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_FragileBoy",
+    "name": "Fragile Boy"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_ChattyGirl",
+    "name": "Chatty Girl"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_Conscientiousinstructor",
+    "name": "Conscientious Instructor"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_RationalMan",
+    "name": "Rational Man"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_WiseScholar",
+    "name": "Wise Scholar"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_FrankLady",
+    "name": "Frank Lady"
+  },
+  {
+    "language": "Portuguese",
+    "voiceId": "Portuguese_DeterminedManager",
+    "name": "Determined Manager"
+  },
+  {
+    "language": "French",
+    "voiceId": "French_Male_Speech_New",
+    "name": "Level-Headed Man"
+  },
+  {
+    "language": "French",
+    "voiceId": "French_Female_News Anchor",
+    "name": "Patient Female Presenter"
+  },
+  {
+    "language": "French",
+    "voiceId": "French_CasualMan",
+    "name": "Casual Man"
+  },
+  {
+    "language": "French",
+    "voiceId": "French_MovieLeadFemale",
+    "name": "Movie Lead Female"
+  },
+  {
+    "language": "French",
+    "voiceId": "French_FemaleAnchor",
+    "name": "Female Anchor"
+  },
+  {
+    "language": "French",
+    "voiceId": "French_MaleNarrator",
+    "name": "Male Narrator"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_SweetGirl",
+    "name": "Sweet Girl"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_ReservedYoungMan",
+    "name": "Reserved Young Man"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_CharmingGirl",
+    "name": "Charming Girl"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_CalmWoman",
+    "name": "Calm Woman"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_ConfidentWoman",
+    "name": "Confident Woman"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_CaringMan",
+    "name": "Caring Man"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_BossyLeader",
+    "name": "Bossy Leader"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_DeterminedBoy",
+    "name": "Determined Boy"
+  },
+  {
+    "language": "Indonesian",
+    "voiceId": "Indonesian_GentleGirl",
+    "name": "Gentle Girl"
+  },
+  {
+    "language": "German",
+    "voiceId": "German_FriendlyMan",
+    "name": "Friendly Man"
+  },
+  {
+    "language": "German",
+    "voiceId": "German_SweetLady",
+    "name": "Sweet Lady"
+  },
+  {
+    "language": "German",
+    "voiceId": "German_PlayfulMan",
+    "name": "Playful Man"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_HandsomeChildhoodFriend",
+    "name": "Handsome Childhood Friend"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_BrightHeroine",
+    "name": "Bright Queen"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_AmbitiousWoman",
+    "name": "Ambitious Woman"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_ReliableMan",
+    "name": "Reliable Man"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_CrazyQueen",
+    "name": "Crazy Girl"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_PessimisticGirl",
+    "name": "Pessimistic Girl"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_AttractiveGuy",
+    "name": "Attractive Guy"
+  },
+  {
+    "language": "Russian",
+    "voiceId": "Russian_Bad-temperedBoy",
+    "name": "Bad-tempered Boy"
+  },
+  {
+    "language": "Italian",
+    "voiceId": "Italian_BraveHeroine",
+    "name": "Brave Heroine"
+  },
+  {
+    "language": "Italian",
+    "voiceId": "Italian_Narrator",
+    "name": "Narrator"
+  },
+  {
+    "language": "Italian",
+    "voiceId": "Italian_WanderingSorcerer",
+    "name": "Wandering Sorcerer"
+  },
+  {
+    "language": "Italian",
+    "voiceId": "Italian_DiligentLeader",
+    "name": "Diligent Leader"
+  },
+  {
+    "language": "Dutch",
+    "voiceId": "Dutch_kindhearted_girl",
+    "name": "Kind-hearted girl"
+  },
+  {
+    "language": "Dutch",
+    "voiceId": "Dutch_bossy_leader",
+    "name": "Bossy leader"
+  },
+  {
+    "language": "Vietnamese",
+    "voiceId": "Vietnamese_kindhearted_girl",
+    "name": "Kind-hearted girl"
+  },
+  {
+    "language": "Arabic",
+    "voiceId": "Arabic_CalmWoman",
+    "name": "Calm Woman"
+  },
+  {
+    "language": "Arabic",
+    "voiceId": "Arabic_FriendlyGuy",
+    "name": "Friendly Guy"
+  },
+  {
+    "language": "Turkish",
+    "voiceId": "Turkish_CalmWoman",
+    "name": "Calm Woman"
+  },
+  {
+    "language": "Turkish",
+    "voiceId": "Turkish_Trustworthyman",
+    "name": "Trustworthy man"
+  },
+  {
+    "language": "Ukrainian",
+    "voiceId": "Ukrainian_CalmWoman",
+    "name": "Calm Woman"
+  },
+  {
+    "language": "Ukrainian",
+    "voiceId": "Ukrainian_WiseScholar",
+    "name": "Wise Scholar"
+  },
+  {
+    "language": "Thai",
+    "voiceId": "Thai_male_1_sample8",
+    "name": "Serene Man"
+  },
+  {
+    "language": "Thai",
+    "voiceId": "Thai_male_2_sample2",
+    "name": "Friendly Man"
+  },
+  {
+    "language": "Thai",
+    "voiceId": "Thai_female_1_sample1",
+    "name": "Confident Woman"
+  },
+  {
+    "language": "Thai",
+    "voiceId": "Thai_female_2_sample2",
+    "name": "Energetic Woman"
+  },
+  {
+    "language": "Polish",
+    "voiceId": "Polish_male_1_sample4",
+    "name": "Male Narrator"
+  },
+  {
+    "language": "Polish",
+    "voiceId": "Polish_male_2_sample3",
+    "name": "Male Anchor"
+  },
+  {
+    "language": "Polish",
+    "voiceId": "Polish_female_1_sample1",
+    "name": "Calm Woman"
+  },
+  {
+    "language": "Polish",
+    "voiceId": "Polish_female_2_sample3",
+    "name": "Casual Woman"
+  },
+  {
+    "language": "Romanian",
+    "voiceId": "Romanian_male_1_sample2",
+    "name": "Reliable Man"
+  },
+  {
+    "language": "Romanian",
+    "voiceId": "Romanian_male_2_sample1",
+    "name": "Energetic Youth"
+  },
+  {
+    "language": "Romanian",
+    "voiceId": "Romanian_female_1_sample4",
+    "name": "Optimistic Youth"
+  },
+  {
+    "language": "Romanian",
+    "voiceId": "Romanian_female_2_sample1",
+    "name": "Gentle Woman"
+  },
+  {
+    "language": "Greek",
+    "voiceId": "greek_male_1a_v1",
+    "name": "Thoughtful Mentor"
+  },
+  {
+    "language": "Greek",
+    "voiceId": "Greek_female_1_sample1",
+    "name": "Gentle Lady"
+  },
+  {
+    "language": "Greek",
+    "voiceId": "Greek_female_2_sample3",
+    "name": "Girl Next Door"
+  },
+  {
+    "language": "Czech",
+    "voiceId": "czech_male_1_v1",
+    "name": "Assured Presenter"
+  },
+  {
+    "language": "Czech",
+    "voiceId": "czech_female_5_v7",
+    "name": "Steadfast Narrator"
+  },
+  {
+    "language": "Czech",
+    "voiceId": "czech_female_2_v2",
+    "name": "Elegant Lady"
+  },
+  {
+    "language": "Finnish",
+    "voiceId": "finnish_male_3_v1",
+    "name": "Upbeat Man"
+  },
+  {
+    "language": "Finnish",
+    "voiceId": "finnish_male_1_v2",
+    "name": "Friendly Boy"
+  },
+  {
+    "language": "Finnish",
+    "voiceId": "finnish_female_4_v1",
+    "name": "Assetive Woman"
+  },
+  {
+    "language": "Hindi",
+    "voiceId": "hindi_male_1_v2",
+    "name": "Trustworthy Advisor"
+  },
+  {
+    "language": "Hindi",
+    "voiceId": "hindi_female_2_v1",
+    "name": "Tranquil Woman"
+  },
+  {
+    "language": "Hindi",
+    "voiceId": "hindi_female_1_v2",
+    "name": "News Anchor"
+  }
+];
+
+const $=s=>document.querySelector(s);
+SAMBERT.forEach(v=>v.sceneParts=(v.scene||'').split('、').map(s=>s.trim()).filter(Boolean));
+const state={provider:'sambert',q:'',filters:{},selected:null,audio:null,playingBtn:null};
+
+const FLAG={ 'English':'🇬🇧','Chinese (Mandarin)':'🇨🇳','Japanese':'🇯🇵','Cantonese':'🇭🇰','Korean':'🇰🇷','Spanish':'🇪🇸','Portuguese':'🇧🇷','French':'🇫🇷','Indonesian':'🇮🇩','German':'🇩🇪','Russian':'🇷🇺','Italian':'🇮🇹','Dutch':'🇳🇱','Vietnamese':'🇻🇳','Arabic':'🇸🇦','Turkish':'🇹🇷','Ukrainian':'🇺🇦','Thai':'🇹🇭','Polish':'🇵🇱','Romanian':'🇷🇴','Greek':'🇬🇷','Czech':'🇨🇿','Finnish':'🇫🇮','Hindi':'🇮🇳' };
+
+function genderOf(v){const f=(v.feature||'');if(/男/.test(f))return'男声';if(/女|姐/.test(f))return'女声';if(/童/.test(f))return'童声';return'其他';}
+function avatarClass(g){return g==='男声'?'a-male':g==='女声'?'a-female':g==='童声'?'a-child':'a-other';}
+
+function dataFor(){return state.provider==='sambert'?SAMBERT:MINIMAX;}
+function keyFor(v){return state.provider+'-'+(v.number||v.voiceId);}
+function displayName(v){return state.provider==='sambert'?v.name:v.name;}
+function displayId(v){return state.provider==='sambert'?v.model:v.voiceId;}
+
+function matches(v){
+  if(state.q){
+    const hay=[v.name,v.model,v.voiceId,v.feature,v.scene,v.language,v.number].filter(Boolean).join(' ').toLowerCase();
+    if(!hay.includes(state.q))return false;
+  }
+  for(const [group,vals] of Object.entries(state.filters)){
+    if(!vals.size)continue;
+    let ok=true;
+    if(group==='lang')ok=vals.has(v.language);
+    else if(group==='gender')ok=vals.has(genderOf(v));
+    else if(group==='scene')ok=(v.sceneParts||[]).some(p=>vals.has(p));
+    if(!ok)return false;
+  }
+  return true;
+}
+
+function buildFilters(){
+  const data=dataFor();
+  const groups=[];
+  const langCount={};data.forEach(v=>langCount[v.language]=(langCount[v.language]||0)+1);
+  groups.push({id:'lang',title:'语言',items:Object.entries(langCount).sort((a,b)=>b[1]-a[1])});
+  if(state.provider==='sambert'){
+    const g={男声:0,女声:0,童声:0};data.forEach(v=>{const k=genderOf(v);if(g[k]!=null)g[k]++;});
+    groups.push({id:'gender',title:'声线',items:Object.entries(g)});
+    const s={};data.forEach(v=>(v.sceneParts||[v.scene]).forEach(p=>{if(p)s[p]=(s[p]||0)+1;}));
+    groups.push({id:'scene',title:'场景',items:Object.entries(s).sort((a,b)=>b[1]-a[1])});
+  }
+  const box=$('#filters');box.innerHTML='';
+  for(const g of groups){
+    const sec=document.createElement('div');sec.className='filter-group';
+    sec.innerHTML=`<h3>${g.title}</h3>`;
+    const chips=document.createElement('div');chips.className='chips';
+    for(const [val,n] of g.items){
+      const b=document.createElement('button');b.className='chip'+(state.filters[g.id]?.has(val)?' on':'');
+      b.innerHTML=`${state.provider==='minimax'&&g.id==='lang'?(FLAG[val]||'')+' ':''}${val}<span class="n">${n}</span>`;
+      b.onclick=()=>{
+        const set=state.filters[g.id]||new Set();
+        set.has(val)?set.delete(val):set.add(val);
+        set.size?state.filters[g.id]=set:delete state.filters[g.id];
+        buildFilters();render();
+      };
+      chips.appendChild(b);
+    }
+    sec.appendChild(chips);box.appendChild(sec);
+  }
+  if(Object.keys(state.filters).length){
+    const c=document.createElement('button');c.className='clear-btn';c.textContent='清除全部筛选';
+    c.onclick=()=>{state.filters={};buildFilters();render();};
+    box.appendChild(c);
+  }
+}
+
+function tagsHtml(v){
+  if(state.provider==='sambert'){
+    return [v.feature,v.scene,v.ssml?'SSML':null].filter(Boolean)
+      .map((t,i)=>`<span class="tag${t==='SSML'?' green':''}">${t}</span>`).join('')+
+      `<span class="tag green">免费</span>`;
+  }
+  return `<span class="tag">${v.language}</span><span class="tag amber">付费</span>`;
+}
+
+function rowHtml(v){
+  const isS=state.provider==='sambert';
+  const av=isS?`<div class="avatar ${avatarClass(genderOf(v))}">${v.name[0]}</div>`
+    :`<div class="avatar a-lang">${FLAG[v.language]||'🌐'}</div>`;
+  const idLine=isS
+    ?`<div class="v-id">${v.model} · ${v.language}${v.sampleRate?' · '+v.sampleRate:''}</div>`
+    :`<div class="v-id" title="${v.voiceId}">${v.voiceId}</div>`;
+  const play=isS&&v.preview
+    ?`<button class="play" data-act="play" title="试听官方样音"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg><span class="eq"><i></i><i></i><i></i></span></button>`
+    :`<button class="play disabled" title="无页面内试听，可到官网试听"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></button>`;
+  const copyTitle=isS?'复制模型 ID':'复制 voice_id';
+  return `<div class="row" data-key="${keyFor(v)}">
+    ${av}
+    <div class="v-main">
+      <div class="v-name">${isS?`<span class="v-num">${v.number}</span>`:''}${displayName(v)}</div>
+      ${idLine}
+    </div>
+    <div class="v-tags">${tagsHtml(v)}</div>
+    <div class="actions">
+      ${play}
+      <button class="icon-btn" data-act="copy" title="${copyTitle}"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button>
+    </div>
+  </div>`;
+}
+
+function render(){
+  const data=dataFor();
+  const list=data.filter(matches);
+  $('#provider-title').textContent=state.provider==='sambert'?'Sambert 音色':'MiniMax 系统音色';
+  $('#count').textContent=`${list.length} / ${data.length}`;
+  $('#list').innerHTML=list.map(rowHtml).join('');
+  $('#empty').hidden=list.length>0;
+}
+
+function stopAudio(){
+  if(state.audio){state.audio.pause();state.audio=null;}
+  if(state.playingBtn){state.playingBtn.closest('.row').classList.remove('playing');state.playingBtn=null;}
+}
+
+function togglePlay(btn,v){
+  if(state.playingBtn===btn){stopAudio();return;}
+  stopAudio();
+  const a=new Audio(v.preview);state.audio=a;state.playingBtn=btn;
+  btn.closest('.row').classList.add('playing');
+  a.onended=()=>{stopAudio();};
+  a.onerror=()=>{stopAudio();alert('试听加载失败，请检查网络（音频托管在阿里云 CDN）。');};
+  a.play().catch(()=>{stopAudio();});
+}
+
+function copyText(t){
+  if(navigator.clipboard&&window.isSecureContext!==false){
+    return navigator.clipboard.writeText(t).catch(()=>fallbackCopy(t));
+  }
+  return Promise.resolve(fallbackCopy(t));
+}
+function fallbackCopy(t){
+  const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();
+}
+
+function select(v){
+  state.selected={v,provider:state.provider};
+  const isS=state.provider==='sambert';
+  $('#d-name').innerHTML=`${isS?`<span class="v-num" style="margin-right:6px">${v.number}</span>`:''}${displayName(v)}<small>${displayId(v)}</small>`;
+  const cmd=isS
+    ?`node scripts/sambert.cjs --voice ${v.number} --text-file narration.txt --out narration.wav`
+    :`node scripts/minimax.cjs --voice "${v.voiceId}" --text-file narration.txt --out narration.mp3`;
+  $('#d-cmd').textContent=cmd;
+  $('#d-note').innerHTML=isS
+    ?`<span class="dot dot-free"></span>免费额度 · 仅 WAV · 默认 16 kHz`
+    :`<span class="dot dot-paid"></span>付费 · hd ≈ $100 / 百万字符 · 输出 mp3`;
+  $('#detail').classList.add('show');
+  document.querySelectorAll('.row').forEach(r=>r.classList.toggle('selected',r.dataset.key===keyFor(v)));
+}
+
+document.addEventListener('click',e=>{
+  const act=e.target.closest('[data-act]');
+  const row=e.target.closest('.row');
+  if(act){
+    const v=dataFor().find(x=>keyFor(x)===(row?.dataset.key));
+    if(!v)return;
+    if(act.dataset.act==='play')togglePlay(act,v);
+    if(act.dataset.act==='copy'){copyText(displayId(v));act.title='已复制 ✓';setTimeout(()=>act.title='复制',900);}
+    return;
+  }
+  if(row){
+    const v=dataFor().find(x=>keyFor(x)===row.dataset.key);
+    if(v)select(v);
+  }
+});
+$('#d-close').onclick=()=>{state.selected=null;$('#detail').classList.remove('show');document.querySelectorAll('.row.selected').forEach(r=>r.classList.remove('selected'));};
+$('#d-copy').onclick=()=>{copyText($('#d-cmd').textContent);const b=$('#d-copy');b.textContent='已复制 ✓';setTimeout(()=>b.textContent='复制命令',900);};
+$('#q').addEventListener('input',e=>{state.q=e.target.value.trim().toLowerCase();render();});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){stopAudio();$('#d-close').onclick();}
+  if(e.key==='/'&&document.activeElement!==$('#q')){e.preventDefault();$('#q').focus();}
+});
+function switchProvider(p){
+  if(state.provider===p)return;
+  stopAudio();state.provider=p;state.filters={};state.selected=null;
+  $('#detail').classList.remove('show');
+  $('#tab-sambert').classList.toggle('active',p==='sambert');
+  $('#tab-minimax').classList.toggle('active',p==='minimax');
+  buildFilters();render();
+}
+$('#tab-sambert').onclick=()=>switchProvider('sambert');
+$('#tab-minimax').onclick=()=>switchProvider('minimax');
+
+$('#gen-date').textContent=new Date().toISOString().slice(0,10);
+buildFilters();render();
+</script>
+</body>
+</html>

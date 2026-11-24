@@ -1,0 +1,4 @@
+interface:
+  display_name: "Voice 语音识别与合成（百炼 Paraformer + Sambert / MiniMax）"
+  short_description: "默认使用阿里百炼：Paraformer 做实时/离线 STT（四款模型各 36K 秒/月），Sambert 做中文 TTS；点名时切 MiniMax T2A。密钥统一在 D:\\Environment\\.env"
+  default_prompt: "使用 voice 技能：STT 默认用 paraformer-realtime-v2，TTS 默认用 Sambert 音色 16（知厨）。"
