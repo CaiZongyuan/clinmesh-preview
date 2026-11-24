@@ -11,6 +11,9 @@ export type AgentEvent =
   // The run restarted from its last checkpoint after a crash: drop what it streamed so far.
   | { type: 'run.reset'; runId: string }
   | { type: 'run.finished'; runId: string; ref: string | null; status: RunStatus; error: string | null }
+  // For an agent whose outcome another Durable Object must accept: delivered, and accepted or refused there.
+  // The record (e.g. the Consultation) is up to date once this arrives.
+  | { type: 'run.settled'; runId: string; ref: string | null; accepted: boolean }
 
 export type ClientMessage = { type: 'hello'; afterSeq: number }
 

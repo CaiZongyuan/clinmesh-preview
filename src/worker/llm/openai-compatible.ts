@@ -11,6 +11,7 @@ export interface OpenAiCompatibleOptions {
 type ChunkToolCall = { index: number; id?: string; function?: { name?: string; arguments?: string } }
 
 interface ChatChunk {
+  error?: { message?: string; code?: string | number } | string
   choices?: {
     delta?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null; tool_calls?: ChunkToolCall[] }
     finish_reason?: string | null
@@ -114,6 +115,11 @@ async function* parseChatStream(body: ReadableStream<Uint8Array>, signal: AbortS
     } catch {
       throw new LlmError('protocol', `unparseable stream chunk: ${data.slice(0, 80)}`)
     }
+    // Some providers report a failure mid-stream as a data event instead of an HTTP status.
+    if (chunk.error) {
+      const detail = typeof chunk.error === 'string' ? chunk.error : [chunk.error.code, chunk.error.message].filter(Boolean).join(' ')
+      throw new LlmError('http', `provider error: ${detail || 'unknown'}`)
+    }
     for (const choice of chunk.choices ?? []) {
       const delta = choice.delta ?? {}
       const thinking = delta.reasoning_content ?? delta.reasoning
@@ -145,19 +151,27 @@ async function* parseChatStream(body: ReadableStream<Uint8Array>, signal: AbortS
     }
   }
 
+  const dataOf = (event: string) =>
+    event
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n')
+
   try {
     while (!finished) {
       const { value, done } = await reader.read()
-      if (done) break
+      if (done) {
+        // The last event may end the stream without its blank line.
+        const data = dataOf(buffer)
+        if (data) yield* handle(data)
+        break
+      }
       buffer += value
       const events = buffer.split(/\r?\n\r?\n/)
       buffer = events.pop() ?? ''
       for (const event of events) {
-        const data = event
-          .split(/\r?\n/)
-          .filter((line) => line.startsWith('data:'))
-          .map((line) => line.slice(5).trimStart())
-          .join('\n')
+        const data = dataOf(event)
         if (data) yield* handle(data)
         if (finished) break
       }
@@ -166,8 +180,8 @@ async function* parseChatStream(body: ReadableStream<Uint8Array>, signal: AbortS
     if (error instanceof LlmError) throw error
     throw signal.aborted ? abortedError(signal) : new LlmError('network', String(error), { retryable: true })
   } finally {
-    reader.releaseLock()
-    body.cancel().catch(() => {})
+    // Cancelling the reader cancels the response body through the pipe, so an early exit frees the connection.
+    reader.cancel().catch(() => {})
   }
 
   if (!finished && finishReason === undefined) throw new LlmError('protocol', 'stream ended before the model finished')

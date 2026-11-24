@@ -1,10 +1,12 @@
 import { abortAllDurableObjects, evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { describe, expect, it, vi } from 'vitest'
-import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import type { AuditEventsResponse, ErrorResponse } from '../../src/shared/encounter'
-import { personaFor } from '../../src/worker/golden-case-pack'
-import { personaPrompt } from '../../src/worker/simulated-patient/patient-context'
+import type { InvestigationsResponse } from '../../src/shared/investigation'
+import { ClinicWorkspaceDO } from '../../src/worker/clinic-workspace-do'
+import { installScriptedLlm } from '../../src/worker/llm/registry'
+import { LlmError, type LlmProvider, type LlmRequest, type LlmStreamEvent } from '../../src/worker/llm/types'
+import { SimulatedPatientDO } from '../../src/worker/simulated-patient/simulated-patient-do'
 import { expectNoCaseTruth } from './case-truth'
 import { api, ask, asked, eventsOf, openPatientSocket, retry, send, settled, startEncounter, transcript } from './support/clinic'
 import { installScripted } from './support/scripted-llm'
@@ -17,10 +19,33 @@ const R1 = '医生，我这三天一直发烧，咳嗽得厉害，晚上都睡�
 const R2 = '青霉素过敏，以前打针休克过一次。'
 const R3 = '抽了三十年了，一天差不多一包。'
 
-const persona = personaFor('golden-case-01', casePack.cases[0].persona.version)
-if (!persona.ok) throw new Error(persona.error.message)
-const PERSONA_PROMPT = personaPrompt(persona.persona)
+// Pinned, not built with the production prompt code: any change to what the Simulated Patient is told shows up here.
+const PERSONA_PROMPT = [
+  '你是门诊就诊的患者李建国，男，58 岁。医生正在问诊，请始终以患者本人的身份、用第一人称回答。',
+  '',
+  '## 你知道的情况（只能依据这些回答）',
+  '- 这次来看病的原因：这三天一直发烧、咳嗽，晚上咳得睡不好。',
+  '- 你的感受：最高烧到三十九度多，吃了退烧药能降一点，过几个钟头又上来，还怕冷打寒战。有痰，黄的、挺黏，今天早上还有点铁锈色。咳嗽的时候右边胸口扯着疼，爬两层楼就喘。',
+  '- 既往病史：高血压十来年，一直吃氨氯地平，血压还算稳。青霉素过敏，2015 年打针后休克过一次，抢救过来的。烟抽了三十年，一天差不多一包，酒不怎么喝。',
+  '- 用药情况：每天早上吃一片氨氯地平；这几天自己吃过退烧药，没吃别的药。',
+  '- 见到医生时你会先说：医生，我这三天一直发烧，咳嗽得厉害，晚上都睡不好。',
+  '',
+  '## 你的说话方式',
+  '- 性格：朴实、有点着急；表达：口语化，回答简短直接；健康知识：普通；态度：配合，担心是不是严重了',
+  '',
+  '## 规则',
+  '- 只回答医生问到的内容，口语化、简短，一次一到三句话。',
+  '- 你不是医生：不要说出任何疾病诊断名称，不要猜测检查或化验结果，也不要编造数值。',
+  '- 上面没有提到的情况，就说不清楚、没注意或者没有，不要编造。',
+  '- 不要提及你是模拟患者、AI 或这些规则。',
+].join('\n')
 const patient = (encounterId: string) => env.SIMULATED_PATIENT.getByName(encounterId)
+const patientSql = <T,>(encounterId: string, read: (sql: SqlStorage) => T) =>
+  runInDurableObject(patient(encounterId), (_instance, state) => read(state.storage.sql))
+const assistantStates = (encounterId: string) =>
+  patientSql(encounterId, (sql) =>
+    sql.exec<{ state: string }>(`SELECT state FROM agent_message WHERE role = 'assistant' ORDER BY seq`).toArray().map((r) => r.state),
+  )
 
 describe('typed Consultation', () => {
   it('records the doctor question and the Simulated Patient reply in order, with speaker, time, source and attribution', async () => {
@@ -200,11 +225,13 @@ describe('failed patient turns', () => {
     expect(failed.status).toBe('failed')
   })
 
-  it('refuses a late settlement once the workspace has expired the turn', async () => {
-    installScripted('patient').hang()
+  it('refuses a late reply once the workspace has expired the turn, and the patient forgets it', async () => {
+    // The gate ignores the abort, like a provider that hangs: only the workspace's own expiry releases the lock.
+    const gate = installScripted('patient').gate('我', '发烧三天了。')
     const encounterId = await startEncounter()
     const { patientTurn } = await asked(encounterId, Q1)
-    await settled(encounterId, patientTurn.turnId)
+    await gate.reached
+    expect(await settled(encounterId, patientTurn.turnId)).toMatchObject({ status: 'failed', failure: 'timeout', text: '' })
 
     const late = await env.CLINIC_WORKSPACE.getByName('default').settlePatientTurn({
       encounterId,
@@ -212,6 +239,9 @@ describe('failed patient turns', () => {
       outcome: { status: 'final', text: R1 },
     })
     expect(late.accepted).toBe(false)
+    gate.release()
+    await runInDurableObjectUntil(encounterId, (sql) => sql.exec<{ status: string }>('SELECT status FROM agent_run').one().status === 'failed')
+    expect(await assistantStates(encounterId)).toEqual([])
     expect((await transcript(encounterId))[1]).toMatchObject({ status: 'failed', failure: 'timeout', text: '' })
   })
 
@@ -239,13 +269,16 @@ describe('streaming over WebSocket', () => {
     const socket = await openPatientSocket(encounterId)
     const { patientTurn } = await asked(encounterId, Q1)
 
-    await socket.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.finished'))
+    await socket.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.settled'))
     const events = eventsOf(socket.messages)
     expect(events[0]).toMatchObject({ type: 'run.started', ref: patientTurn.turnId })
     const deltas = events.filter((e) => e.type === 'text.delta')
     expect(deltas.length).toBeGreaterThan(0)
     expect(deltas.map((e) => ('text' in e ? e.text : '')).join('')).toBe(R1)
-    expect(events.at(-1)).toMatchObject({ type: 'run.finished', ref: patientTurn.turnId, status: 'done', error: null })
+    expect(events.slice(-2)).toMatchObject([
+      { type: 'run.finished', ref: patientTurn.turnId, status: 'done', error: null },
+      { type: 'run.settled', ref: patientTurn.turnId, accepted: true },
+    ])
     expect(events.map((e) => e.seq)).toEqual([...events.map((e) => e.seq)].sort((a, b) => a - b))
     for (const frame of socket.raw) expectNoCaseTruth('patient socket frame', frame)
     expect(await settled(encounterId, patientTurn.turnId)).toMatchObject({ status: 'final', text: R1 })
@@ -270,8 +303,8 @@ describe('streaming over WebSocket', () => {
     expect(resumed.messages.at(-1)).toEqual({ type: 'replay.done', seq: seen.at(-1)!.seq })
 
     gate.release()
-    await resumed.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.finished'))
-    expect(eventsOf(resumed.messages).map((e) => e.type)).toEqual(['text.delta', 'run.finished'])
+    await resumed.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.settled'))
+    expect(eventsOf(resumed.messages).map((e) => e.type)).toEqual(['text.delta', 'run.finished', 'run.settled'])
 
     const ahead = await openPatientSocket(encounterId, 10_000)
     expect(ahead.messages).toEqual([{ type: 'resync' }])
@@ -320,7 +353,8 @@ describe('durability', () => {
     expect(llm.requests).toHaveLength(2)
     expect(llm.requests[1].messages).toEqual(llm.requests[0].messages)
     const replay = await openPatientSocket(encounterId)
-    expect(eventsOf(replay.messages).map((e) => e.type)).toEqual(['run.started', 'run.reset', 'run.finished'])
+    await replay.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.settled'))
+    expect(eventsOf(replay.messages).map((e) => e.type)).toEqual(['run.started', 'run.reset', 'run.finished', 'run.settled'])
     socket.close()
     replay.close()
   })
@@ -340,6 +374,188 @@ describe('durability', () => {
       return run.status === 'failed' && run.error === 'timeout'
     })
     expect(llm.requests).toHaveLength(1)
+  })
+})
+
+describe('what the Simulated Patient is told', () => {
+  it('gets none of what the doctor uncovered by Physical Examination or Investigation', async () => {
+    const llm = installScripted('patient').reply(R1).reply(R2)
+    const encounterId = await startEncounter()
+    for (const system of ['vitals', 'lungs']) {
+      expect((await send('POST', `/api/encounters/${encounterId}/physical-examinations`, { system })).status).toBe(201)
+    }
+    const issued = await send('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['cbc', 'cxr'] })
+    for (const { investigationId } of ((await issued.json()) as InvestigationsResponse).investigations) {
+      expect((await send('POST', `/api/encounters/${encounterId}/investigations/${investigationId}/instant-release`)).status).toBe(200)
+    }
+
+    await settled(encounterId, (await asked(encounterId, Q1)).patientTurn.turnId)
+    await settled(encounterId, (await asked(encounterId, Q2)).patientTurn.turnId)
+    expect(llm.requests.map((r) => r.messages)).toEqual([
+      [{ role: 'system', content: PERSONA_PROMPT }, { role: 'user', content: Q1 }],
+      [
+        { role: 'system', content: PERSONA_PROMPT },
+        { role: 'user', content: Q1 },
+        { role: 'assistant', content: R1 },
+        { role: 'user', content: Q2 },
+      ],
+    ])
+    // No `revealed` exemption: what the doctor uncovered is still Case Truth to the patient.
+    expectNoCaseTruth('Simulated Patient requests', JSON.stringify(llm.requests))
+  })
+
+  it('never streams the patient model\'s thinking to the browser', async () => {
+    installScripted('patient').reply(R1, { thinking: '他是不是在问我发烧的事' })
+    const encounterId = await startEncounter()
+    const socket = await openPatientSocket(encounterId)
+    await asked(encounterId, Q1)
+    await socket.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.settled'))
+    expect(eventsOf(socket.messages).some((e) => e.type === 'thinking.delta')).toBe(false)
+    expect(socket.raw.join('')).not.toContain('他是不是在问我发烧的事')
+    socket.close()
+  })
+
+  it('keeps a failed run\'s tool-step text out of the next run\'s context', async () => {
+    const requests: LlmRequest[] = []
+    const scripts: (() => AsyncGenerator<LlmStreamEvent>)[] = [
+      async function* () {
+        yield { type: 'text.delta', text: '让我查查' }
+        yield { type: 'tool_call', id: 'call-1', name: 'lookup', argumentsJson: '{}' }
+        yield { type: 'done', finishReason: 'tool_calls' }
+      },
+      async function* () {
+        throw new LlmError('http', 'HTTP 500', { status: 500 })
+      },
+      async function* () {
+        yield { type: 'text.delta', text: R1 }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    ]
+    const provider: LlmProvider = {
+      stream(request) {
+        requests.push(structuredClone(request))
+        return scripts.shift()!()
+      },
+    }
+    installScriptedLlm('patient', provider)
+    const encounterId = await startEncounter()
+    const { patientTurn } = await asked(encounterId, Q1)
+    expect(await settled(encounterId, patientTurn.turnId)).toMatchObject({ status: 'failed', failure: 'llm-error' })
+
+    // Within its own run the checkpoint is context for the next step (the patient, having no tools, keeps only its words).
+    expect(requests[1].messages.slice(1)).toEqual([
+      { role: 'user', content: Q1 },
+      { role: 'assistant', content: '让我查查' },
+    ])
+    const { patientTurn: attempt2 } = (await (await retry(encounterId, patientTurn.turnId)).json()) as { patientTurn: { turnId: string } }
+    await settled(encounterId, attempt2.turnId)
+    expect(requests[2].messages).toEqual([{ role: 'system', content: PERSONA_PROMPT }, { role: 'user', content: Q1 }])
+  })
+})
+
+describe('settling patient turns', () => {
+  it('accepts the redelivery of a settlement it already applied, so the patient keeps its reply', async () => {
+    const original = ClinicWorkspaceDO.prototype.settlePatientTurn
+    let calls = 0
+    // The workspace commits, then the response is lost: the outbox delivers the same settlement again.
+    ClinicWorkspaceDO.prototype.settlePatientTurn = function (this: ClinicWorkspaceDO, settlement) {
+      const result = original.call(this, settlement)
+      if (++calls === 1) throw new Error('connection lost after commit')
+      return result
+    }
+    try {
+      const llm = installScripted('patient').reply(R1).reply(R2)
+      const encounterId = await startEncounter()
+      const socket = await openPatientSocket(encounterId)
+      const { patientTurn } = await asked(encounterId, Q1)
+      expect(await settled(encounterId, patientTurn.turnId)).toMatchObject({ status: 'final', text: R1 })
+
+      await socket.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.settled'))
+      expect(calls).toBe(2)
+      expect(eventsOf(socket.messages).find((e) => e.type === 'run.settled')).toMatchObject({ accepted: true })
+      expect(await assistantStates(encounterId)).toEqual(['active'])
+
+      await settled(encounterId, (await asked(encounterId, Q2)).patientTurn.turnId)
+      expect(llm.requests[1].messages.slice(1)).toEqual([
+        { role: 'user', content: Q1 },
+        { role: 'assistant', content: R1 },
+        { role: 'user', content: Q2 },
+      ])
+      socket.close()
+    } finally {
+      ClinicWorkspaceDO.prototype.settlePatientTurn = original
+    }
+  })
+
+  it('announces the settlement after the workspace has it, even when delivery is delayed', async () => {
+    const original = ClinicWorkspaceDO.prototype.settlePatientTurn
+    let calls = 0
+    ClinicWorkspaceDO.prototype.settlePatientTurn = function (this: ClinicWorkspaceDO, settlement) {
+      if (++calls === 1) throw new Error('workspace briefly unreachable')
+      return original.call(this, settlement)
+    }
+    try {
+      installScripted('patient').reply(R1)
+      const encounterId = await startEncounter()
+      const socket = await openPatientSocket(encounterId)
+      const { patientTurn } = await asked(encounterId, Q1)
+
+      await socket.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.finished'))
+      expect((await transcript(encounterId))[1].status).toBe('pending')
+      await socket.waitFor((m) => eventsOf(m).some((e) => e.type === 'run.settled'))
+      expect((await transcript(encounterId))[1]).toMatchObject({ turnId: patientTurn.turnId, status: 'final', text: R1 })
+      socket.close()
+    } finally {
+      ClinicWorkspaceDO.prototype.settlePatientTurn = original
+    }
+  })
+
+  it('fails the reply when the Simulated Patient cannot be reached, and refuses its late settlement', async () => {
+    const original = SimulatedPatientDO.prototype.beginReply
+    SimulatedPatientDO.prototype.beginReply = async () => {
+      throw new Error('patient unreachable')
+    }
+    try {
+      const encounterId = await startEncounter()
+      const { patientTurn } = await asked(encounterId, Q1)
+      expect(patientTurn).toMatchObject({ status: 'failed', failure: 'patient-unavailable' })
+      const late = await env.CLINIC_WORKSPACE.getByName('default').settlePatientTurn({
+        encounterId,
+        patientTurnId: patientTurn.turnId,
+        outcome: { status: 'final', text: R1 },
+      })
+      expect(late.accepted).toBe(false)
+    } finally {
+      SimulatedPatientDO.prototype.beginReply = original
+    }
+  })
+
+  it('holds at most one pending patient turn per Encounter in storage, even if a command skipped the check', async () => {
+    installScripted('patient').gate('我', '发烧。')
+    const encounterId = await startEncounter()
+    await asked(encounterId, Q1)
+    await runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
+      const insertPending = () =>
+        state.storage.sql.exec(
+          `INSERT INTO consultation_turn (turn_id, encounter_id, seq, speaker, source, attribution, text, status, created_at)
+           VALUES ('second-pending', ?, 99, 'patient', 'simulated', 'simulated-patient', '', 'pending', '2026-11-24T00:00:00Z')`,
+          encounterId,
+        )
+      expect(insertPending).toThrow(/UNIQUE/)
+    })
+  })
+
+  it('ignores malformed socket frames and still answers hello', async () => {
+    const encounterId = await startEncounter()
+    const response = await api(`/api/encounters/${encounterId}/patient/socket`, { headers: { upgrade: 'websocket' } })
+    const ws = response.webSocket!
+    const frames: string[] = []
+    ws.addEventListener('message', (event) => frames.push(String(event.data)))
+    ws.accept()
+    for (const junk of ['null', '42', '"hello"', '{"type":"hello"}', 'not json']) ws.send(junk)
+    ws.send(JSON.stringify({ type: 'hello', afterSeq: 0 }))
+    await vi.waitFor(() => expect(frames).toEqual([JSON.stringify({ type: 'replay.done', seq: 0 })]), { timeout: 2000 })
+    ws.close()
   })
 })
 

@@ -217,7 +217,7 @@ export class DurableAgentRuntime {
       } else {
         outcome = { status: 'failed', error: 'too-many-steps', text: '' }
         for (let step = 0; step < MAX_STEPS; step++) {
-          const context = this.agent.buildContext({ binding: this.binding(), run, messages: this.contextMessages() })
+          const context = this.agent.buildContext({ binding: this.binding(), run, messages: this.contextMessages(run.runId) })
           usage.estimatedInput += context.messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
           const toolCalls: ToolCall[] = []
           text = ''
@@ -259,8 +259,10 @@ export class DurableAgentRuntime {
   }
 
   // Checkpoint after an LLM step that asked for tools. No agent has tools yet, so each call is answered with an
-  // error the model can read, and the loop goes on to the next step.
+  // error the model can read, and the loop goes on to the next step. For a settling agent the checkpoint is
+  // `unsettled` like its reply: only its own run sees it until the outcome is accepted.
   private checkpointToolStep(runId: string, text: string, toolCalls: ToolCall[]): void {
+    const state = this.agent.settlement ? 'unsettled' : 'active'
     this.ctx.storage.transactionSync(() => {
       const messages: LlmMessage[] = [
         { role: 'assistant', content: text, toolCalls },
@@ -268,8 +270,8 @@ export class DurableAgentRuntime {
       ]
       for (const message of messages) {
         this.sql.exec(
-          `INSERT INTO agent_message (run_id, role, content_json, state, created_at) VALUES (?, ?, ?, 'active', ?)`,
-          runId, message.role, JSON.stringify(message), Date.now(),
+          `INSERT INTO agent_message (run_id, role, content_json, state, created_at) VALUES (?, ?, ?, ?, ?)`,
+          runId, message.role, JSON.stringify(message), state, Date.now(),
         )
       }
     })
@@ -290,6 +292,10 @@ export class DurableAgentRuntime {
       `UPDATE agent_run SET status = ?, error = ?, usage_json = ?, finished_at = ? WHERE run_id = ?`,
       outcome.status, outcome.status === 'failed' ? outcome.error : null, usage && JSON.stringify(usage), now, run.runId,
     )
+    // A failed run settles nothing it said: its checkpoints never reach another run's context.
+    if (outcome.status === 'failed') {
+      this.sql.exec(`UPDATE agent_message SET state = 'void' WHERE run_id = ? AND state = 'unsettled'`, run.runId)
+    }
     if (this.agent.settlement) this.outbox.enqueue(run.runId, this.agent.settlement.payload(run, outcome), now)
     this.events.dropDeltas(run.runId)
     const finished: AgentEvent = {
@@ -308,13 +314,16 @@ export class DurableAgentRuntime {
     for (const entry of this.outbox.due(Date.now())) {
       try {
         const accepted = await settlement.deliver(entry.payload)
-        this.ctx.storage.transactionSync(() => {
+        const settled = this.ctx.storage.transactionSync(() => {
           this.outbox.delivered(entry.id, Date.now())
           this.sql.exec(
             `UPDATE agent_message SET state = ? WHERE run_id = ? AND state = 'unsettled'`,
             accepted ? 'active' : 'void', entry.runId,
           )
+          const ref = this.sql.exec<{ external_ref: string | null }>('SELECT external_ref FROM agent_run WHERE run_id = ?', entry.runId).one()
+          return this.events.append({ type: 'run.settled', runId: entry.runId, ref: ref.external_ref, accepted })
         })
+        this.publish([settled])
       } catch (error) {
         this.outbox.failed(entry, Date.now(), String(error))
       }
@@ -326,10 +335,14 @@ export class DurableAgentRuntime {
     return row ? JSON.parse(row.binding_json) : null
   }
 
-  // Active messages in order: the inputs runs were given, settled replies and tool-step checkpoints.
-  private contextMessages(): LlmMessage[] {
+  // Active messages in order (the inputs runs were given, settled replies and checkpoints), plus this run's own
+  // checkpoints while they are unsettled.
+  private contextMessages(runId: string): LlmMessage[] {
     return this.sql
-      .exec<{ content_json: string }>(`SELECT content_json FROM agent_message WHERE state = 'active' ORDER BY seq`)
+      .exec<{ content_json: string }>(
+        `SELECT content_json FROM agent_message WHERE state = 'active' OR (state = 'unsettled' AND run_id = ?) ORDER BY seq`,
+        runId,
+      )
       .toArray()
       .map((row) => JSON.parse(row.content_json) as LlmMessage)
   }

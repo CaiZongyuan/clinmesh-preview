@@ -161,7 +161,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
         ready.now,
         new Date(ready.now.getTime() + this.turnTimeoutMs),
       )
-      this.encounters.audit(encounterId, 'consultation-question-asked', DEMO_PRACTITIONER_ID, ready.now.toISOString())
+      this.encounters.audit(encounterId, 'consultation-question-asked', DEMO_PRACTITIONER_ID, ready.now.toISOString(), exchange.doctorTurn.turnId)
       return { ok: true, exchange, persona: ready.persona }
     })
     return this.dispatchReply(encounterId, recorded)
@@ -175,7 +175,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       const deadline = new Date(ready.now.getTime() + this.turnTimeoutMs)
       const retried = this.consultation.retry(encounterId, patientTurnId, ready.now, deadline)
       if (!retried.ok) return retried
-      this.encounters.audit(encounterId, 'patient-reply-retried', DEMO_PRACTITIONER_ID, ready.now.toISOString())
+      this.encounters.audit(encounterId, 'patient-reply-retried', DEMO_PRACTITIONER_ID, ready.now.toISOString(), retried.patientTurn.turnId)
       return { ok: true, exchange: retried, persona: ready.persona }
     })
     return this.dispatchReply(encounterId, recorded)
@@ -218,11 +218,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
         await this.env.SIMULATED_PATIENT.getByName(encounterId).beginReply(request)
       } catch (error) {
         console.error('Simulated Patient unavailable', error)
-        this.settlePatientTurn({
-          encounterId,
-          patientTurnId: request.patientTurnId,
-          outcome: { status: 'failed', failure: 'patient-unavailable', text: '' },
-        })
+        this.ctx.storage.transactionSync(() => this.consultation.failPending(encounterId, 'patient-unavailable', new Date()))
       }
     }
     return { ok: true, doctorTurn: exchange.doctorTurn, patientTurn: this.consultation.find(exchange.patientTurn.turnId)! }

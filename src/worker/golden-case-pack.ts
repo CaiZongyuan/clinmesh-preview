@@ -118,12 +118,22 @@ export function personaFor(caseId: string, personaVersion: string): PatientPerso
     return { ok: false, error: { code: 'case-version-retired', message } }
   }
   const { patient, registration, persona } = goldenCase
+  const { chiefComplaint, openingStatement, knownHistorySummary, symptomExperience, medicationMemory } = persona.content
+  const { character, speechStyle, healthLiteracy, attitude } = persona.content.persona
+  // Field by field, so anything later added to the pack's persona reaches the patient only by a change here.
   return {
     ok: true,
     persona: {
       version: persona.version,
       identity: { name: patient.name, sex: patient.gender as Sex, age: ageOn(patient.birthDate, registration.registeredAt) },
-      content: persona.content,
+      content: {
+        chiefComplaint,
+        openingStatement,
+        knownHistorySummary,
+        symptomExperience,
+        medicationMemory,
+        persona: { character, speechStyle, healthLiteracy, attitude },
+      },
     },
   }
 }

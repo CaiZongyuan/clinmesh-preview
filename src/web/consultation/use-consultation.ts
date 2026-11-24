@@ -35,8 +35,9 @@ function merge(turns: ConsultationTurn[], incoming: ConsultationTurn[]): Consult
 
 // The Consultation of one Encounter: the transcript from the workspace over HTTP, and the Simulated Patient's
 // replies as they stream over its socket. The socket replays what was missed after a refresh or a dropped
-// connection, and every settled reply reloads the transcript, which stays the record.
-export function useConsultation(encounterId: string | null): Consultation {
+// connection, and every reply the workspace has settled reloads the transcript, which stays the record.
+// A change of Encounter status (e.g. abandonment, which fails a waiting reply) reloads it too.
+export function useConsultation(encounterId: string | null, encounterStatus?: string): Consultation {
   const [turns, setTurns] = useState<ConsultationTurn[]>([])
   const [streamed, setStreamed] = useState<Record<string, string>>({})
   const [stream, setStream] = useState<StreamState>('connecting')
@@ -58,8 +59,11 @@ export function useConsultation(encounterId: string | null): Consultation {
     setTurns([])
     setStreamed({})
     setError(null)
+  }, [encounterId])
+
+  useEffect(() => {
     void refresh()
-  }, [refresh])
+  }, [refresh, encounterStatus])
 
   useEffect(() => {
     if (!encounterId) return
@@ -83,7 +87,7 @@ export function useConsultation(encounterId: string | null): Consultation {
         setText(event.runId, (text) => text + event.text)
       } else if (event.type === 'run.reset') {
         setText(event.runId, () => '')
-      } else if (event.type === 'run.finished') {
+      } else if (event.type === 'run.settled') {
         if (!replaying) void refresh()
       }
     }
@@ -144,11 +148,16 @@ export function useConsultation(encounterId: string | null): Consultation {
     return () => clearTimeout(timer)
   }, [pending, refresh])
 
+  // Sending the same question again after a failed request reuses its id, so the workspace records it once.
+  const unsent = useRef<{ text: string; clientTurnId: string } | null>(null)
+
   const ask = async (text: string) => {
     if (!encounterId) return false
     setError(null)
+    if (unsent.current?.text !== text) unsent.current = { text, clientTurnId: crypto.randomUUID() }
     try {
-      const { doctorTurn, patientTurn } = await askPatient(encounterId, crypto.randomUUID(), text)
+      const { doctorTurn, patientTurn } = await askPatient(encounterId, unsent.current.clientTurnId, text)
+      unsent.current = null
       setTurns((known) => merge(known, [doctorTurn, patientTurn]))
       return true
     } catch (e) {

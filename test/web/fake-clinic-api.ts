@@ -45,6 +45,7 @@ export function examinationFor(system: keyof typeof goldenCase1Findings, examine
 let turnIds = 0
 export function turnFor(overrides: Partial<ConsultationTurn> & Pick<ConsultationTurn, 'seq' | 'speaker'>): ConsultationTurn {
   const doctor = overrides.speaker === 'doctor'
+  const createdAt = overrides.createdAt ?? '2026-11-24T00:41:05.000Z'
   return {
     turnId: `turn-${++turnIds}`,
     source: doctor ? 'typed' : 'simulated',
@@ -53,8 +54,8 @@ export function turnFor(overrides: Partial<ConsultationTurn> & Pick<Consultation
     status: 'final',
     replyTo: null,
     attempt: 1,
-    createdAt: '2026-11-24T00:41:05.000Z',
-    settledAt: '2026-11-24T00:41:06.000Z',
+    createdAt,
+    settledAt: overrides.status === 'pending' ? null : createdAt,
     deadlineAt: null,
     failure: null,
     ...overrides,
@@ -174,6 +175,8 @@ export function createFakeClinicApi({
     if (method === 'POST' && action === 'abandonment') {
       if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
       Object.assign(encounter, { status: 'abandoned', endedAt: new Date().toISOString() })
+      const waiting = pendingOf(encounter.encounterId)
+      if (waiting) Object.assign(waiting, { status: 'failed', failure: 'encounter-ended', deadlineAt: null, settledAt: new Date().toISOString() })
       return Response.json({ encounter })
     }
     const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined
@@ -186,11 +189,19 @@ export function createFakeClinicApi({
     throw new Error(`The fake clinic API has no route for ${method} ${path}`)
   }
 
-  function settle(encounterId: string, update: Partial<ConsultationTurn>, status: 'done' | 'failed', error: string | null) {
+  // The patient's run finishes first; the workspace has the outcome only once the settlement is delivered.
+  function finish(encounterId: string, status: 'done' | 'failed', error: string | null) {
+    const turn = pendingOf(encounterId)
+    if (!turn) throw new Error('No patient turn is pending')
+    emit(encounterId, { type: 'run.finished', runId: runOf.get(turn.turnId)!, ref: turn.turnId, status, error })
+    return turn
+  }
+
+  function settle(encounterId: string, update: Partial<ConsultationTurn>, announce = true) {
     const turn = pendingOf(encounterId)
     if (!turn) throw new Error('No patient turn is pending')
     Object.assign(turn, { deadlineAt: null, settledAt: new Date().toISOString(), ...update })
-    emit(encounterId, { type: 'run.finished', runId: runOf.get(turn.turnId)!, ref: turn.turnId, status, error })
+    if (announce) emit(encounterId, { type: 'run.settled', runId: runOf.get(turn.turnId)!, ref: turn.turnId, accepted: true })
   }
 
   class FakePatientSocket {
@@ -246,8 +257,19 @@ export function createFakeClinicApi({
     openSockets: () => [...sockets],
     patient: {
       stream: (encounterId: string, text: string) => emit(encounterId, { type: 'text.delta', runId: pendingRun(encounterId), text }),
-      answer: (encounterId: string, text: string) => settle(encounterId, { status: 'final', text }, 'done', null),
-      fail: (encounterId: string, failure: PatientTurnFailure) => settle(encounterId, { status: 'failed', failure }, 'failed', failure),
+      answer: (encounterId: string, text: string) => {
+        finish(encounterId, 'done', null)
+        settle(encounterId, { status: 'final', text })
+      },
+      fail: (encounterId: string, failure: PatientTurnFailure) => {
+        finish(encounterId, 'failed', failure)
+        settle(encounterId, { status: 'failed', failure })
+      },
+      // The run is done, but its settlement hasn't reached the workspace yet.
+      finishOnly: (encounterId: string) => finish(encounterId, 'done', null),
+      deliver: (encounterId: string, text: string) => settle(encounterId, { status: 'final', text }),
+      // The workspace fails the reply by itself (e.g. past its deadline) and no event says so.
+      expireSilently: (encounterId: string) => settle(encounterId, { status: 'failed', failure: 'timeout' }, false),
       // A network drop: every open socket closes, and the page has to reconnect.
       dropConnections: () => [...sockets].forEach((socket) => socket.close()),
     },

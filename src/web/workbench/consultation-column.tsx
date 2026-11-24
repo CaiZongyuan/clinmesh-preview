@@ -15,7 +15,7 @@ import { MAX_QUESTION_LENGTH, type ConsultationTurn, type PatientTurnFailure } f
 import type { EncounterView } from '../../shared/encounter'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import type { Consultation } from '../consultation/use-consultation'
-import { formatTime } from './format'
+import { formatClockSeconds } from './format'
 import { badge, iconButton, pane, paneHeader } from './pane-styles'
 import { PhysicalExaminationPanel, PhysicalExaminationRow } from './physical-examination'
 
@@ -28,14 +28,20 @@ type TranscriptFilter = 'all' | 'doctor' | 'patient' | 'examination'
 
 // What the doctor and patient said, and the objective findings the doctor examined, in the order they happened.
 type TranscriptEntry =
-  | { channel: 'doctor' | 'patient'; at: string; order: number; turn: ConsultationTurn }
+  | { channel: 'doctor' | 'patient'; at: string | null; order: number; turn: ConsultationTurn }
   | { channel: 'examination'; at: string; order: number; examination: PhysicalExaminationView }
 
+// A turn happened when it was said: a question when asked, a reply when the patient gave it. A reply still
+// pending sorts last, after anything examined while the patient was thinking.
+const spokenAt = (turn: ConsultationTurn) =>
+  turn.speaker === 'doctor' ? turn.createdAt : (turn.settledAt ?? (turn.status === 'pending' ? null : turn.createdAt))
+
 function transcriptOf(turns: ConsultationTurn[], examinations: PhysicalExaminationView[]): TranscriptEntry[] {
+  const time = (at: string | null) => (at === null ? Number.POSITIVE_INFINITY : Date.parse(at))
   return [
-    ...turns.map((turn): TranscriptEntry => ({ channel: turn.speaker, at: turn.createdAt, order: turn.seq, turn })),
+    ...turns.map((turn): TranscriptEntry => ({ channel: turn.speaker, at: spokenAt(turn), order: turn.seq, turn })),
     ...examinations.map((examination): TranscriptEntry => ({ channel: 'examination', at: examination.examinedAt, order: 0, examination })),
-  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.order - b.order)
+  ].sort((a, b) => time(a.at) - time(b.at) || a.order - b.order)
 }
 
 const FILTERS: readonly { value: TranscriptFilter; label: string; empty: string }[] = [
@@ -190,9 +196,11 @@ function TurnRow({ turn, patientName, streamed, retry }: TurnRowProps) {
       <div className="min-w-0">
         <div className="flex min-h-[18px] flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <b className="font-medium text-foreground">{doctor ? '接诊医生' : patientName}</b>
-          <time dateTime={turn.createdAt} className="font-mono">
-            {formatTime(turn.createdAt)}
-          </time>
+          {spokenAt(turn) && (
+            <time dateTime={spokenAt(turn)!} className="font-mono">
+              {formatClockSeconds(spokenAt(turn)!)}
+            </time>
+          )}
           {turn.source === 'typed' ? (
             <span className={`${badge} h-[18px] bg-muted px-[5px] text-[11px] font-normal`}>
               <KeyboardIcon aria-hidden="true" size={11} />

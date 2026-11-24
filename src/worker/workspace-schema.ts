@@ -92,6 +92,9 @@ const MIGRATIONS: readonly string[] = [
      settled_at TEXT,
      deadline_at TEXT,
      failure_reason TEXT,
+     -- Who settled a patient turn: the Simulated Patient's own outcome, or the workspace failing it (expiry,
+     -- abandonment, patient unreachable). A redelivered patient settlement is accepted again only for the former.
+     settled_by TEXT CHECK (settled_by IN ('simulated-patient', 'workspace')),
      UNIQUE (encounter_id, seq),
      UNIQUE (encounter_id, client_turn_id)
    );

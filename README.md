@@ -47,7 +47,7 @@ Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "
 | `GET /api/encounters/:encounterId/consultation` | The Consultation transcript: doctor and patient turns in order (speaker, source, attribution, status, failure) |
 | `POST /api/encounters/:encounterId/consultation/doctor-turns` `{ clientTurnId, text }` | Records a typed question and a pending patient turn, and asks the Simulated Patient (201); idempotent per `clientTurnId`; `409 patient-turn-pending` while the previous reply is pending |
 | `POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry` | A new reply attempt to the latest, failed patient turn (201); the failed one stays; `409 patient-turn-not-retryable` otherwise |
-| `GET /api/encounters/:encounterId/patient/socket` | WebSocket: the Simulated Patient's reply stream (`src/shared/agent-wire.ts`). Send `{ "type": "hello", "afterSeq": n }`; the server replays events after `n`, sends `replay.done`, then live events. `426` without an upgrade |
+| `GET /api/encounters/:encounterId/patient/socket` | WebSocket: the Simulated Patient's reply stream (`src/shared/agent-wire.ts`). Send `{ "type": "hello", "afterSeq": n }`; the server replays events after `n`, sends `replay.done`, then live events; `run.settled` follows once the workspace has the reply. `426` without an upgrade |
 
 Two Worker-seam tests enumerate the Hono app's routes and fail until a new route is listed:
 

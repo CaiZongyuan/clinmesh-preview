@@ -16,6 +16,7 @@ type TurnRow = {
   settled_at: string | null
   deadline_at: string | null
   failure_reason: PatientTurnFailure | null
+  settled_by: 'simulated-patient' | 'workspace' | null
 }
 
 export interface Exchange {
@@ -57,7 +58,7 @@ export class ConsultationRepository {
   expireOverdue(encounterId: string, now: Date, graceMs: number): void {
     const turn = this.pending(encounterId)
     if (turn?.deadlineAt && Date.parse(turn.deadlineAt) + graceMs <= now.getTime()) {
-      this.fail(turn.turnId, 'timeout', now)
+      this.fail(turn.turnId, 'timeout', now, 'workspace')
     }
   }
 
@@ -95,25 +96,31 @@ export class ConsultationRepository {
     }
   }
 
-  // First settlement wins; a turn that already failed (timed out, Encounter ended) refuses a late reply.
+  // First settlement wins. A patient turn the workspace already failed (expired, Encounter ended, patient
+  // unreachable) refuses a late reply; one the Simulated Patient settled accepts the redelivery of that same
+  // settlement (each patient turn is one run, settled once), so an outbox retry never voids an accepted reply.
   settle(encounterId: string, patientTurnId: string, outcome: PatientReplyOutcome, now: Date, graceMs: number): boolean {
     this.expireOverdue(encounterId, now, graceMs)
-    const turn = this.find(patientTurnId)
-    if (!turn || turn.status !== 'pending' || this.encounterOf(patientTurnId) !== encounterId) return false
+    const row = this.sql
+      .exec<TurnRow>(`SELECT * FROM consultation_turn WHERE turn_id = ? AND encounter_id = ? AND speaker = 'patient'`, patientTurnId, encounterId)
+      .toArray()[0]
+    if (!row) return false
+    if (row.status !== 'pending') return row.settled_by === 'simulated-patient' && sameOutcome(row, outcome)
     if (outcome.status === 'final') {
       this.sql.exec(
-        `UPDATE consultation_turn SET status = 'final', text = ?, settled_at = ? WHERE turn_id = ?`,
+        `UPDATE consultation_turn SET status = 'final', text = ?, settled_at = ?, settled_by = 'simulated-patient' WHERE turn_id = ?`,
         outcome.text, now.toISOString(), patientTurnId,
       )
     } else {
-      this.fail(patientTurnId, outcome.failure, now, outcome.text)
+      this.fail(patientTurnId, outcome.failure, now, 'simulated-patient', outcome.text)
     }
     return true
   }
 
+  // The workspace fails a waiting reply itself: the Encounter ended, or the Simulated Patient could not be reached.
   failPending(encounterId: string, failure: PatientTurnFailure, now: Date): void {
     const turn = this.pending(encounterId)
-    if (turn) this.fail(turn.turnId, failure, now)
+    if (turn) this.fail(turn.turnId, failure, now, 'workspace')
   }
 
   find(turnId: string): ConsultationTurn | undefined {
@@ -131,10 +138,10 @@ export class ConsultationRepository {
     return this.find(turnId)!
   }
 
-  private fail(turnId: string, failure: PatientTurnFailure, now: Date, partialText = ''): void {
+  private fail(turnId: string, failure: PatientTurnFailure, now: Date, settledBy: TurnRow['settled_by'], partialText = ''): void {
     this.sql.exec(
-      `UPDATE consultation_turn SET status = 'failed', failure_reason = ?, text = ?, settled_at = ? WHERE turn_id = ?`,
-      failure, partialText, now.toISOString(), turnId,
+      `UPDATE consultation_turn SET status = 'failed', failure_reason = ?, text = ?, settled_at = ?, settled_by = ? WHERE turn_id = ?`,
+      failure, partialText, now.toISOString(), settledBy, turnId,
     )
   }
 
@@ -154,6 +161,9 @@ export class ConsultationRepository {
     return (this.sql.exec<{ seq: number | null }>('SELECT max(seq) AS seq FROM consultation_turn WHERE encounter_id = ?', encounterId).one().seq ?? 0) + 1
   }
 }
+
+const sameOutcome = (row: TurnRow, outcome: PatientReplyOutcome) =>
+  outcome.status === 'final' ? row.status === 'final' && row.text === outcome.text : row.failure_reason === outcome.failure
 
 function toTurn(row: TurnRow): ConsultationTurn {
   return {

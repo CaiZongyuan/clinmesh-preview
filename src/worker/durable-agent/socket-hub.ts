@@ -26,13 +26,13 @@ export class SocketHub {
   }
 
   onMessage(ws: WebSocket, data: string | ArrayBuffer): void {
-    let message: ClientMessage
+    let message: Partial<ClientMessage> | null
     try {
-      message = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data)) as ClientMessage
+      message = JSON.parse(typeof data === 'string' ? data : new TextDecoder().decode(data)) as Partial<ClientMessage> | null
     } catch {
       return
     }
-    if (message.type !== 'hello' || typeof message.afterSeq !== 'number') return
+    if (typeof message !== 'object' || message === null || message.type !== 'hello' || typeof message.afterSeq !== 'number') return
     const latest = this.events.latestSeq()
     if (message.afterSeq > latest) {
       send(ws, { type: 'resync' })

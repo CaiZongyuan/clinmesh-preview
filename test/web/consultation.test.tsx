@@ -157,9 +157,9 @@ describe('typed Consultation', () => {
 describe('transcript', () => {
   const turns = () => [
     turnFor({ seq: 1, speaker: 'doctor', text: '您哪里不舒服？', createdAt: '2026-11-24T00:41:00.000Z' }),
-    turnFor({ seq: 2, speaker: 'patient', text: '发烧三天了。', createdAt: '2026-11-24T00:41:00.000Z' }),
+    turnFor({ seq: 2, speaker: 'patient', text: '发烧三天了。', createdAt: '2026-11-24T00:41:00.000Z', settledAt: '2026-11-24T00:41:04.000Z' }),
     turnFor({ seq: 3, speaker: 'doctor', text: '咳嗽有痰吗？', createdAt: '2026-11-24T00:43:00.000Z' }),
-    turnFor({ seq: 4, speaker: 'patient', text: '有黄痰。', createdAt: '2026-11-24T00:43:00.000Z' }),
+    turnFor({ seq: 4, speaker: 'patient', text: '有黄痰。', createdAt: '2026-11-24T00:43:00.000Z', settledAt: '2026-11-24T00:43:09.000Z' }),
   ]
 
   it('interleaves examination rows by time and filters all / doctor / patient / examination', async () => {
@@ -173,6 +173,9 @@ describe('transcript', () => {
       'doctor',
       'patient',
     ])
+    // A reply shows when the patient gave it, not when the question was asked.
+    expect(within(transcriptRows()[1]).getByText('08:41:04')).toHaveAttribute('datetime', '2026-11-24T00:41:04.000Z')
+    expect(within(transcriptRows()[3]).getByText('08:43:00')).toBeInTheDocument()
 
     const filter = screen.getByRole('radiogroup', { name: '筛选问诊记录' })
     await user.click(within(filter).getByRole('radio', { name: '医生' }))
@@ -286,6 +289,74 @@ describe('refresh and disconnects', () => {
     await waitFor(() => expect(screen.getByRole('status', { name: '模拟患者连接' })).toHaveTextContent('实时'), { timeout: 3000 })
     await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('我这三天一直发烧。'))
     expect(api.openSockets()).toHaveLength(1)
+  })
+})
+
+describe('keeping the transcript current', () => {
+  it('reloads only once the workspace has the reply, not when the patient run merely finished', async () => {
+    const { api } = openEncounter()
+    await live()
+    await askQuestion('您哪里不舒服？')
+    await waitFor(() => expect(transcriptRows()).toHaveLength(2))
+    const reads = () => requestsTo('GET', `/api/encounters/${ENCOUNTER}/consultation`).length
+
+    act(() => void api.patient.finishOnly(ENCOUNTER))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(transcriptRows()[1]).toHaveTextContent('模拟患者正在组织语言')
+    const before = reads()
+
+    act(() => api.patient.deliver(ENCOUNTER, '发烧三天了。'))
+    await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('发烧三天了。'))
+    expect(reads()).toBe(before + 1)
+    expect(screen.getByRole('textbox', { name: '键入向患者的提问' })).toHaveAttribute('placeholder', '键入问题（不经过语音）')
+  })
+
+  it('asks the workspace again once a pending reply is past its deadline, even with no event', async () => {
+    const { api } = openEncounter({
+      turns: [
+        turnFor({ seq: 1, speaker: 'doctor', text: '您哪里不舒服？' }),
+        turnFor({ seq: 2, speaker: 'patient', status: 'pending', deadlineAt: new Date(Date.now() - 10_000).toISOString() }),
+      ],
+    })
+    await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('模拟患者正在组织语言'))
+    api.patient.expireSilently(ENCOUNTER)
+
+    await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('模拟患者回答超时'), { timeout: 4000 })
+    expect(within(transcriptRows()[1]).getByRole('button', { name: '重试这一问' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '键入向患者的提问' })).toHaveAttribute('placeholder', '键入问题（不经过语音）')
+  })
+
+  it('shows the waiting reply as ended once the doctor abandons the Encounter', async () => {
+    const user = userEvent.setup()
+    openEncounter()
+    await live()
+    await askQuestion('您哪里不舒服？')
+    await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('模拟患者正在组织语言'))
+
+    await user.click(screen.getByRole('button', { name: '放弃就诊' }))
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '确认放弃' }))
+    await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('就诊已结束，本轮未作答。'))
+    expect(screen.getByRole('textbox', { name: '键入向患者的提问' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '重试这一问' })).not.toBeInTheDocument()
+  })
+
+  it('resends a question whose request failed under the same client turn id', async () => {
+    const user = userEvent.setup()
+    const { api } = openEncounter()
+    await live()
+    fetchStub.mockImplementationOnce(() => Promise.reject(new TypeError('Failed to fetch')))
+    fetchStub.mockImplementation(api.handle)
+    await askQuestion('您哪里不舒服？')
+    expect(await within(await column()).findByRole('alert')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '键入向患者的提问' })).toHaveValue('您哪里不舒服？')
+
+    await user.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(transcriptRows()).toHaveLength(2))
+    const ids = fetchStub.mock.calls
+      .filter(([url, init]) => String(url).endsWith('/consultation/doctor-turns') && init?.method === 'POST')
+      .map(([, init]) => JSON.parse(String(init?.body)).clientTurnId)
+    expect(ids).toHaveLength(2)
+    expect(ids[1]).toBe(ids[0])
   })
 })
 

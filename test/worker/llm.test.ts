@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { resolveLlmConfig } from '../../src/worker/llm/config'
 import { createOpenAiCompatibleProvider } from '../../src/worker/llm/openai-compatible'
 import { resolveLlmProvider } from '../../src/worker/llm/registry'
@@ -148,6 +148,41 @@ describe('OpenAI-compatible provider', () => {
       }).stream(request, controller.signal),
     ).catch((e: unknown) => e)
     expect(aborted).toMatchObject({ kind: 'aborted' })
+  })
+})
+
+describe('OpenAI-compatible stream edge cases', () => {
+  const providerOver = (body: BodyInit) =>
+    createOpenAiCompatibleProvider({ baseUrl: 'https://llm.test', apiKey: 'k', effortStyle: 'none', fetch: async () => new Response(body) })
+
+  it('keeps a final event that ends the stream without its blank line', async () => {
+    const body = 'data: {"choices":[{"delta":{"content":"好"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n'
+    expect(await collect(providerOver(body).stream(request, new AbortController().signal))).toEqual([
+      { type: 'text.delta', text: '好' },
+      { type: 'done', finishReason: 'stop' },
+    ])
+  })
+
+  it('surfaces an error the provider reports mid-stream, with its message', async () => {
+    const body = 'data: {"choices":[{"delta":{"content":"好"}}]}\n\ndata: {"error":{"message":"rate limited","code":"1302"}}\n\n'
+    const error = await collect(providerOver(body).stream(request, new AbortController().signal)).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(LlmError)
+    expect(error).toMatchObject({ kind: 'http', message: 'provider error: 1302 rate limited' })
+  })
+
+  it('cancels the upstream response when it stops reading early', async () => {
+    let cancelled = false
+    const upstream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {not json\n\n'))
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    const error = await collect(providerOver(upstream).stream(request, new AbortController().signal)).catch((e: unknown) => e)
+    expect(error).toMatchObject({ kind: 'protocol' })
+    await vi.waitFor(() => expect(cancelled).toBe(true))
   })
 })
 

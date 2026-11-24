@@ -34,7 +34,7 @@ const browserLayoutStorage: ResizableStorage = {
 export function WorkbenchColumns({ caseWorkspace, encounter }: { caseWorkspace: ReactNode; encounter?: EncounterContext }) {
   const [columns] = useState(createResizableController)
   // Lives above the column so the collapsed strip still knows when the patient is answering.
-  const consultation = useConsultation(encounter?.encounter.encounterId ?? null)
+  const consultation = useConsultation(encounter?.encounter.encounterId ?? null, encounter?.encounter.status)
 
   const resetConsultation = (event: MouseEvent) => {
     event.preventDefault()
