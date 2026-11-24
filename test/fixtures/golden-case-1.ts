@@ -33,12 +33,13 @@ export const goldenCase1Chart = {
   },
   triage: {
     level: 3,
+    measuredAt: '2026-11-24T08:20:00+08:00',
     vitals: [
-      { kind: 'temperature', value: '38.6', unit: '℃', abnormal: true },
-      { kind: 'pulse', value: '102', unit: '次/分', abnormal: true },
-      { kind: 'respiratory-rate', value: '22', unit: '次/分', abnormal: true },
-      { kind: 'blood-pressure', value: '138/84', unit: 'mmHg', abnormal: false },
-      { kind: 'spo2', value: '94', unit: '%', abnormal: true },
+      { kind: 'temperature', value: '38.4', unit: '℃', flag: 'high' },
+      { kind: 'pulse', value: '98', unit: '次/分', flag: null },
+      { kind: 'respiratory-rate', value: '20', unit: '次/分', flag: null },
+      { kind: 'blood-pressure', value: '136/82', unit: 'mmHg', flag: null },
+      { kind: 'spo2', value: '95', unit: '%', flag: null },
     ],
   },
   visibleSourceHistory: {

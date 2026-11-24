@@ -8,6 +8,8 @@ import { badge, iconButton } from './pane-styles'
 
 const STATUS_LABEL: Record<EncounterStatus, string> = { active: '就诊中', abandoned: '已放弃', completed: '已完诊 · 只读' }
 
+const FLAG_MARK = { high: { mark: '↑', name: '偏高' }, low: { mark: '↓', name: '偏低' } } as const
+
 const VITAL_LABEL: Record<VitalSignKind, { short: string; name: string }> = {
   temperature: { short: 'T', name: '体温' },
   pulse: { short: 'P', name: '脉搏' },
@@ -75,23 +77,32 @@ function TriageVitals({ triage }: { triage: Triage }) {
           return (
             <li
               key={vital.kind}
-              data-abnormal={vital.abnormal || undefined}
-              className="flex items-baseline gap-1 rounded-md bg-muted px-2 py-0.5 text-xs shadow-[inset_0_0_0_1px_var(--border)] data-abnormal:shadow-[inset_0_0_0_1px_var(--warning)]"
+              data-flag={vital.flag ?? undefined}
+              className="flex items-baseline gap-1 rounded-md bg-muted px-2 py-0.5 text-xs shadow-[inset_0_0_0_1px_var(--border)] data-flag:shadow-[inset_0_0_0_1px_var(--warning)]"
             >
               <span aria-hidden="true" className="text-muted-foreground">
                 {label.short}
               </span>
               <span className="sr-only">{label.name}</span>
-              <span className={`text-[13.5px] font-semibold tabular-nums ${vital.abnormal ? 'text-warning' : ''}`}>
+              <span className={`text-[13.5px] font-semibold tabular-nums ${vital.flag ? 'text-warning' : ''}`}>
                 {vital.value}
               </span>
               <span className="text-[11px] text-muted-foreground">{vital.unit}</span>
-              {vital.abnormal && <span className="sr-only">异常</span>}
+              {vital.flag && (
+                <>
+                  <span aria-hidden="true" className="font-semibold text-warning">
+                    {FLAG_MARK[vital.flag].mark}
+                  </span>
+                  <span className="sr-only">{FLAG_MARK[vital.flag].name}</span>
+                </>
+              )}
             </li>
           )
         })}
       </ul>
-      <span className="text-[11px] text-muted-foreground">分诊测量</span>
+      <span className="text-[11px] text-muted-foreground">
+        分诊 <time dateTime={triage.measuredAt}>{formatClock(triage.measuredAt)}</time>
+      </span>
     </div>
   )
 }
@@ -135,7 +146,7 @@ function OutpatientNumber({ value }: { value: string }) {
       <Button aria-label="复制门诊号" title="复制门诊号" className={`${iconButton} size-6`} onClick={copy}>
         {copyState === 'copied' ? <CheckIcon aria-hidden="true" size={12} /> : <CopyIcon aria-hidden="true" size={12} />}
       </Button>
-      <span role="status" className="sr-only">
+      <span role="status" aria-label="复制状态" className="sr-only">
         {copyState === 'copied' ? '已复制门诊号' : copyState === 'failed' ? '无法访问剪贴板，请手动复制' : ''}
       </span>
     </span>

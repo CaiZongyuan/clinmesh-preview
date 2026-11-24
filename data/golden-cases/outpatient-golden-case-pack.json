@@ -2,7 +2,7 @@
   "id": "clinmesh-preview-outpatient-golden-cases",
   "name": "ClinMesh Preview 门诊 Golden Case",
   "nameEn": "ClinMesh Preview outpatient Golden Cases",
-  "version": "2026-11-24.2",
+  "version": "2026-11-24.3",
   "cases": [
     {
       "id": "golden-case-01",
@@ -27,13 +27,14 @@
       },
       "triage": {
         "level": 3,
+        "measuredAt": "2026-11-24T08:20:00+08:00",
         "vitals": {
-          "temperatureCelsius": 38.6,
-          "pulseBpm": 102,
-          "respiratoryRatePerMin": 22,
-          "systolicMmHg": 138,
-          "diastolicMmHg": 84,
-          "spo2Percent": 94
+          "temperatureCelsius": 38.4,
+          "pulseBpm": 98,
+          "respiratoryRatePerMin": 20,
+          "systolicMmHg": 136,
+          "diastolicMmHg": 82,
+          "spo2Percent": 95
         }
       },
       "allergies": [

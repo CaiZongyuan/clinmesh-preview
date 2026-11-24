@@ -3,56 +3,8 @@ import { describe, expect, it } from 'vitest'
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import type { EncounterResponse } from '../../src/shared/encounter'
 import { app } from '../../src/worker/app'
-
-type GoldenCase = (typeof casePack.cases)[number]
-
-const CASE_TRUTH_FIELDS = [
-  'title',
-  'titleEn',
-  'indexConditions',
-  'physicalExamination',
-  'laboratories',
-  'textResults',
-  'reportAmendments',
-  'debriefReference',
-] as const satisfies readonly (keyof GoldenCase)[]
-
-// Which catalog item a result belongs to is not Case Truth; the result is.
-const CATALOG_IDENTITY_KEYS = new Set(['id', 'catalogItem', 'codings', 'system', 'version', 'unit', 'unitDisplay', 'referenceRange'])
-
-function leaves(value: unknown, skipKeys = new Set<string>()): unknown[] {
-  if (Array.isArray(value)) return value.flatMap((item) => leaves(item, skipKeys))
-  if (value !== null && typeof value === 'object') {
-    return Object.entries(value).flatMap(([key, item]) => (skipKeys.has(key) ? [] : leaves(item, skipKeys)))
-  }
-  return [value]
-}
-
-// The denylist is the snapshot's Case Truth minus anything the snapshot also shows the doctor.
-function caseTruthDenylist(goldenCase: GoldenCase) {
-  const truth = leaves(CASE_TRUTH_FIELDS.map((field) => goldenCase[field]), CATALOG_IDENTITY_KEYS)
-  const visibleFields = Object.keys(goldenCase).filter((field) => !(CASE_TRUTH_FIELDS as readonly string[]).includes(field))
-  const visible = new Set(leaves(visibleFields.map((field) => goldenCase[field as keyof GoldenCase])))
-  return {
-    terms: truth.filter((v): v is string => typeof v === 'string' && v.length >= 2 && !visible.has(v)),
-    numbers: truth.filter((v): v is number => typeof v === 'number' && !visible.has(v)),
-  }
-}
-
-const denylist = casePack.cases.map(caseTruthDenylist)
-const truthTerms = [...new Set(denylist.flatMap((d) => d.terms))]
-const truthNumbers = new Set(denylist.flatMap((d) => d.numbers))
-
-function expectNoCaseTruth(route: string, body: string) {
-  for (const term of truthTerms) {
-    expect(body, `${route} exposes Case Truth "${term}"`).not.toContain(term)
-  }
-  expect(body, `${route} exposes a diagnosis-revealing id`).not.toMatch(/(^|[^a-z])cap([^a-z]|$)/i)
-  const numbers = leaves(JSON.parse(body)).filter((v) => typeof v === 'number')
-  for (const n of numbers) {
-    expect(truthNumbers.has(n as number), `${route} exposes the hidden result value ${n}`).toBe(false)
-  }
-}
+import { goldenCase1Chart } from '../fixtures/golden-case-1'
+import { expectNoCaseTruth, goldenCaseDenylists } from './case-truth'
 
 interface ProbeContext {
   caseId: string
@@ -67,8 +19,8 @@ const request = (method: string, path: string, body?: unknown) =>
   })
 
 // One probe per route of the Hono app; a route without a probe fails the first test below.
-// WebSocket routes join this table when they exist. The Encounter Abandonment probe stays last
-// because it is what ends the active Encounter.
+// WebSocket upgrades must also be routed through the Hono app so they show up in `app.routes`
+// and get a probe here. The Encounter Abandonment probe stays last because it ends the active Encounter.
 const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'GET /api/golden-cases': () => request('GET', '/api/golden-cases'),
   'POST /api/encounters': ({ caseId }) => request('POST', '/api/encounters', { caseId }),
@@ -88,18 +40,60 @@ async function probeEveryRoute(ctx: ProbeContext, phase: string) {
   }
 }
 
+const caughtLeak = (body: string) => {
+  try {
+    expectNoCaseTruth('mutation', body)
+    return false
+  } catch {
+    return true
+  }
+}
+
+describe('Case Truth denylist', () => {
+  const [goldenCase1] = goldenCaseDenylists
+
+  it('is built from the snapshot and catches fragments, hidden values in text and diagnosis words', () => {
+    expect(goldenCase1.fragments).toEqual(
+      expect.arrayContaining(['社区获得性肺炎', '右下肺呼吸音减低', '门诊治疗，72 小时复诊', casePack.cases[0].textResults[0].impression]),
+    )
+    expect(goldenCase1.numbers).toEqual(expect.arrayContaining([14.2, 86, 38.6, 102, 138]))
+
+    for (const leak of [
+      '{"reply":"医生说右下肺呼吸音减低"}',
+      '{"reply":"WBC 14.2，偏高"}',
+      '{"reply":"疑似肺炎"}',
+      '{"reply":"Looks like PNEUMONIA"}',
+      '{"value":14.2}',
+      '{"exam":"T 38.6℃"}',
+    ]) {
+      expect(caughtLeak(leak), leak).toBe(true)
+    }
+  })
+
+  it('lets everything the doctor may see through, including ids and timestamps that contain the same digits', () => {
+    expect(caughtLeak(JSON.stringify({ ...goldenCase1Chart, encounterId: 'a142c0de-8614-4236-9102-3814c2a86f00' }))).toBe(false)
+    expect(caughtLeak('{"startedAt":"2026-11-24T08:14:02.142Z","path":"/api/encounters/86-14.2x"}')).toBe(false)
+    expect(caughtLeak('{"error":"患者超过 30 秒未回答，请重试"}')).toBe(false)
+  })
+})
+
+describe('Golden Case snapshot', () => {
+  // Triage is measured before the doctor examines the patient; reusing the examination's readings would show
+  // Case Truth in the banner, and the denylist cannot see it because it drops values the snapshot shows anyway.
+  it('records triage vitals that differ from the vitals the Physical Examination reveals', () => {
+    for (const goldenCase of casePack.cases) {
+      const v = goldenCase.triage.vitals
+      const triage = [v.temperatureCelsius, v.pulseBpm, v.respiratoryRatePerMin, v.systolicMmHg, v.diastolicMmHg, v.spo2Percent]
+      const examination = [...goldenCase.physicalExamination.vitals.matchAll(/\d+(?:\.\d+)?/g)].map((m) => Number(m[0]))
+      expect(examination.slice(0, 6), goldenCase.id).not.toEqual(triage)
+    }
+  })
+})
+
 describe('Case Truth isolation over HTTP', () => {
   it('has a probe for every route the Worker serves', () => {
     const served = app.routes.filter((route) => route.method !== 'ALL').map((route) => `${route.method} ${route.path}`)
     expect(new Set(served)).toEqual(new Set(Object.keys(probes)))
-  })
-
-  it('builds a non-trivial denylist from the snapshot', () => {
-    expect(truthTerms).toEqual(expect.arrayContaining(['J18.9', '社区获得性肺炎', '右下叶；CURB-65 0 分（尿素未测），可门诊治疗。']))
-    expect(truthTerms).toContain(casePack.cases[0].debriefReference.disposition)
-    expect(truthTerms).toContain(casePack.cases[0].physicalExamination.lungs)
-    expect(truthTerms).toContain(casePack.cases[0].textResults[0].impression)
-    expect(truthNumbers).toContain(14.2)
   })
 
   it('exposes no Case Truth on any route while the Encounter is active, nor after Encounter Abandonment', async () => {

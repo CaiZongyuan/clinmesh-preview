@@ -4,11 +4,14 @@ export type EncounterStatus = 'active' | 'abandoned' | 'completed'
 
 export type VitalSignKind = 'temperature' | 'pulse' | 'respiratory-rate' | 'blood-pressure' | 'spo2'
 
+// Which side of the reference range a reading falls on; null when it is within range.
+export type VitalSignFlag = 'high' | 'low' | null
+
 export interface VitalSign {
   kind: VitalSignKind
   value: string
   unit: string
-  abnormal: boolean
+  flag: VitalSignFlag
 }
 
 export interface BannerPatient {
@@ -25,6 +28,7 @@ export interface BannerPatient {
 
 export interface Triage {
   level: number
+  measuredAt: string
   vitals: VitalSign[]
 }
 

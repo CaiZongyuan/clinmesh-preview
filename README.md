@@ -22,11 +22,16 @@ Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "
 | `GET /api/golden-cases` | The queue; `queueStatus` is `in-encounter` while a Golden Case has the active Encounter |
 | `POST /api/encounters` `{ caseId }` | Starts an Encounter (201); `409 active-encounter-exists` while another is active |
 | `GET /api/encounters/active` | The workspace's active Encounter, or `null` |
-| `GET /api/encounters/:encounterId` | One Encounter: patient banner, triage vitals and Visible Source History only |
+| `GET /api/encounters/:encounterId` | One Encounter: patient banner, pre-examination triage vitals and Visible Source History only |
 | `POST /api/encounters/:encounterId/abandonment` | Encounter Abandonment; `409 encounter-not-active` once it is frozen |
 | `GET /api/encounters/:encounterId/audit-events` | Audit trail with `practitionerId` |
 
-Every new HTTP or WebSocket route must be added to the probe table in `test/worker/truth-isolation.test.ts`, which fails until it is.
+Two Worker-seam tests enumerate the Hono app's routes and fail until a new route is listed:
+
+- `test/worker/truth-isolation.test.ts` probes every route for Case Truth with the shared denylist in `test/worker/case-truth.ts` (`expectNoCaseTruth`), which later tickets reuse for WebSocket frames, Simulated Patient replies and Copilot context.
+- `test/worker/write-freeze.test.ts` sends every write command under `/api/encounters/:encounterId` to an abandoned Encounter and expects `409 encounter-not-active`.
+
+WebSocket routes must be registered on the same Hono app (not dispatched beside it in `src/worker/index.ts`), so the enumeration sees them.
 
 | Script           | What it does                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------ |

@@ -53,7 +53,7 @@ export function encounterChart(caseId: string): EncounterChart | undefined {
       insurance: registration.insurance,
       chiefComplaint: goldenCase.chiefComplaint,
     },
-    triage: { level: triage.level, vitals: triageVitalSigns(triage.vitals) },
+    triage: { level: triage.level, measuredAt: triage.measuredAt, vitals: triageVitalSigns(triage.vitals) },
     visibleSourceHistory: {
       priorVisits: goldenCase.visibleHistory.map((visit) => ({
         visitedAt: visit.encounterDateTime,

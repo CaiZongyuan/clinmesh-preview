@@ -1,4 +1,4 @@
-import { evictDurableObject } from 'cloudflare:test'
+import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import type {
@@ -104,6 +104,20 @@ describe('single active Encounter per workspace', () => {
     expect(responses.map((r) => r.status).sort()).toEqual([201, 409, 409])
     const winner = ((await responses.find((r) => r.status === 201)!.json()) as EncounterResponse).encounter
     expect((await activeEncounter())?.encounterId).toBe(winner.encounterId)
+  })
+})
+
+describe('single active Encounter in storage', () => {
+  it('rejects a second active row even if a command skipped the check', async () => {
+    await startedEncounter()
+    await runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
+      const insertActive = () =>
+        state.storage.sql.exec(
+          `INSERT INTO encounter (encounter_id, case_id, case_version, persona_version, practitioner_id, status, started_at, visible_chart)
+           VALUES ('second-active', 'golden-case-01', 'v', 'p', 'demo-practitioner', 'active', '2026-11-24T00:00:00Z', '{}')`,
+        )
+      expect(insertActive).toThrow(/UNIQUE/)
+    })
   })
 })
 

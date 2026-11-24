@@ -60,12 +60,13 @@ describe('starting an Encounter', () => {
 
     const vitals = within(within(patient).getByRole('list', { name: '分诊生命体征' })).getAllByRole('listitem')
     expect(vitals.map((tile) => tile.textContent)).toEqual([
-      'T体温38.6℃异常',
-      'P脉搏102次/分异常',
-      'R呼吸22次/分异常',
-      'BP血压138/84mmHg',
-      'SpO₂血氧饱和度94%异常',
+      'T体温38.4℃↑偏高',
+      'P脉搏98次/分',
+      'R呼吸20次/分',
+      'BP血压136/82mmHg',
+      'SpO₂血氧饱和度95%',
     ])
+    expect(patient).toHaveTextContent('分诊 08:20')
 
     const railAfter = screen.getByRole('navigation', { name: '候诊队列' })
     expect(within(railAfter).getByRole('button', { name: '7 号 李建国 · 在诊' })).toHaveAttribute('aria-current', 'true')
@@ -77,6 +78,17 @@ describe('starting an Encounter', () => {
     expect(router.state.location.pathname).toBe('/encounters/encounter-1')
     expect(patient).toHaveTextContent('就诊中')
     expect(within(patient).getByTitle('本次就诊时长')).toHaveTextContent(/05:0\d/)
+  })
+
+  it('marks a low reading with a visible arrow, not only color', async () => {
+    const encounter = encounterFor()
+    encounter.triage = {
+      ...encounter.triage,
+      vitals: encounter.triage.vitals.map((v) => (v.kind === 'spo2' ? { ...v, value: '91', flag: 'low' as const } : v)),
+    }
+    openWorkbench('/encounters/encounter-1', [encounter])
+    const vitals = within(within(await banner()).getByRole('list', { name: '分诊生命体征' })).getAllByRole('listitem')
+    expect(vitals.at(-1)).toHaveTextContent('SpO₂血氧饱和度91%↓偏低')
   })
 
   it('shows the server refusal when another Encounter became active in the meantime', async () => {
@@ -123,7 +135,7 @@ describe('patient banner', () => {
     openWorkbench('/encounters/encounter-1', [encounterFor()])
     await user.click(within(await banner()).getByRole('button', { name: '复制门诊号' }))
     expect(await navigator.clipboard.readText()).toBe('20261124-0007')
-    expect(screen.getByRole('status')).toHaveTextContent('已复制门诊号')
+    expect(screen.getByRole('status', { name: '复制状态' })).toHaveTextContent('已复制门诊号')
   })
 
   it('names every control uniquely while an Encounter is open', async () => {
