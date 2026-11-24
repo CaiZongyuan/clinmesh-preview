@@ -86,6 +86,8 @@ describe('typed Consultation', () => {
       ['encounter-started', 'demo-practitioner'],
       ['consultation-question-asked', 'demo-practitioner'],
     ])
+    // The question's audit event names the doctor turn it recorded.
+    expect(audit.auditEvents[1]).toMatchObject({ subject: doctorTurn.turnId, occurredAt: doctorTurn.createdAt })
   })
 
   it('gives the Simulated Patient only its Patient Persona, the doctor utterances and its own settled replies', async () => {
@@ -189,7 +191,11 @@ describe('failed patient turns', () => {
     ])
     expect(llm.requests).toHaveLength(2)
     const audit = (await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse
-    expect(audit.auditEvents.map((e) => e.eventType)).toContain('patient-reply-retried')
+    expect(audit.auditEvents.slice(1).map((e) => [e.eventType, e.practitionerId, e.subject])).toEqual([
+      ['consultation-question-asked', 'demo-practitioner', doctorTurn.turnId],
+      // The retry's audit event names the new reply attempt it started.
+      ['patient-reply-retried', 'demo-practitioner', attempt2.turnId],
+    ])
   })
 
   it('fails visibly with llm-not-configured when no model is configured, never hanging, and retries once one is', async () => {

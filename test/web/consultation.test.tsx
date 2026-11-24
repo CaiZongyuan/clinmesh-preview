@@ -319,6 +319,10 @@ describe('keeping the transcript current', () => {
       ],
     })
     await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('模拟患者正在组织语言'))
+    // Let the socket finish its replay (whose own reload would otherwise pick up the change), so only the
+    // deadline re-check can.
+    await live()
+    await new Promise((resolve) => setTimeout(resolve, 100))
     api.patient.expireSilently(ENCOUNTER)
 
     await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('模拟患者回答超时'), { timeout: 4000 })
