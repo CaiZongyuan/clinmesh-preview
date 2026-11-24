@@ -6,6 +6,12 @@ import type {
   PhysicalExaminationsResponse,
   PhysicalExaminationView,
 } from '../shared/physical-examination'
+import type {
+  CatalogItemView,
+  InvestigationCatalogResponse,
+  InvestigationsResponse,
+  InvestigationView,
+} from '../shared/investigation'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
@@ -51,4 +57,28 @@ export async function fetchPhysicalExaminations(encounterId: string): Promise<Ph
 
 export async function performPhysicalExamination(encounterId: string, system: BodySystem): Promise<PhysicalExaminationView> {
   return (await request<PhysicalExaminationResponse>(physicalExaminationsPath(encounterId), post({ system }))).examination
+}
+
+export async function fetchInvestigationCatalog(): Promise<CatalogItemView[]> {
+  return (await request<InvestigationCatalogResponse>('/api/investigation-catalog')).items
+}
+
+const investigationsPath = (encounterId: string) => `/api/encounters/${encodeURIComponent(encounterId)}/investigations`
+
+export async function fetchInvestigations(encounterId: string): Promise<InvestigationView[]> {
+  return (await request<InvestigationsResponse>(investigationsPath(encounterId))).investigations
+}
+
+export async function issueInvestigations(encounterId: string, catalogItemIds: string[]): Promise<InvestigationView[]> {
+  return (await request<InvestigationsResponse>(investigationsPath(encounterId), post({ catalogItemIds }))).investigations
+}
+
+export async function releaseInvestigationNow(encounterId: string, investigationId: string): Promise<InvestigationView[]> {
+  const path = `${investigationsPath(encounterId)}/${encodeURIComponent(investigationId)}/instant-release`
+  return (await request<InvestigationsResponse>(path, post())).investigations
+}
+
+export async function acknowledgeReports(encounterId: string, reportIds: string[]): Promise<InvestigationView[]> {
+  const path = `/api/encounters/${encodeURIComponent(encounterId)}/report-acknowledgements`
+  return (await request<InvestigationsResponse>(path, post({ reportIds }))).investigations
 }

@@ -96,12 +96,20 @@ export interface ActiveEncounterResponse {
   encounter: EncounterView | null
 }
 
-export type AuditEventType = 'encounter-started' | 'encounter-abandoned' | 'physical-examination-performed'
+export type AuditEventType =
+  | 'encounter-started'
+  | 'encounter-abandoned'
+  | 'physical-examination-performed'
+  | 'investigation-issued'
+  | 'investigation-released-instantly'
+  | 'report-acknowledged'
 
 export interface AuditEvent {
   eventType: AuditEventType
   practitionerId: string
   occurredAt: string
+  // What the event acted on, such as a catalog item, Report or body system; absent for the Encounter itself.
+  subject?: string
 }
 
 export interface AuditEventsResponse {
@@ -116,6 +124,12 @@ export type EncounterErrorCode =
   | 'encounter-not-active'
   | 'body-system-already-examined'
   | 'case-version-retired'
+  | 'catalog-item-not-found'
+  | 'investigation-already-issued'
+  | 'investigation-not-found'
+  | 'report-not-found'
+  | 'report-superseded'
+  | 'report-already-acknowledged'
 
 export interface EncounterError {
   code: EncounterErrorCode

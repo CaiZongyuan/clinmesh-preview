@@ -44,6 +44,32 @@ const MIGRATIONS: readonly string[] = [
      examined_at TEXT NOT NULL,
      PRIMARY KEY (encounter_id, body_system)
    );`,
+  // Investigations keep the planned time of each category stage; the last one releases Report version 1.
+  // Report versions are immutable rows; a Report Acknowledgement belongs to exactly one version.
+  // Audit events gain the subject they acted on (catalog item, Report, body system); earlier rows keep NULL.
+  `ALTER TABLE audit_event ADD COLUMN subject TEXT;
+   CREATE TABLE investigation (
+     investigation_id TEXT PRIMARY KEY,
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     catalog_item_id TEXT NOT NULL,
+     practitioner_id TEXT NOT NULL,
+     issued_at TEXT NOT NULL,
+     stage_times TEXT NOT NULL
+   );
+   CREATE INDEX investigation_by_encounter ON investigation (encounter_id);
+   CREATE TABLE report (
+     report_id TEXT PRIMARY KEY,
+     investigation_id TEXT NOT NULL REFERENCES investigation (investigation_id),
+     version INTEGER NOT NULL,
+     released_at TEXT NOT NULL,
+     content TEXT NOT NULL,
+     UNIQUE (investigation_id, version)
+   );
+   CREATE TABLE report_acknowledgement (
+     report_id TEXT PRIMARY KEY REFERENCES report (report_id),
+     practitioner_id TEXT NOT NULL,
+     acknowledged_at TEXT NOT NULL
+   );`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

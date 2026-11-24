@@ -2,8 +2,15 @@ import type { EncounterError, EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
 import { BODY_SYSTEM_NAME, isBodySystem, type PhysicalExaminationView } from '../../src/shared/physical-examination'
 import { goldenCase1Chart, goldenCase1Findings, goldenCase1QueueEntry } from '../fixtures/golden-case-1'
+import { createFakeInvestigations, fakeCatalog } from './fake-investigations'
 
 const STATUS: Record<EncounterError['code'], number> = {
+  'catalog-item-not-found': 404,
+  'investigation-already-issued': 409,
+  'investigation-not-found': 404,
+  'report-not-found': 404,
+  'report-superseded': 409,
+  'report-already-acknowledged': 409,
   'invalid-request': 400,
   'golden-case-not-found': 404,
   'encounter-not-found': 404,
@@ -37,6 +44,7 @@ export function createFakeClinicApi({
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0 }
   const active = () => state.encounters.find((e) => e.status === 'active') ?? null
+  const investigations = createFakeInvestigations(refuse)
 
   const queue = (): GoldenCaseQueueEntry[] => [
     { ...goldenCase1QueueEntry, queueStatus: active()?.caseId === goldenCase1QueueEntry.caseId ? 'in-encounter' : 'waiting' },
@@ -56,6 +64,9 @@ export function createFakeClinicApi({
     if (method === 'GET' && path === '/api/golden-cases') return Response.json({ goldenCases: queue() })
     if (method === 'GET' && path === '/api/encounters/active') return Response.json({ encounter: active() })
     if (method === 'POST' && path === '/api/encounters') return startEncounter(JSON.parse(String(init?.body)).caseId)
+    if (method === 'GET' && path === '/api/investigation-catalog') {
+      return Response.json({ catalogVersion: 'fake', items: fakeCatalog })
+    }
 
     const [, encounterId, action] = path.match(/^\/api\/encounters\/([^/]+)(?:\/(.+))?$/) ?? []
     const encounter = state.encounters.find((e) => e.encounterId === encounterId)
@@ -79,12 +90,16 @@ export function createFakeClinicApi({
       Object.assign(encounter, { status: 'abandoned', endedAt: new Date().toISOString() })
       return Response.json({ encounter })
     }
+    const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined
+    const answered = action && investigations.handle(method, encounter, action, body)
+    if (answered) return answered
     throw new Error(`The fake clinic API has no route for ${method} ${path}`)
   }
 
   return {
     handle,
     encounters: () => state.encounters,
+    investigations: investigations.list,
     // Another browser tab starting an Encounter behind this one's back.
     startElsewhere: (caseId: string) => startEncounter(caseId),
   }

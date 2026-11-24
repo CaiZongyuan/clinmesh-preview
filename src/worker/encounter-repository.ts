@@ -17,6 +17,7 @@ type AuditEventRow = {
   event_type: AuditEventType
   practitioner_id: string
   occurred_at: string
+  subject: string | null
 }
 
 export type EncounterResult = { ok: true; encounter: EncounterView } | { ok: false; error: EncounterError }
@@ -80,13 +81,18 @@ export class EncounterRepository {
     if (!this.find(encounterId)) return notFound(encounterId)
     const rows = this.sql
       .exec<AuditEventRow>(
-        `SELECT event_type, practitioner_id, occurred_at FROM audit_event WHERE encounter_id = ? ORDER BY audit_event_id`,
+        `SELECT event_type, practitioner_id, occurred_at, subject FROM audit_event WHERE encounter_id = ? ORDER BY audit_event_id`,
         encounterId,
       )
       .toArray()
     return {
       ok: true,
-      auditEvents: rows.map((r) => ({ eventType: r.event_type, practitionerId: r.practitioner_id, occurredAt: r.occurred_at })),
+      auditEvents: rows.map((r) => ({
+        eventType: r.event_type,
+        practitionerId: r.practitioner_id,
+        occurredAt: r.occurred_at,
+        ...(r.subject === null ? {} : { subject: r.subject }),
+      })),
     }
   }
 
@@ -95,10 +101,10 @@ export class EncounterRepository {
     return row && toView(row)
   }
 
-  audit(encounterId: string, eventType: AuditEventType, practitionerId: string, occurredAt: string) {
+  audit(encounterId: string, eventType: AuditEventType, practitionerId: string, occurredAt: string, subject?: string) {
     this.sql.exec(
-      'INSERT INTO audit_event (encounter_id, event_type, practitioner_id, occurred_at) VALUES (?, ?, ?, ?)',
-      encounterId, eventType, practitionerId, occurredAt,
+      'INSERT INTO audit_event (encounter_id, event_type, practitioner_id, occurred_at, subject) VALUES (?, ?, ?, ?, ?)',
+      encounterId, eventType, practitionerId, occurredAt, subject ?? null,
     )
   }
 }

@@ -2,6 +2,7 @@ import { exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import type { EncounterResponse } from '../../src/shared/encounter'
+import type { InvestigationsResponse } from '../../src/shared/investigation'
 import { app } from '../../src/worker/app'
 import { goldenCase1Chart } from '../fixtures/golden-case-1'
 import { expectNoCaseTruth, goldenCaseDenylists } from './case-truth'
@@ -11,6 +12,17 @@ interface ProbeContext {
   encounterId: string
   // Case Truth the probes have legitimately uncovered so far, which later responses may repeat.
   revealed: unknown[]
+  releasedInvestigationId: string
+  releasedReportId: string
+}
+
+// The Case Truth results a released Report v1 legitimately shows for these catalog items of Golden Case 1.
+const releasedResults = (catalogItems: readonly string[]) => {
+  const { laboratories, textResults } = casePack.cases[0]
+  return [
+    laboratories.filter((l) => catalogItems.includes(l.catalogItem)),
+    textResults.filter((t) => catalogItems.includes(t.catalogItem)),
+  ]
 }
 
 const request = (method: string, path: string, body?: unknown) =>
@@ -38,6 +50,15 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   },
   'GET /api/encounters/:encounterId/physical-examinations': ({ encounterId }) =>
     request('GET', `/api/encounters/${encounterId}/physical-examinations`),
+  'GET /api/investigation-catalog': () => request('GET', '/api/investigation-catalog'),
+  'GET /api/encounters/:encounterId/investigations': ({ encounterId }) =>
+    request('GET', `/api/encounters/${encounterId}/investigations`),
+  'POST /api/encounters/:encounterId/investigations': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['glu'] }),
+  'POST /api/encounters/:encounterId/investigations/:investigationId/instant-release': ({ encounterId, releasedInvestigationId }) =>
+    request('POST', `/api/encounters/${encounterId}/investigations/${releasedInvestigationId}/instant-release`),
+  'POST /api/encounters/:encounterId/report-acknowledgements': ({ encounterId, releasedReportId }) =>
+    request('POST', `/api/encounters/${encounterId}/report-acknowledgements`, { reportIds: [releasedReportId] }),
   'POST /api/encounters/:encounterId/abandonment': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/abandonment`),
 }
@@ -134,7 +155,9 @@ describe('Case Truth isolation over HTTP', () => {
     expect(new Set(served)).toEqual(new Set(Object.keys(probes)))
   })
 
-  it('exposes no Case Truth on any route while the Encounter is active, nor after Encounter Abandonment', async () => {
+  // Golden Case 1 overrides CBC, CRP, PCT, chest X-ray and chest CT. The Encounter issues CBC, CRP and chest X-ray,
+  // releases CBC and chest X-ray, leaves CRP pending and never orders PCT or chest CT.
+  it('exposes only uncovered Case Truth on any route while the Encounter is active, and nothing more after Encounter Abandonment', async () => {
     const caseId = casePack.cases[0].id
     const started = await request('POST', '/api/encounters', { caseId })
     expect(started.status).toBe(201)
@@ -142,9 +165,31 @@ describe('Case Truth isolation over HTTP', () => {
     expectNoCaseTruth('start', startedBody)
     const { encounterId } = (JSON.parse(startedBody) as EncounterResponse).encounter
 
-    const ctx: ProbeContext = { caseId, encounterId, revealed: [] }
+    const issued = await request('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['cbc', 'crp', 'cxr'] })
+    const issuedBody = await issued.text()
+    expectNoCaseTruth('issue', issuedBody)
+    const [cbc, , cxr] = (JSON.parse(issuedBody) as InvestigationsResponse).investigations
+    expectNoCaseTruth('nothing released', await (await request('GET', `/api/encounters/${encounterId}/investigations`)).text())
+
+    const revealed = releasedResults(['cbc', 'cxr'])
+    await request('POST', `/api/encounters/${encounterId}/investigations/${cbc.investigationId}/instant-release`)
+    const afterRelease = await request('POST', `/api/encounters/${encounterId}/investigations/${cxr.investigationId}/instant-release`)
+    const afterReleaseBody = await afterRelease.text()
+    expectNoCaseTruth('released', afterReleaseBody, revealed)
+    // The released results do show, so the probes below are not vacuous.
+    expect(afterReleaseBody).toContain('14.2')
+    expect(afterReleaseBody).toContain(casePack.cases[0].textResults[0].impression)
+    const list = (JSON.parse(afterReleaseBody) as InvestigationsResponse).investigations
+
+    const ctx: ProbeContext = {
+      caseId,
+      encounterId,
+      revealed,
+      releasedInvestigationId: cbc.investigationId,
+      releasedReportId: list[0].reports[0].reportId,
+    }
     await probeEveryRoute(ctx, 'active Encounter')
-    expect(ctx.revealed, 'the Physical Examination probe examined the vitals').toHaveLength(1)
+    expect(ctx.revealed, 'the Physical Examination probe examined the vitals').toHaveLength(3)
 
     const after = (await (await request('GET', `/api/encounters/${encounterId}`)).json()) as EncounterResponse
     expect(after.encounter.status).toBe('abandoned')

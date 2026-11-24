@@ -43,7 +43,7 @@ export class PhysicalExaminationRepository {
        VALUES (?, ?, ?, ?, ?, ?)`,
       encounterId, system, finding, vitals && JSON.stringify(vitals), practitionerId, now,
     )
-    this.encounters.audit(encounterId, 'physical-examination-performed', practitionerId, now)
+    this.encounters.audit(encounterId, 'physical-examination-performed', practitionerId, now, system)
     return { ok: true, examination: this.find(encounterId, system)! }
   }
 

@@ -78,8 +78,8 @@ describe('Physical Examination', () => {
 
     const { auditEvents } = (await (await api(`/api/encounters/${encounter.encounterId}/audit-events`)).json()) as AuditEventsResponse
     expect(auditEvents.slice(1)).toEqual([
-      { eventType: 'physical-examination-performed', practitionerId: PRACTITIONER_ID, occurredAt: lungs.examinedAt },
-      { eventType: 'physical-examination-performed', practitionerId: PRACTITIONER_ID, occurredAt: vitals.examinedAt },
+      { eventType: 'physical-examination-performed', practitionerId: PRACTITIONER_ID, occurredAt: lungs.examinedAt, subject: 'lungs' },
+      { eventType: 'physical-examination-performed', practitionerId: PRACTITIONER_ID, occurredAt: vitals.examinedAt, subject: 'vitals' },
     ])
   })
 
