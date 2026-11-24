@@ -108,6 +108,8 @@ export interface AuditEvent {
   eventType: AuditEventType
   practitionerId: string
   occurredAt: string
+  // What the event acted on, such as a catalog item, Report or body system; absent for the Encounter itself.
+  subject?: string
 }
 
 export interface AuditEventsResponse {

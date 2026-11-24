@@ -17,6 +17,7 @@ interface ClinicalConfirmationProps {
   title: string
   children: ReactNode
   confirmLabel: string
+  confirmClassName?: string
   // What the doctor approves; the confirming button carries it in data-agent-confirm so the agent bridge cannot press it.
   intent: string
   onConfirm: () => Promise<void>
@@ -56,7 +57,13 @@ export function ClinicalConfirmation(props: ClinicalConfirmationProps) {
         </div>
         <div data-slot="row" className="mt-4 flex justify-end gap-2">
           <AlertDialogClose>返回</AlertDialogClose>
-          <AlertDialogClose value="confirm" data-variant="solid" data-agent-confirm={props.intent} action={confirm}>
+          <AlertDialogClose
+            value="confirm"
+            data-variant="solid"
+            data-agent-confirm={props.intent}
+            action={confirm}
+            className={props.confirmClassName}
+          >
             {props.confirmLabel}
           </AlertDialogClose>
         </div>

@@ -10,7 +10,8 @@ import type {
   InvestigationView,
   ReportResultRow,
 } from '../../src/shared/investigation'
-import { admitCatalog, flagFor, type CatalogItem, type RawCatalog } from '../../src/worker/investigation-catalog'
+import { ageOn } from '../../src/worker/golden-case-pack'
+import { admitCatalog, bandFor, flagFor, type CatalogItem, type RawCatalog } from '../../src/worker/investigation-catalog'
 
 const T0 = Date.parse('2026-11-24T00:40:00.000Z')
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString()
@@ -39,6 +40,12 @@ async function investigations(encounterId: string): Promise<InvestigationView[]>
   const response = await api(`/api/encounters/${encounterId}/investigations`)
   expect(response.status).toBe(200)
   return ((await response.json()) as InvestigationsResponse).investigations
+}
+
+async function retireCaseVersion(encounterId: string) {
+  await runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
+    state.storage.sql.exec(`UPDATE encounter SET case_version = '2026-01-01.0' WHERE encounter_id = ?`, encounterId)
+  })
 }
 
 const byItem = (list: InvestigationView[], catalogItemId: string) => list.find((i) => i.catalogItemId === catalogItemId)!
@@ -97,6 +104,20 @@ describe('investigation catalog', () => {
       withAnalyte([{ sex: 'male', ageFrom: 0, referenceRange: { low: 1, high: 2, text: '1–2' }, value: 1.5 }]),
       withAnalyte([{ sex: 'any', ageFrom: 18, referenceRange: { low: 1, high: 2, text: '1–2' }, value: 1.5 }]),
       withAnalyte([{ sex: 'any', ageFrom: 0, referenceRange: { low: 1, high: 2, text: '1–2' }, value: 3 }]),
+      withAnalyte([
+        { sex: 'any', ageFrom: 0, referenceRange: { low: 1, high: 2, text: '1–2' }, value: 1.5 },
+        { sex: 'any', ageFrom: 0, referenceRange: { low: 1, high: 3, text: '1–3' }, value: 1.5 },
+      ]),
+      withAnalyte([
+        { sex: 'any', ageFrom: 0, referenceRange: { low: 1, high: 2, text: '1–2' }, value: 1.5 },
+        { sex: 'female', ageFrom: 60, referenceRange: { low: 1, high: 3, text: '1–3' }, value: 1.5 },
+        { sex: 'any', ageFrom: 60, referenceRange: { low: 1, high: 4, text: '1–4' }, value: 1.5 },
+      ]),
+      {
+        ...cxr,
+        id: 'tied-narrative',
+        narrative: [cxr.narrative![0], { ...cxr.narrative![0], sex: 'male', impression: '另一结论。' }],
+      },
       { ...cxr, id: 'no-narrative', narrative: undefined },
     ]
     const admitted = admitCatalog({ ...catalog, items: [...catalog.items, ...refused] }).items.map((item) => item.id)
@@ -106,10 +127,14 @@ describe('investigation catalog', () => {
   it('agrees with every Golden Case override on the item, analyte, reference range and abnormal flag', () => {
     const items = (rawCatalog as RawCatalog).items
     for (const goldenCase of casePack.cases) {
+      const patient = {
+        sex: goldenCase.patient.gender as 'male' | 'female',
+        age: ageOn(goldenCase.patient.birthDate, goldenCase.registration.registeredAt),
+      }
       for (const lab of goldenCase.laboratories) {
         const analyte = items.find((item) => item.id === lab.catalogItem)?.analytes?.find((a) => a.id === lab.id)
         expect(analyte, `${goldenCase.id} ${lab.id}`).toBeDefined()
-        const band = analyte!.baseline!.find((b) => b.sex === 'any' || b.sex === goldenCase.patient.gender)!
+        const band = bandFor(analyte!.baseline!, patient)!
         expect(band.referenceRange, lab.id).toEqual(lab.referenceRange)
         const flag = { H: 'high', L: 'low', N: null }[lab.interpretation as 'H' | 'L' | 'N']
         expect(flagFor(lab.value, band.referenceRange), lab.id).toBe(flag)
@@ -142,6 +167,10 @@ describe('issuing Investigations', () => {
       reports: [],
     })
     expect(await investigations(encounterId)).toEqual(issued)
+    const audit = ((await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents
+    expect(audit.slice(1)).toEqual(
+      ['cbc', 'crp', 'cxr'].map((subject) => ({ eventType: 'investigation-issued', practitionerId: 'demo-practitioner', occurredAt: at(0), subject })),
+    )
     expect(await auditTypes(encounterId)).toEqual([
       'encounter-started',
       'investigation-issued',
@@ -229,30 +258,47 @@ describe('simulated turnaround', () => {
       'investigation-issued',
       'investigation-released-instantly',
     ])
+    const audit = ((await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents
+    expect(audit.at(-1)?.subject).toBe(cbc.investigationId)
 
     const missing = await releaseNow(encounterId, 'no-such-investigation')
     expect(missing.status).toBe(404)
     expect(await errorCode(missing)).toBe('investigation-not-found')
   })
 
-  it('refuses with case-version-retired, releasing nothing, when a Report comes due after its Golden Case version is retired', async () => {
+  it('refuses commands with case-version-retired once its Golden Case version is retired, but keeps reading', async () => {
     const encounterId = await startEncounter()
     const [cbc] = ((await (await issue(encounterId, ['cbc', 'crp'])).json()) as InvestigationsResponse).investigations
-    await runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
-      state.storage.sql.exec(`UPDATE encounter SET case_version = '2026-01-01.0' WHERE encounter_id = ?`, encounterId)
-    })
+    await retireCaseVersion(encounterId)
 
     const instant = await releaseNow(encounterId, cbc.investigationId)
     expect(instant.status).toBe(409)
     expect(await errorCode(instant)).toBe('case-version-retired')
-    // Before anything is due, the Encounter's investigations still read; once a Report is due, reads refuse too.
-    expect((await investigations(encounterId)).every((i) => i.reports.length === 0)).toBe(true)
     vi.setSystemTime(T0 + 100_000)
-    for (const response of [await api(`/api/encounters/${encounterId}/investigations`), await issue(encounterId, ['pct'])]) {
-      expect(response.status).toBe(409)
-      expect(await errorCode(response)).toBe('case-version-retired')
-    }
+    const issueAfter = await issue(encounterId, ['pct'])
+    expect(issueAfter.status).toBe(409)
+    expect(await errorCode(issueAfter)).toBe('case-version-retired')
+    // Due Reports stay unreleased rather than resolve from a retired Case Truth, and 已出报告 is not shown as reached.
+    const list = await investigations(encounterId)
+    expect(list.map((i) => i.reports)).toEqual([[], []])
+    expect(byItem(list, 'cbc').stages.map((s) => s.name)).toEqual(['已开立', '已采样', '检验中'])
     expect(await auditTypes(encounterId)).toEqual(['encounter-started', 'investigation-issued', 'investigation-issued'])
+  })
+
+  it('keeps released and acknowledged Reports of an abandoned Encounter readable after its case version is retired', async () => {
+    const encounterId = await startEncounter()
+    const [cbc] = ((await (await issue(encounterId, ['cbc', 'crp'])).json()) as InvestigationsResponse).investigations
+    const released = ((await (await releaseNow(encounterId, cbc.investigationId)).json()) as InvestigationsResponse).investigations
+    await acknowledge(encounterId, [byItem(released, 'cbc').reports[0].reportId])
+    vi.setSystemTime(T0 + 100_000)
+    await post(`/api/encounters/${encounterId}/abandonment`)
+    await retireCaseVersion(encounterId)
+
+    const list = await investigations(encounterId)
+    expect(byItem(list, 'cbc').reports).toEqual([
+      expect.objectContaining({ version: 1, acknowledgement: expect.objectContaining({ practitionerId: 'demo-practitioner' }) }),
+    ])
+    expect(byItem(list, 'crp').reports).toEqual([])
   })
 
   it('stops the clock when the Encounter is abandoned: nothing due later is ever released', async () => {
@@ -361,6 +407,40 @@ describe('Report Acknowledgement', () => {
     const again = await acknowledge(encounterId, [reports[0].reportId])
     expect(again.status).toBe(409)
     expect(await errorCode(again)).toBe('report-already-acknowledged')
+  })
+
+  it('acknowledges only the latest version: a superseded one is refused and a batch containing it acknowledges nothing', async () => {
+    const encounterId = await startEncounter()
+    const issued = ((await (await issue(encounterId, ['cbc', 'crp'])).json()) as InvestigationsResponse).investigations
+    for (const i of issued) await releaseNow(encounterId, i.investigationId)
+    const list = await investigations(encounterId)
+    const cbcV1 = byItem(list, 'cbc').reports[0].reportId
+    const crpV1 = byItem(list, 'crp').reports[0].reportId
+    await runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO report (report_id, investigation_id, version, released_at, content)
+         SELECT 'cbc-v2', investigation_id, 2, released_at, content FROM report WHERE report_id = ?`,
+        cbcV1,
+      )
+    })
+
+    for (const reportIds of [[cbcV1], [crpV1, cbcV1]]) {
+      const response = await acknowledge(encounterId, reportIds)
+      expect(response.status).toBe(409)
+      expect(await errorCode(response)).toBe('report-superseded')
+    }
+    const unchanged = await investigations(encounterId)
+    expect(unchanged.flatMap((i) => i.reports.map((r) => r.acknowledgement))).toEqual([null, null, null])
+
+    const latest = await acknowledge(encounterId, ['cbc-v2'])
+    expect(latest.status).toBe(200)
+    const [cbc] = ((await latest.json()) as InvestigationsResponse).investigations
+    expect(cbc.reports.map((r) => [r.version, r.acknowledgement?.practitionerId ?? null])).toEqual([
+      [1, null],
+      [2, 'demo-practitioner'],
+    ])
+    const audit = ((await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents
+    expect(audit.filter((e) => e.eventType === 'report-acknowledged').map((e) => e.subject)).toEqual(['cbc-v2'])
   })
 
   it('refuses unknown or malformed Report ids without acknowledging any of the batch', async () => {

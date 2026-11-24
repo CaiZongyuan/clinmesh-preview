@@ -10,7 +10,7 @@ import { CheckIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useState } from 'react'
 import { CATEGORY_LABEL, type CatalogItemView, type InvestigationCategory } from '../../../shared/investigation'
 import { badge, iconButton } from '../pane-styles'
-import { ClinicalConfirmation } from './clinical-confirmation'
+import { ClinicalConfirmation } from '../clinical-confirmation'
 import { InvestigationCard } from './investigation-card'
 import type { Investigations } from './use-investigations'
 

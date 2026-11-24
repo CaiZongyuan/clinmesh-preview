@@ -72,9 +72,9 @@ export class InvestigationRepository {
          VALUES (?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(), encounterId, item.id, practitionerId, iso(now), JSON.stringify(plannedStageTimes(item, now)),
       )
-      this.encounters.audit(encounterId, 'investigation-issued', practitionerId, iso(now))
+      this.encounters.audit(encounterId, 'investigation-issued', practitionerId, iso(now), item.id)
     }
-    return this.list(active.encounter, now)
+    return { ok: true, investigations: this.list(active.encounter, now) }
   }
 
   // The simulation's test control: every remaining stage happens now, which releases Report version 1.
@@ -90,9 +90,9 @@ export class InvestigationRepository {
       if (!truth.ok) return refuse(truth.error)
       const stageTimes = (JSON.parse(row.stage_times) as string[]).map((at) => (at > iso(now) ? iso(now) : at))
       this.sql.exec('UPDATE investigation SET stage_times = ? WHERE investigation_id = ?', JSON.stringify(stageTimes), investigationId)
-      this.encounters.audit(encounterId, 'investigation-released-instantly', practitionerId, iso(now))
+      this.encounters.audit(encounterId, 'investigation-released-instantly', practitionerId, iso(now), investigationId)
     }
-    return this.list(active.encounter, now)
+    return { ok: true, investigations: this.list(active.encounter, now) }
   }
 
   // Only the latest version of a Report can be acknowledged, and only once.
@@ -116,18 +116,21 @@ export class InvestigationRepository {
         'INSERT INTO report_acknowledgement (report_id, practitioner_id, acknowledged_at) VALUES (?, ?, ?)',
         reportId, practitionerId, iso(now),
       )
-      this.encounters.audit(encounterId, 'report-acknowledged', practitionerId, iso(now))
+      this.encounters.audit(encounterId, 'report-acknowledged', practitionerId, iso(now), reportId)
     }
-    return this.list(active.encounter, now)
+    return { ok: true, investigations: this.list(active.encounter, now) }
   }
 
-  list(encounter: EncounterView, now: number): InvestigationsResult {
-    const unsettled = this.settle(encounter, now)
-    if (unsettled) return refuse(unsettled)
+  // Reading never refuses: a Report whose Case Truth is retired simply stays unreleased, so Reports already
+  // released and acknowledged stay readable. On an abandoned Encounter, settling only records Reports that came
+  // due at or before it ended: a past fact, not a write after the freeze.
+  list(encounter: EncounterView, now: number): InvestigationView[] {
+    this.settle(encounter, now)
     const clock = clockOf(encounter, now)
-    const investigations = this.rows(encounter.encounterId).map((row): InvestigationView => {
+    return this.rows(encounter.encounterId).map((row): InvestigationView => {
       const item = catalogItem(row.catalog_item_id)!
       const stageTimes = JSON.parse(row.stage_times) as string[]
+      const reports = this.reportRows(row.investigation_id).map(toReportView)
       return {
         investigationId: row.investigation_id,
         catalogItemId: item.id,
@@ -140,11 +143,11 @@ export class InvestigationRepository {
         expectedReportAt: stageTimes.at(-1)!,
         stages: INVESTIGATION_STAGES[item.category]
           .map((name, i) => ({ name, at: stageTimes[i] }))
-          .filter((stage) => stage.at <= clock),
-        reports: this.reportRows(row.investigation_id).map(toReportView),
+          // 已出报告 is reached only when a Report exists, which a retired Case Truth can withhold.
+          .filter((stage, i) => stage.at <= clock && (i < stageTimes.length - 1 || reports.length > 0)),
+        reports,
       }
     })
-    return { ok: true, investigations }
   }
 
   // Releases every Report that has come due. Refuses, writing nothing, when a due Report's Case Truth is retired.

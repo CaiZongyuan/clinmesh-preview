@@ -46,7 +46,9 @@ const MIGRATIONS: readonly string[] = [
    );`,
   // Investigations keep the planned time of each category stage; the last one releases Report version 1.
   // Report versions are immutable rows; a Report Acknowledgement belongs to exactly one version.
-  `CREATE TABLE investigation (
+  // Audit events gain the subject they acted on (catalog item, Report, body system); earlier rows keep NULL.
+  `ALTER TABLE audit_event ADD COLUMN subject TEXT;
+   CREATE TABLE investigation (
      investigation_id TEXT PRIMARY KEY,
      encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
      catalog_item_id TEXT NOT NULL,

@@ -84,7 +84,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   listInvestigations(encounterId: string): InvestigationsResult {
     return this.ctx.storage.transactionSync(() => {
       const found = this.encounters.get(encounterId)
-      return found.ok ? this.investigations.list(found.encounter, Date.now()) : found
+      return found.ok ? { ok: true, investigations: this.investigations.list(found.encounter, Date.now()) } : found
     })
   }
 

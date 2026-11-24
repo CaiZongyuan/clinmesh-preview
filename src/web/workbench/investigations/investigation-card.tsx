@@ -11,7 +11,7 @@ import {
 } from '../../../shared/investigation'
 import { formatClock } from '../format'
 import { badge } from '../pane-styles'
-import { ClinicalConfirmation } from './clinical-confirmation'
+import { ClinicalConfirmation } from '../clinical-confirmation'
 import { latestReport } from './use-investigations'
 
 const FLAG: Record<Exclude<ResultFlag, null>, { mark: string; hint: string }> = {

@@ -70,7 +70,8 @@ export interface CaseTruthResults {
 
 const SEXES: readonly Sex[] = ['male', 'female']
 
-function bandFor<B extends Band>(bands: readonly B[], patient: Patient): B | undefined {
+// The band with the latest `ageFrom` that the patient has reached; admission guarantees there is exactly one.
+export function bandFor<B extends Band>(bands: readonly B[], patient: Patient): B | undefined {
   return bands
     .filter((band) => (band.sex === 'any' || band.sex === patient.sex) && band.ageFrom <= patient.age)
     .sort((a, b) => b.ageFrom - a.ageFrom)[0]
@@ -83,8 +84,15 @@ export function flagFor(value: number | string, range: ReferenceRange): ResultFl
   return null
 }
 
-// Why an item may not enter the catalog, or null when it may. Every result must resolve from a baseline rule
-// for any patient, so each sex needs a band from birth, and a baseline value must itself be normal.
+// Each sex has exactly one applicable band at each age where some band starts.
+const unambiguous = (bands: readonly Band[]) =>
+  SEXES.every((sex) =>
+    bands.every((band) => bands.filter((b) => b.ageFrom === band.ageFrom && (b.sex === 'any' || b.sex === sex)).length <= 1),
+  )
+
+// Why an item may not enter the catalog, or null when it may. Every result must resolve from exactly one baseline
+// rule for any patient, so each sex needs a band from birth and no two bands may tie, and a baseline value must
+// itself be normal.
 export function admissionRefusal(item: CatalogItem): string | null {
   const coversEveryone = (bands: readonly Band[] | undefined) =>
     !!bands?.length && SEXES.every((sex) => bands.some((band) => band.ageFrom === 0 && (band.sex === 'any' || band.sex === sex)))
@@ -92,12 +100,14 @@ export function admissionRefusal(item: CatalogItem): string | null {
     if (!item.analytes?.length) return 'has no analytes'
     for (const analyte of item.analytes) {
       if (!coversEveryone(analyte.baseline)) return `${analyte.id} has no baseline rule for every age and sex`
+      if (!unambiguous(analyte.baseline!)) return `${analyte.id} has two baseline rules for the same age and sex`
       const abnormal = analyte.baseline!.find((band) => flagFor(band.value, band.referenceRange) !== null)
       if (abnormal) return `${analyte.id} has an abnormal baseline value`
     }
     return null
   }
-  return coversEveryone(item.narrative) ? null : 'has no baseline rule for every age and sex'
+  if (!coversEveryone(item.narrative)) return 'has no baseline rule for every age and sex'
+  return unambiguous(item.narrative!) ? null : 'has two baseline rules for the same age and sex'
 }
 
 export function admitCatalog(raw: RawCatalog) {
