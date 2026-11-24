@@ -99,6 +99,12 @@ const MIGRATIONS: readonly string[] = [
      UNIQUE (encounter_id, client_turn_id)
    );
    CREATE UNIQUE INDEX consultation_single_pending ON consultation_turn (encounter_id) WHERE status = 'pending';`,
+  // A cancellation is an immutable fact about one Investigation, so it cannot happen twice.
+  `CREATE TABLE investigation_cancellation (
+     investigation_id TEXT PRIMARY KEY REFERENCES investigation (investigation_id),
+     practitioner_id TEXT NOT NULL,
+     cancelled_at TEXT NOT NULL
+   );`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

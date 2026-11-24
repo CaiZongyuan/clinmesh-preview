@@ -32,6 +32,8 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'catalog-item-not-found': 404,
   'investigation-already-issued': 409,
   'investigation-not-found': 404,
+  'investigation-cancelled': 409,
+  'investigation-already-reported': 409,
   'report-not-found': 404,
   'report-superseded': 409,
   'report-already-acknowledged': 409,
@@ -127,6 +129,10 @@ app.post('/encounters/:encounterId/investigations', async (c) => {
 
 app.post('/encounters/:encounterId/investigations/:investigationId/instant-release', async (c) =>
   investigationsOr(c, await workspace(c).releaseInvestigationNow(c.req.param('encounterId'), c.req.param('investigationId'))),
+)
+
+app.post('/encounters/:encounterId/investigations/:investigationId/cancellation', async (c) =>
+  investigationsOr(c, await workspace(c).cancelInvestigation(c.req.param('encounterId'), c.req.param('investigationId'))),
 )
 
 app.post('/encounters/:encounterId/report-acknowledgements', async (c) => {

@@ -84,6 +84,11 @@ export async function releaseInvestigationNow(encounterId: string, investigation
   return (await request<InvestigationsResponse>(path, post())).investigations
 }
 
+export async function cancelInvestigation(encounterId: string, investigationId: string): Promise<InvestigationView[]> {
+  const path = `${investigationsPath(encounterId)}/${encodeURIComponent(investigationId)}/cancellation`
+  return (await request<InvestigationsResponse>(path, post())).investigations
+}
+
 export async function acknowledgeReports(encounterId: string, reportIds: string[]): Promise<InvestigationView[]> {
   const path = `/api/encounters/${encodeURIComponent(encounterId)}/report-acknowledgements`
   return (await request<InvestigationsResponse>(path, post({ reportIds }))).investigations

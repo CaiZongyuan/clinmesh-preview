@@ -31,6 +31,8 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
     send('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['pct'] }),
   'POST /api/encounters/:encounterId/investigations/:investigationId/instant-release': ({ encounterId, pendingInvestigationId }) =>
     send('POST', `/api/encounters/${encounterId}/investigations/${pendingInvestigationId}/instant-release`),
+  'POST /api/encounters/:encounterId/investigations/:investigationId/cancellation': ({ encounterId, pendingInvestigationId }) =>
+    send('POST', `/api/encounters/${encounterId}/investigations/${pendingInvestigationId}/cancellation`),
   'POST /api/encounters/:encounterId/report-acknowledgements': ({ encounterId, releasedReportId }) =>
     send('POST', `/api/encounters/${encounterId}/report-acknowledgements`, { reportIds: [releasedReportId] }),
   'POST /api/encounters/:encounterId/consultation/doctor-turns': ({ encounterId }) =>

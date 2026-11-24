@@ -8,11 +8,18 @@ import {
 } from '@ui-sdk/react/segmented-control'
 import { CheckIcon, SearchIcon, XIcon } from 'lucide-react'
 import { useState } from 'react'
-import { CATEGORY_LABEL, type CatalogItemView, type InvestigationCategory } from '../../../shared/investigation'
+import {
+  CATEGORY_LABEL,
+  type CatalogItemView,
+  type InvestigationCategory,
+  type InvestigationView,
+  type ReportView,
+} from '../../../shared/investigation'
+import { formatClock } from '../format'
 import { badge, iconButton } from '../pane-styles'
 import { ClinicalConfirmation } from '../clinical-confirmation'
-import { InvestigationCard } from './investigation-card'
-import type { Investigations } from './use-investigations'
+import { InvestigationCard, type BatchSelection } from './investigation-card'
+import { awaitingAcknowledgement, latestReport, type Investigations } from './use-investigations'
 
 type CategoryFilter = InvestigationCategory | 'all'
 
@@ -30,12 +37,26 @@ export function InvestigationsTab({ state, writable }: { state: Investigations; 
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [abnormalOnly, setAbnormalOnly] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
   const { catalog, investigations, pending } = state
 
   const q = query.trim().toLowerCase()
   const shown = catalog.filter((item) => (category === 'all' || item.category === category) && matches(item, q))
-  const issued = new Set(investigations.map((i) => i.catalogItemId))
+  const issued = new Set(investigations.filter((i) => !i.cancellation).map((i) => i.catalogItemId))
   const pendingItems = pending.flatMap((id) => catalog.filter((item) => item.id === id))
+  // Several Reports awaiting acknowledgement can be selected and acknowledged together. Selection is by Report
+  // version, so a version superseded by an amendment drops out of it.
+  const awaiting = investigations.filter(awaitingAcknowledgement).map((i) => ({ name: i.name, report: latestReport(i)! }))
+  const batch = awaiting.length > 1 ? awaiting.filter(({ report }) => selected.includes(report.reportId)) : []
+  const selectionFor = (investigation: InvestigationView): BatchSelection | null => {
+    const report = latestReport(investigation)
+    if (awaiting.length < 2 || !report || report.acknowledgement) return null
+    const { reportId } = report
+    return {
+      selected: selected.includes(reportId),
+      onSelectedChange: (on) => setSelected((ids) => (on ? [...ids, reportId] : ids.filter((id) => id !== reportId))),
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -163,14 +184,26 @@ export function InvestigationsTab({ state, writable }: { state: Investigations; 
           <h3 id="issued-heading" className="m-0 text-sm font-semibold">
             已开立与报告 <span className="font-mono text-xs text-muted-foreground">{investigations.length}</span>
           </h3>
-          <label className="flex items-center gap-1.5 text-xs">
-            <Checkbox checked={abnormalOnly} onCheckedChange={(checked) => setAbnormalOnly(checked === true)}>
-              <CheckboxIndicator>
-                <CheckIcon aria-hidden="true" size={12} />
-              </CheckboxIndicator>
-            </Checkbox>
-            仅看异常
-          </label>
+          <div className="flex items-center gap-2.5">
+            <label className="flex items-center gap-1.5 text-xs">
+              <Checkbox checked={abnormalOnly} onCheckedChange={(checked) => setAbnormalOnly(checked === true)}>
+                <CheckboxIndicator>
+                  <CheckIcon aria-hidden="true" size={12} />
+                </CheckboxIndicator>
+              </Checkbox>
+              仅看异常
+            </label>
+            {awaiting.length > 1 && (
+              <BatchAcknowledgement
+                batch={batch}
+                writable={writable}
+                onConfirm={async () => {
+                  await state.acknowledge(batch.map(({ report }) => report.reportId))
+                  setSelected([])
+                }}
+              />
+            )}
+          </div>
         </div>
         {investigations.length === 0 ? (
           <p className="m-0 py-3 text-center text-xs text-muted-foreground">尚未开立检查</p>
@@ -181,12 +214,44 @@ export function InvestigationsTab({ state, writable }: { state: Investigations; 
               investigation={investigation}
               abnormalOnly={abnormalOnly}
               writable={writable}
+              selection={selectionFor(investigation)}
               onReleaseNow={() => state.releaseNow(investigation.investigationId)}
+              onCancel={() => state.cancel(investigation.investigationId)}
               onAcknowledge={(reportId) => state.acknowledge([reportId])}
             />
           ))
         )}
       </section>
     </div>
+  )
+}
+
+interface BatchAcknowledgementProps {
+  batch: { name: string; report: ReportView }[]
+  writable: boolean
+  onConfirm: () => Promise<void>
+}
+
+function BatchAcknowledgement({ batch, writable, onConfirm }: BatchAcknowledgementProps) {
+  return (
+    <ClinicalConfirmation
+      trigger={batch.length ? `确认所选已阅（${batch.length}）` : '确认所选已阅'}
+      triggerClassName="h-7 border-primary bg-primary px-2.5 text-xs text-primary-foreground"
+      disabled={!writable || batch.length === 0}
+      title={`确认 ${batch.length} 份报告已阅？`}
+      confirmLabel={`确认 ${batch.length} 份已阅`}
+      intent={`确认已阅 ${batch.map(({ name, report }) => `${name}第 ${report.version} 版报告`).join('、')}`}
+      onConfirm={onConfirm}
+    >
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {batch.map(({ name, report }) => (
+          <li key={report.reportId}>
+            {name} · 第 {report.version} 版（当前）
+            <span className="text-muted-foreground"> · 报告时间 {formatClock(report.releasedAt)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="m-0 mt-2 text-muted-foreground">确认您已查看以上各份报告的当前版本。仅打开查看不构成已阅确认。</p>
+    </ClinicalConfirmation>
   )
 }

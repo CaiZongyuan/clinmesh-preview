@@ -10,6 +10,8 @@ const STATUS: Record<EncounterError['code'], number> = {
   'catalog-item-not-found': 404,
   'investigation-already-issued': 409,
   'investigation-not-found': 404,
+  'investigation-cancelled': 409,
+  'investigation-already-reported': 409,
   'report-not-found': 404,
   'report-superseded': 409,
   'report-already-acknowledged': 409,
@@ -252,6 +254,7 @@ export function createFakeClinicApi({
     encounters: () => state.encounters,
     investigations: investigations.list,
     turns: (encounterId: string) => turnsOf(encounterId),
+    amendReport: investigations.amend,
     // Another browser tab starting an Encounter behind this one's back.
     startElsewhere: (caseId: string) => startEncounter(caseId),
     openSockets: () => [...sockets],
