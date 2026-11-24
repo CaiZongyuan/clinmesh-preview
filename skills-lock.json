@@ -1,12 +1,33 @@
 {
   "version": 2,
   "skills": {
+    "agent-browser": {
+      "source": "vercel-labs/agent-browser",
+      "commit": "0a923358ea989d7602f0d06507ad3447c62ffe9b",
+      "sourceType": "github",
+      "skillPath": "skills/agent-browser/SKILL.md",
+      "computedHash": "a0dfac7503f69bcf529b2660fc79964064c4f179eb65695904ddc45fc0d99d20"
+    },
     "ask-matt": {
       "source": "mattpocock/skills",
       "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823",
       "sourceType": "github",
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "7ff2383b40fe9d8f3e753d267d964fb2b44d120a948fd2a57c3b26ddfc318370"
+    },
+    "change-impact": {
+      "source": "CaiZongyuan/skills",
+      "commit": "5010243ff40b6f1b4c9e878dd8ecf47856538a71",
+      "sourceType": "github",
+      "skillPath": "skills/change-impact/SKILL.md",
+      "computedHash": "4a08e485a5bced375db289e0e0c49f92e50101908bb45181ca6d95aeb6029db2"
+    },
+    "check-benchmark": {
+      "source": "CaiZongyuan/skills",
+      "commit": "5010243ff40b6f1b4c9e878dd8ecf47856538a71",
+      "sourceType": "github",
+      "skillPath": "skills/check-benchmark/SKILL.md",
+      "computedHash": "057eb9b18fc364bc489890e08ba32dbdd6e795cc43e4a9cec969c63f0f02c108"
     },
     "chief-of-staff": {
       "source": "mattpocock/skills",
@@ -35,6 +56,13 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/codebase-design/SKILL.md",
       "computedHash": "d40f025dc1b0f2020663260f38f2bcb8d6ed3523afb11e5fda624b01238677e8"
+    },
+    "development-timeline": {
+      "source": "CaiZongyuan/skills",
+      "commit": "5010243ff40b6f1b4c9e878dd8ecf47856538a71",
+      "sourceType": "github",
+      "skillPath": "skills/development-timeline/SKILL.md",
+      "computedHash": "0483aff12774d1b6ecd83a16732afe6ea74f40ded37de0873f9bcd0240dddc41"
     },
     "diagnosing-bugs": {
       "source": "mattpocock/skills",
@@ -120,6 +148,13 @@
       "skillPath": "skills/misc/migrate-to-shoehorn/SKILL.md",
       "computedHash": "a63549df6d5b5c6595029f8c504ccf31a12f01312f03db70da4b45cb10ba5ca8"
     },
+    "pm-development": {
+      "source": "CaiZongyuan/skills",
+      "commit": "5010243ff40b6f1b4c9e878dd8ecf47856538a71",
+      "sourceType": "github",
+      "skillPath": "skills/pm-development/SKILL.md",
+      "computedHash": "6ab1b8e130fd8491240ffc0fd1a836c9db9f6946a5596122d85a84ebd0f4d5cf"
+    },
     "pr": {
       "source": "mattpocock/skills",
       "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823",
@@ -133,6 +168,13 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/prototype/SKILL.md",
       "computedHash": "1e3ba2202a5b77b8aa50bc4447432331d6e42590e53ec0935689662cfed199ca"
+    },
+    "reduce-complexity": {
+      "source": "CaiZongyuan/skills",
+      "commit": "5010243ff40b6f1b4c9e878dd8ecf47856538a71",
+      "sourceType": "github",
+      "skillPath": "skills/reduce-complexity/SKILL.md",
+      "computedHash": "581b369acf19074e64556ae780adc5c4325c9fd04e58cca815ea1d1940894acc"
     },
     "research": {
       "source": "mattpocock/skills",
@@ -231,6 +273,13 @@
       "sourceType": "github",
       "skillPath": "packages/core/skills/ui-sdk/SKILL.md",
       "computedHash": "cabe635c8f279e77b50a265c499ea2e8ebd471574b96acfc61a11a147d553e6d"
+    },
+    "verification-guide": {
+      "source": "CaiZongyuan/skills",
+      "commit": "5010243ff40b6f1b4c9e878dd8ecf47856538a71",
+      "sourceType": "github",
+      "skillPath": "skills/verification-guide/SKILL.md",
+      "computedHash": "a1d60dc066cc944354625e838719a50ef0ec984fb38a66e97bf186eae0da2e3e"
     },
     "wait-what": {
       "source": "mattpocock/skills",
