@@ -91,6 +91,15 @@ describe('Case Truth denylist', () => {
     expect(caughtLeak('{"queueNumber":7,"age":58,"note":"72 小时内请勿重复提交"}')).toBe(false)
   })
 
+  it('skips numbers under structural keys such as sequence, usage, durations and age, and only those', () => {
+    for (const body of ['{"usage":{"in":30,"out":72}}', '{"seq":22}', '{"turn":{"index":94,"durationMs":84}}', '{"age":58,"version":"94"}']) {
+      expect(caughtLeak(body), body).toBe(false)
+    }
+    for (const body of ['{"spo2":94}', '{"usage":{"in":30},"reading":"94"}', '{"seq":1,"text":"SpO₂ 94"}']) {
+      expect(caughtLeak(body), body).toBe(true)
+    }
+  })
+
   it('lets through Case Truth the doctor has revealed, and only that', () => {
     const { lungs, heart } = casePack.cases[0].physicalExamination
     expect(caughtLeak(JSON.stringify({ finding: lungs }), [lungs])).toBe(false)

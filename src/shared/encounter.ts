@@ -115,6 +115,7 @@ export type EncounterErrorCode =
   | 'active-encounter-exists'
   | 'encounter-not-active'
   | 'body-system-already-examined'
+  | 'case-version-retired'
 
 export interface EncounterError {
   code: EncounterErrorCode

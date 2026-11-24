@@ -10,6 +10,7 @@ const STATUS: Record<EncounterError['code'], number> = {
   'active-encounter-exists': 409,
   'encounter-not-active': 409,
   'body-system-already-examined': 409,
+  'case-version-retired': 409,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })

@@ -11,3 +11,4 @@ Both `Clinical Copilot` and `Simulated Patient` run as separate, per-encounter `
 - Physical DO separation enforces ClinMesh's `no-truth-leak` invariant at the storage and context boundary: neither the doctor nor `Clinical Copilot` can bypass clinical investigation to read `Case Truth`.
 - Both agents inherit crash recovery, durable transcripts, and WebSocket reconnection from `pi-durable` without custom session plumbing.
 - `Clinical Copilot` must never be granted direct backend mutation tools for formal clinical commits; formal commits always traverse doctor-confirmed UI/command paths.
+- `Physical Examination` controls are agent-gated with `data-agent-confirm` because each one reveals `Case Truth` as the doctor's own act, even though an examination is not a formal Clinical Confirmation commit: the doctor's own press needs no dialog or acknowledgement, but `Clinical Copilot` cannot examine without the doctor's approval.

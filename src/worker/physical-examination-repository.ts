@@ -1,7 +1,7 @@
 import type { EncounterError, VitalSign } from '../shared/encounter'
 import { BODY_SYSTEM_NAME, type BodySystem, type PhysicalExaminationView } from '../shared/physical-examination'
 import type { EncounterRepository } from './encounter-repository'
-import { physicalExaminationFinding } from './golden-case-pack'
+import { caseTruth, physicalExaminationFinding } from './golden-case-pack'
 
 type PhysicalExaminationRow = {
   body_system: BodySystem
@@ -35,7 +35,9 @@ export class PhysicalExaminationRepository {
         error: { code: 'body-system-already-examined', message: `本次就诊已查过${BODY_SYSTEM_NAME[system]}，每个部位只查一次。` },
       }
     }
-    const { finding, vitals } = physicalExaminationFinding(active.encounter.caseId, system)!
+    const truth = caseTruth(active.encounter.caseId, active.encounter.caseVersion)
+    if (!truth.ok) return truth
+    const { finding, vitals } = physicalExaminationFinding(truth.caseTruth, system)
     this.sql.exec(
       `INSERT INTO physical_examination (encounter_id, body_system, finding, vitals, practitioner_id, examined_at)
        VALUES (?, ?, ?, ?, ?, ?)`,

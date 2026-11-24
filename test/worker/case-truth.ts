@@ -25,6 +25,12 @@ const DIAGNOSIS_TOKENS: Record<string, readonly string[]> = {
 // Which catalog item a result belongs to is not Case Truth; the result is.
 const CATALOG_IDENTITY_KEYS = new Set(['id', 'catalogItem', 'codings', 'system', 'version', 'unit', 'unitDisplay', 'referenceRange'])
 
+// Response keys whose numbers count or order things rather than describe the patient: sequence and turn
+// positions, token usage, durations, the queue number, age and versions. Hidden-value checks skip them;
+// fragment and diagnosis-word checks still read the whole body.
+const STRUCTURAL_KEYS = new Set(['seq', 'index', 'count', 'usage', 'in', 'out', 'queueNumber', 'age', 'attempt', 'version'])
+const isStructuralKey = (key: string) => STRUCTURAL_KEYS.has(key) || key.startsWith('duration')
+
 const MIN_FRAGMENT_LENGTH = 4
 const CLAUSE_BREAK = /[，。；、：（）();,！？!?\n]+/
 
@@ -34,7 +40,7 @@ const NUMBER_TOKEN = /(?<![\w.:+%-])\d+(?:\.\d+)?(?![\w.:-])/g
 const standaloneNumber = (n: number) =>
   new RegExp(`(?<![\\w.:+%-])${String(n).replace('.', '\\.')}(?![\\w.:-])`)
 
-function leaves(value: unknown, skipKeys = new Set<string>()): unknown[] {
+function leaves(value: unknown, skipKeys: { has: (key: string) => boolean } = new Set<string>()): unknown[] {
   if (Array.isArray(value)) return value.flatMap((item) => leaves(item, skipKeys))
   if (value !== null && typeof value === 'object') {
     return Object.entries(value).flatMap(([key, item]) => (skipKeys.has(key) ? [] : leaves(item, skipKeys)))
@@ -99,7 +105,7 @@ export function expectNoCaseTruth(label: string, body: string, revealed: unknown
   try {
     parsed = JSON.parse(body)
   } catch {}
-  const values = leaves(parsed)
+  const values = leaves(parsed, { has: isStructuralKey })
   const strings = values.filter((v): v is string => typeof v === 'string')
   const denylists = casePack.cases.map((goldenCase) => caseTruthDenylist(goldenCase, revealed))
 

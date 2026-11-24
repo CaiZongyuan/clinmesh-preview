@@ -1,5 +1,5 @@
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
-import type { EncounterView, PriorMedication } from '../shared/encounter'
+import type { EncounterError, EncounterView, PriorMedication } from '../shared/encounter'
 import type { Sex, VisitKind } from '../shared/golden-case-queue'
 import type { BodySystem, PhysicalExaminationView } from '../shared/physical-examination'
 import { vitalSigns, vitalSignsSentence } from './vital-signs'
@@ -70,14 +70,38 @@ export function encounterChart(caseId: string): EncounterChart | undefined {
   }
 }
 
+type GoldenCase = (typeof casePack.cases)[number]
+
+export type CaseTruth = Pick<
+  GoldenCase,
+  'indexConditions' | 'physicalExamination' | 'laboratories' | 'textResults' | 'reportAmendments' | 'debriefReference'
+>
+
+export type CaseTruthResult = { ok: true; caseTruth: CaseTruth } | { ok: false; error: EncounterError }
+
+// The one way to read Case Truth. An Encounter reads the pack version it started with or nothing,
+// so a newer pack never silently changes what its examinations and results reveal.
+export function caseTruth(caseId: string, caseVersion: string): CaseTruthResult {
+  const goldenCase = casePack.cases.find((c) => c.id === caseId)
+  if (!goldenCase || caseVersion !== casePack.version) {
+    const message = goldenCase
+      ? `本次就诊绑定病例包版本 ${caseVersion}，当前为 ${casePack.version}。该版本已停用，无法继续揭示病例真值；请放弃本次就诊后重新开始。`
+      : `Golden Case ${caseId} 已不在当前病例包中，无法继续揭示病例真值；请放弃本次就诊。`
+    return { ok: false, error: { code: 'case-version-retired', message } }
+  }
+  const { indexConditions, physicalExamination, laboratories, textResults, reportAmendments, debriefReference } = goldenCase
+  return {
+    ok: true,
+    caseTruth: { indexConditions, physicalExamination, laboratories, textResults, reportAmendments, debriefReference },
+  }
+}
+
 export type PhysicalExaminationFinding = Pick<PhysicalExaminationView, 'finding' | 'vitals'>
 
-// Reveals one body system's finding from Case Truth, and nothing else of it.
-export function physicalExaminationFinding(caseId: string, system: BodySystem): PhysicalExaminationFinding | undefined {
-  const goldenCase = casePack.cases.find((c) => c.id === caseId)
-  if (!goldenCase) return undefined
-  if (system !== 'vitals') return { finding: goldenCase.physicalExamination[system], vitals: null }
-  const { spo2Condition, ...readings } = goldenCase.physicalExamination.vitals
+// Reveals one body system's finding, and nothing else of Case Truth.
+export function physicalExaminationFinding({ physicalExamination }: CaseTruth, system: BodySystem): PhysicalExaminationFinding {
+  if (system !== 'vitals') return { finding: physicalExamination[system], vitals: null }
+  const { spo2Condition, ...readings } = physicalExamination.vitals
   const vitals = vitalSigns(readings)
   return { finding: vitalSignsSentence(vitals, spo2Condition), vitals }
 }

@@ -25,6 +25,7 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'active-encounter-exists': 409,
   'encounter-not-active': 409,
   'body-system-already-examined': 409,
+  'case-version-retired': 409,
 }
 
 type AppContext = Context<{ Bindings: Env }>

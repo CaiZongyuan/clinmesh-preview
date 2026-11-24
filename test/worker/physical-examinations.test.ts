@@ -119,6 +119,31 @@ describe('Physical Examination', () => {
     expect(await examinations(encounter.encounterId)).toEqual([])
   })
 
+  it('refuses with case-version-retired, writing nothing, when the Encounter’s Golden Case version is no longer in the pack', async () => {
+    for (const [column, value] of [
+      ['case_version', '2026-01-01.0'],
+      ['case_id', 'golden-case-retired'],
+    ] as const) {
+      const encounter = await startEncounter()
+      await runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
+        state.storage.sql.exec(`UPDATE encounter SET ${column} = ? WHERE encounter_id = ?`, value, encounter.encounterId)
+      })
+
+      const response = await examine(encounter.encounterId, 'vitals')
+      expect(response.status, column).toBe(409)
+      const body = await response.text()
+      expectNoCaseTruth(`retired ${column}`, body)
+      const { error } = JSON.parse(body) as ErrorResponse
+      expect(error.code, column).toBe('case-version-retired')
+      expect(error.message, column).toContain('无法继续揭示病例真值')
+
+      expect(await examinations(encounter.encounterId)).toEqual([])
+      const { auditEvents } = (await (await api(`/api/encounters/${encounter.encounterId}/audit-events`)).json()) as AuditEventsResponse
+      expect(auditEvents.map((e) => e.eventType)).toEqual(['encounter-started'])
+      await post(`/api/encounters/${encounter.encounterId}/abandonment`)
+    }
+  })
+
   it('rejects a second row for the same body system in storage even if a command skipped the check', async () => {
     const encounter = await startEncounter()
     await examine(encounter.encounterId, 'general')
