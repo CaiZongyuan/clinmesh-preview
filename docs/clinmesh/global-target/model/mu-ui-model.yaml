@@ -1,0 +1,666 @@
+domain: GlobalMiniHIS
+screens:
+  - screenId: Desk-admin
+    name: 机构配置负责人工作区
+    roleRefs:
+      - admin
+    description: 目标业务视图；选装业务只在本机构已启用且岗位获权时出现。
+    elements:
+      - elementId: button-admin-profile.publish
+        name: 发布机构生效配置
+        label: 发布机构生效配置
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-profile.publish
+    events:
+      - eventId: action-admin-profile.publish
+        name: 发布机构生效配置
+        triggerElementId: button-admin-profile.publish
+        permissions:
+          - P-profile.publish
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: profile.publish
+  - screenId: Desk-clerk
+    name: 登记与身份核对员工作区
+    roleRefs:
+      - clerk
+    description: 目标业务视图；选装业务只在本机构已启用且岗位获权时出现。
+    elements:
+      - elementId: button-clerk-patient.register
+        name: 登记患者或创建临时身份
+        label: 登记患者或创建临时身份
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-patient.register
+      - elementId: button-clerk-identity.check
+        name: 审结重复身份候选
+        label: 审结重复身份候选
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-identity.check
+      - elementId: button-clerk-identity.reverse
+        name: 纠正误并
+        label: 纠正误并
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-identity.reverse
+      - elementId: button-clerk-visit.start
+        name: 开始本次接诊
+        label: 开始本次接诊
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-visit.start
+      - elementId: button-clerk-appt.book
+        name: 承诺预约号源
+        label: 承诺预约号源
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-appt.book
+      - elementId: button-clerk-appt.cancel
+        name: 取消预约
+        label: 取消预约
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-appt.cancel
+      - elementId: button-clerk-appt.arrive
+        name: 确认预约到诊
+        label: 确认预约到诊
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-appt.arrive
+    events:
+      - eventId: action-clerk-patient.register
+        name: 登记患者或创建临时身份
+        triggerElementId: button-clerk-patient.register
+        permissions:
+          - P-patient.register
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: patient.register
+      - eventId: action-clerk-identity.check
+        name: 审结重复身份候选
+        triggerElementId: button-clerk-identity.check
+        permissions:
+          - P-identity.check
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: identity.check
+      - eventId: action-clerk-identity.reverse
+        name: 纠正误并
+        triggerElementId: button-clerk-identity.reverse
+        permissions:
+          - P-identity.reverse
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: identity.reverse
+      - eventId: action-clerk-visit.start
+        name: 开始本次接诊
+        triggerElementId: button-clerk-visit.start
+        permissions:
+          - P-visit.start
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: visit.start
+      - eventId: action-clerk-appt.book
+        name: 承诺预约号源
+        triggerElementId: button-clerk-appt.book
+        permissions:
+          - P-appt.book
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: appt.book
+      - eventId: action-clerk-appt.cancel
+        name: 取消预约
+        triggerElementId: button-clerk-appt.cancel
+        permissions:
+          - P-appt.cancel
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: appt.cancel
+      - eventId: action-clerk-appt.arrive
+        name: 确认预约到诊
+        triggerElementId: button-clerk-appt.arrive
+        permissions:
+          - P-appt.arrive
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: appt.arrive
+  - screenId: Desk-doctor
+    name: 经治医生工作区
+    roleRefs:
+      - doctor
+    description: 目标业务视图；选装业务只在本机构已启用且岗位获权时出现。
+    elements:
+      - elementId: button-doctor-history.record
+        name: 核实病史与过敏状态
+        label: 核实病史与过敏状态
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-history.record
+      - elementId: button-doctor-contact.record
+        name: 登记实际岗位接触
+        label: 登记实际岗位接触
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-contact.record
+      - elementId: button-doctor-note.sign
+        name: 签署临床记录
+        label: 签署临床记录
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-note.sign
+      - elementId: button-doctor-note.correct
+        name: 更正已签病历
+        label: 更正已签病历
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-note.correct
+      - elementId: button-doctor-visit.end
+        name: 办理离诊及未决事项交接
+        label: 办理离诊及未决事项交接
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-visit.end
+      - elementId: button-doctor-request.issue
+        name: 开立院内或外送申请
+        label: 开立院内或外送申请
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-request.issue
+      - elementId: button-doctor-report.ack
+        name: 确认本版本已阅
+        label: 确认本版本已阅
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-report.ack
+      - elementId: button-doctor-follow.assign
+        name: 建立后续行动
+        label: 建立后续行动
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-follow.assign
+      - elementId: button-doctor-follow.handoff
+        name: 承接后续责任
+        label: 承接后续责任
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-follow.handoff
+      - elementId: button-doctor-follow.finish
+        name: 记录后续处理结果
+        label: 记录后续处理结果
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-follow.finish
+      - elementId: button-doctor-rx.issue
+        name: 开具院内或外配处方
+        label: 开具院内或外配处方
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-rx.issue
+      - elementId: button-doctor-queue.results
+        name: 查看未回与待阅结果
+        label: 查看未回与待阅结果
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-queue.results
+      - elementId: button-doctor-queue.follow
+        name: 查看未结后续行动
+        label: 查看未结后续行动
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-queue.follow
+    events:
+      - eventId: action-doctor-history.record
+        name: 核实病史与过敏状态
+        triggerElementId: button-doctor-history.record
+        permissions:
+          - P-history.record
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: history.record
+      - eventId: action-doctor-contact.record
+        name: 登记实际岗位接触
+        triggerElementId: button-doctor-contact.record
+        permissions:
+          - P-contact.record
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: contact.record
+      - eventId: action-doctor-note.sign
+        name: 签署临床记录
+        triggerElementId: button-doctor-note.sign
+        permissions:
+          - P-note.sign
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: note.sign
+      - eventId: action-doctor-note.correct
+        name: 更正已签病历
+        triggerElementId: button-doctor-note.correct
+        permissions:
+          - P-note.correct
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: note.correct
+      - eventId: action-doctor-visit.end
+        name: 办理离诊及未决事项交接
+        triggerElementId: button-doctor-visit.end
+        permissions:
+          - P-visit.end
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: visit.end
+      - eventId: action-doctor-request.issue
+        name: 开立院内或外送申请
+        triggerElementId: button-doctor-request.issue
+        permissions:
+          - P-request.issue
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: request.issue
+      - eventId: action-doctor-report.ack
+        name: 确认本版本已阅
+        triggerElementId: button-doctor-report.ack
+        permissions:
+          - P-report.ack
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: report.ack
+      - eventId: action-doctor-follow.assign
+        name: 建立后续行动
+        triggerElementId: button-doctor-follow.assign
+        permissions:
+          - P-follow.assign
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: follow.assign
+      - eventId: action-doctor-follow.handoff
+        name: 承接后续责任
+        triggerElementId: button-doctor-follow.handoff
+        permissions:
+          - P-follow.handoff
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: follow.handoff
+      - eventId: action-doctor-follow.finish
+        name: 记录后续处理结果
+        triggerElementId: button-doctor-follow.finish
+        permissions:
+          - P-follow.finish
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: follow.finish
+      - eventId: action-doctor-rx.issue
+        name: 开具院内或外配处方
+        triggerElementId: button-doctor-rx.issue
+        permissions:
+          - P-rx.issue
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: rx.issue
+      - eventId: action-doctor-queue.results
+        name: 查看未回与待阅结果
+        triggerElementId: button-doctor-queue.results
+        permissions:
+          - P-queue.results
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: queue.results
+      - eventId: action-doctor-queue.follow
+        name: 查看未结后续行动
+        triggerElementId: button-doctor-queue.follow
+        permissions:
+          - P-queue.follow
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: queue.follow
+  - screenId: Desk-nurse
+    name: 护理人员工作区
+    roleRefs:
+      - nurse
+    description: 目标业务视图；选装业务只在本机构已启用且岗位获权时出现。
+    elements:
+      - elementId: button-nurse-contact.record
+        name: 登记实际岗位接触
+        label: 登记实际岗位接触
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-contact.record
+      - elementId: button-nurse-follow.handoff
+        name: 承接后续责任
+        label: 承接后续责任
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-follow.handoff
+      - elementId: button-nurse-follow.finish
+        name: 记录后续处理结果
+        label: 记录后续处理结果
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-follow.finish
+      - elementId: button-nurse-stay.admit
+        name: 办理入院与床位占用
+        label: 办理入院与床位占用
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-stay.admit
+      - elementId: button-nurse-stay.depart
+        name: 记录实际离院
+        label: 记录实际离院
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-stay.depart
+      - elementId: button-nurse-stay.release
+        name: 按机构政策释放原床
+        label: 按机构政策释放原床
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-stay.release
+      - elementId: button-nurse-queue.follow
+        name: 查看未结后续行动
+        label: 查看未结后续行动
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-queue.follow
+    events:
+      - eventId: action-nurse-contact.record
+        name: 登记实际岗位接触
+        triggerElementId: button-nurse-contact.record
+        permissions:
+          - P-contact.record
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: contact.record
+      - eventId: action-nurse-follow.handoff
+        name: 承接后续责任
+        triggerElementId: button-nurse-follow.handoff
+        permissions:
+          - P-follow.handoff
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: follow.handoff
+      - eventId: action-nurse-follow.finish
+        name: 记录后续处理结果
+        triggerElementId: button-nurse-follow.finish
+        permissions:
+          - P-follow.finish
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: follow.finish
+      - eventId: action-nurse-stay.admit
+        name: 办理入院与床位占用
+        triggerElementId: button-nurse-stay.admit
+        permissions:
+          - P-stay.admit
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: stay.admit
+      - eventId: action-nurse-stay.depart
+        name: 记录实际离院
+        triggerElementId: button-nurse-stay.depart
+        permissions:
+          - P-stay.depart
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: stay.depart
+      - eventId: action-nurse-stay.release
+        name: 按机构政策释放原床
+        triggerElementId: button-nurse-stay.release
+        permissions:
+          - P-stay.release
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: stay.release
+      - eventId: action-nurse-queue.follow
+        name: 查看未结后续行动
+        triggerElementId: button-nurse-queue.follow
+        permissions:
+          - P-queue.follow
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: queue.follow
+  - screenId: Desk-reviewer
+    name: 外部回报核对员工作区
+    roleRefs:
+      - reviewer
+    description: 目标业务视图；选装业务只在本机构已启用且岗位获权时出现。
+    elements:
+      - elementId: button-reviewer-inbound.receive
+        name: 登记外部回报
+        label: 登记外部回报
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-inbound.receive
+      - elementId: button-reviewer-inbound.match
+        name: 核对来件与原申请
+        label: 核对来件与原申请
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-inbound.match
+      - elementId: button-reviewer-report.file
+        name: 归入原申请的正式结果
+        label: 归入原申请的正式结果
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-report.file
+      - elementId: button-reviewer-report.amend
+        name: 登记来源方更正版本
+        label: 登记来源方更正版本
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-report.amend
+      - elementId: button-reviewer-queue.inbound
+        name: 查看未匹配回报
+        label: 查看未匹配回报
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-queue.inbound
+    events:
+      - eventId: action-reviewer-inbound.receive
+        name: 登记外部回报
+        triggerElementId: button-reviewer-inbound.receive
+        permissions:
+          - P-inbound.receive
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: inbound.receive
+      - eventId: action-reviewer-inbound.match
+        name: 核对来件与原申请
+        triggerElementId: button-reviewer-inbound.match
+        permissions:
+          - P-inbound.match
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: inbound.match
+      - eventId: action-reviewer-report.file
+        name: 归入原申请的正式结果
+        triggerElementId: button-reviewer-report.file
+        permissions:
+          - P-report.file
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: report.file
+      - eventId: action-reviewer-report.amend
+        name: 登记来源方更正版本
+        triggerElementId: button-reviewer-report.amend
+        permissions:
+          - P-report.amend
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: report.amend
+      - eventId: action-reviewer-queue.inbound
+        name: 查看未匹配回报
+        triggerElementId: button-reviewer-queue.inbound
+        permissions:
+          - P-queue.inbound
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: queue.inbound
+  - screenId: Desk-pharmacist
+    name: 药师工作区
+    roleRefs:
+      - pharmacist
+    description: 目标业务视图；选装业务只在本机构已启用且岗位获权时出现。
+    elements:
+      - elementId: button-pharmacist-lot.receive
+        name: 记录批次入库
+        label: 记录批次入库
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-lot.receive
+      - elementId: button-pharmacist-lot.dispense
+        name: 按院内处方发放
+        label: 按院内处方发放
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-lot.dispense
+      - elementId: button-pharmacist-lot.adjust
+        name: 登记盘点差异或退回
+        label: 登记盘点差异或退回
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-lot.adjust
+    events:
+      - eventId: action-pharmacist-lot.receive
+        name: 记录批次入库
+        triggerElementId: button-pharmacist-lot.receive
+        permissions:
+          - P-lot.receive
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: lot.receive
+      - eventId: action-pharmacist-lot.dispense
+        name: 按院内处方发放
+        triggerElementId: button-pharmacist-lot.dispense
+        permissions:
+          - P-lot.dispense
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: lot.dispense
+      - eventId: action-pharmacist-lot.adjust
+        name: 登记盘点差异或退回
+        triggerElementId: button-pharmacist-lot.adjust
+        permissions:
+          - P-lot.adjust
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: lot.adjust
+  - screenId: Desk-cashier
+    name: 收款员工作区
+    roleRefs:
+      - cashier
+    description: 目标业务视图；选装业务只在本机构已启用且岗位获权时出现。
+    elements:
+      - elementId: button-cashier-account.charge
+        name: 登记逐项应收
+        label: 登记逐项应收
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-account.charge
+      - elementId: button-cashier-payment.collect
+        name: 办理收款
+        label: 办理收款
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-payment.collect
+      - elementId: button-cashier-payment.recover
+        name: 核实原支付结果
+        label: 核实原支付结果
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-payment.recover
+      - elementId: button-cashier-payment.refund
+        name: 办理原款退款
+        label: 办理原款退款
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-payment.refund
+      - elementId: button-cashier-queue.funds
+        name: 核对未结账与未知款
+        label: 核对未结账与未知款
+        elementType: BUTTON
+        io: ACTION
+        permissionRef: P-queue.funds
+    events:
+      - eventId: action-cashier-account.charge
+        name: 登记逐项应收
+        triggerElementId: button-cashier-account.charge
+        permissions:
+          - P-account.charge
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: account.charge
+      - eventId: action-cashier-payment.collect
+        name: 办理收款
+        triggerElementId: button-cashier-payment.collect
+        permissions:
+          - P-payment.collect
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: payment.collect
+      - eventId: action-cashier-payment.recover
+        name: 核实原支付结果
+        triggerElementId: button-cashier-payment.recover
+        permissions:
+          - P-payment.recover
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: payment.recover
+      - eventId: action-cashier-payment.refund
+        name: 办理原款退款
+        triggerElementId: button-cashier-payment.refund
+        permissions:
+          - P-payment.refund
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: payment.refund
+      - eventId: action-cashier-queue.funds
+        name: 核对未结账与未知款
+        triggerElementId: button-cashier-queue.funds
+        permissions:
+          - P-queue.funds
+        callChain:
+          - stepOrder: 1
+            stepType: BEHAVIOR_CALL
+            refId: queue.funds

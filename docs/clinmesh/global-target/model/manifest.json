@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "projectId": "global-mini-his",
+  "domain": "GlobalMiniHIS",
+  "models": {
+    "M1": "m1-object-model.yaml",
+    "M2": "m2-behavior-model.yaml",
+    "M3": "m3-rule-model.yaml",
+    "ME": "me-event-model.yaml",
+    "M4": "m4-scenario-model.yaml",
+    "M5": "m5-actor-model.yaml",
+    "M6": "m6-flow-model.yaml",
+    "M7": "m7-report-model.yaml",
+    "MU": "mu-ui-model.yaml",
+    "MM": "m-mapping-model.yaml",
+    "MI": "mi-interface-model.yaml"
+  }
+}

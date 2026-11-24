@@ -1,0 +1,436 @@
+domain: GlobalMiniHIS
+behaviors:
+  - id: profile.publish
+    name: 发布机构生效配置
+    alias: 发布机构生效配置
+    ownerEntity: FacilityProfile
+    behaviorType: COMMAND
+    description: 显式选择启用能力、适用时区、术语与政策；不以国家名决定开床。
+    requiredPermissions:
+      - P-profile.publish
+    invokedRules:
+      - scope
+      - config
+  - id: patient.register
+    name: 登记患者或创建临时身份
+    alias: 登记患者或创建临时身份
+    ownerEntity: Patient
+    behaviorType: COMMAND
+    description: 无证件可登记；候选不明不自动覆盖原主档。
+    requiredPermissions:
+      - P-patient.register
+    invokedRules:
+      - scope
+      - identity
+      - local
+  - id: identity.check
+    name: 审结重复身份候选
+    alias: 审结重复身份候选
+    ownerEntity: IdentityReview
+    behaviorType: COMMAND
+    description: 核查后可保留为两人，或记录依据联结主档。
+    requiredPermissions:
+      - P-identity.check
+    invokedRules:
+      - scope
+      - identity
+  - id: identity.reverse
+    name: 纠正误并
+    alias: 纠正误并
+    ownerEntity: IdentityReview
+    behaviorType: COMMAND
+    description: 逆向关联并复核错并期间记录；保留原办理与纠正轨迹。
+    requiredPermissions:
+      - P-identity.reverse
+    invokedRules:
+      - scope
+      - identity
+  - id: history.record
+    name: 核实病史与过敏状态
+    alias: 核实病史与过敏状态
+    ownerEntity: ClinicalHistory
+    behaviorType: COMMAND
+    description: 记录实际知悉状态与来源；不得把无数据自动标为无过敏。
+    requiredPermissions:
+      - P-history.record
+    invokedRules:
+      - scope
+      - history
+  - id: visit.start
+    name: 开始本次接诊
+    alias: 开始本次接诊
+    ownerEntity: Visit
+    behaviorType: COMMAND
+    description: 为已登记患者建立一次来院并绑定机构版本；无需预约、收费或模拟病例。
+    requiredPermissions:
+      - P-visit.start
+    invokedRules:
+      - scope
+      - local
+      - config
+    producedEvents:
+      - VisitOpened
+  - id: contact.record
+    name: 登记实际岗位接触
+    alias: 登记实际岗位接触
+    ownerEntity: Contact
+    behaviorType: COMMAND
+    description: 同次来院追加护士或医生各自的实际接触、发生与录入时间，不重挂号。
+    requiredPermissions:
+      - P-contact.record
+    invokedRules:
+      - scope
+      - local
+  - id: note.sign
+    name: 签署临床记录
+    alias: 签署临床记录
+    ownerEntity: ClinicalNote
+    behaviorType: COMMAND
+    description: 经治医生签署具体修订，记录诊断判断、处置计划与签署身份。
+    requiredPermissions:
+      - P-note.sign
+    invokedRules:
+      - scope
+      - document
+      - local
+  - id: note.correct
+    name: 更正已签病历
+    alias: 更正已签病历
+    ownerEntity: ClinicalNote
+    behaviorType: COMMAND
+    description: 保留原文、新旧关系、更正人和理由。
+    requiredPermissions:
+      - P-note.correct
+    invokedRules:
+      - scope
+      - document
+  - id: visit.end
+    name: 办理离诊及未决事项交接
+    alias: 办理离诊及未决事项交接
+    ownerEntity: Visit
+    behaviorType: COMMAND
+    description: 离诊不会删除未回申请、待阅报告或随访责任。
+    requiredPermissions:
+      - P-visit.end
+    invokedRules:
+      - scope
+      - document
+      - owner
+    producedEvents:
+      - VisitEnded
+  - id: request.issue
+    name: 开立院内或外送申请
+    alias: 开立院内或外送申请
+    ownerEntity: Request
+    behaviorType: COMMAND
+    description: 绑定项目版本、患者、此次就诊、接收责任人与预计回报时间。
+    requiredPermissions:
+      - P-request.issue
+    invokedRules:
+      - scope
+      - owner
+  - id: inbound.receive
+    name: 登记外部回报
+    alias: 登记外部回报
+    ownerEntity: InboundResult
+    behaviorType: COMMAND
+    description: 人工按来源登记或由同一核对流程接收外部消息；待核件不是已签发的本院报告。
+    requiredPermissions:
+      - P-inbound.receive
+    invokedRules:
+      - scope
+      - match
+  - id: inbound.match
+    name: 核对来件与原申请
+    alias: 核对来件与原申请
+    ownerEntity: InboundResult
+    behaviorType: COMMAND
+    description: 确认唯一匹配，无法匹配继续隔离，不污染临床病历。
+    requiredPermissions:
+      - P-inbound.match
+    invokedRules:
+      - scope
+      - match
+  - id: report.file
+    name: 归入原申请的正式结果
+    alias: 归入原申请的正式结果
+    ownerEntity: Report
+    behaviorType: COMMAND
+    description: 登记来源方已经签发的结果，保留外院签发身份；本次登记不代替医生确认已阅。
+    requiredPermissions:
+      - P-report.file
+    invokedRules:
+      - scope
+      - match
+      - latest
+    producedEvents:
+      - ResultFiled
+  - id: report.amend
+    name: 登记来源方更正版本
+    alias: 登记来源方更正版本
+    ownerEntity: Report
+    behaviorType: COMMAND
+    description: 验证原报告关联并追加新版本，通知当前临床责任人重新核对。
+    requiredPermissions:
+      - P-report.amend
+    invokedRules:
+      - scope
+      - match
+      - latest
+    producedEvents:
+      - ResultAmended
+  - id: report.ack
+    name: 确认本版本已阅
+    alias: 确认本版本已阅
+    ownerEntity: Report
+    behaviorType: COMMAND
+    description: 仅记录当前版本已阅；医生判断是否另建后续行动。
+    requiredPermissions:
+      - P-report.ack
+    invokedRules:
+      - scope
+      - latest
+  - id: follow.assign
+    name: 建立后续行动
+    alias: 建立后续行动
+    ownerEntity: FollowUp
+    behaviorType: COMMAND
+    description: 对需要复查、转诊或患者联系的事项建立单独任务。
+    requiredPermissions:
+      - P-follow.assign
+    invokedRules:
+      - scope
+      - owner
+    producedEvents:
+      - FollowAssigned
+  - id: follow.handoff
+    name: 承接后续责任
+    alias: 承接后续责任
+    ownerEntity: FollowUp
+    behaviorType: COMMAND
+    description: 接收方确认后切换责任人，之前仍由原责任人负责。
+    requiredPermissions:
+      - P-follow.handoff
+    invokedRules:
+      - scope
+      - owner
+  - id: follow.finish
+    name: 记录后续处理结果
+    alias: 记录后续处理结果
+    ownerEntity: FollowUp
+    behaviorType: COMMAND
+    description: 登记实际行动与结论；非本人职责不可结案。
+    requiredPermissions:
+      - P-follow.finish
+    invokedRules:
+      - scope
+      - owner
+  - id: rx.issue
+    name: 开具院内或外配处方
+    alias: 开具院内或外配处方
+    ownerEntity: Prescription
+    behaviorType: COMMAND
+    description: 冻结药品、用法与履行路径；外配不要求本院药房或现场收费。
+    requiredPermissions:
+      - P-rx.issue
+    invokedRules:
+      - scope
+      - history
+  - id: appt.book
+    name: 承诺预约号源
+    alias: 承诺预约号源
+    ownerEntity: Appointment
+    behaviorType: COMMAND
+    description: 只有机构启用预约才可办理；保留号源归属。
+    requiredPermissions:
+      - P-appt.book
+    invokedRules:
+      - scope
+      - config
+      - appointment
+  - id: appt.cancel
+    name: 取消预约
+    alias: 取消预约
+    ownerEntity: Appointment
+    behaviorType: COMMAND
+    description: 释放号源，不伪造到诊或已产生诊疗应收。
+    requiredPermissions:
+      - P-appt.cancel
+    invokedRules:
+      - scope
+      - appointment
+  - id: appt.arrive
+    name: 确认预约到诊
+    alias: 确认预约到诊
+    ownerEntity: Appointment
+    behaviorType: COMMAND
+    description: 将预约关联实际来院，重复确认不重复就诊。
+    requiredPermissions:
+      - P-appt.arrive
+    invokedRules:
+      - scope
+      - appointment
+  - id: lot.receive
+    name: 记录批次入库
+    alias: 记录批次入库
+    ownerEntity: DrugLot
+    behaviorType: COMMAND
+    description: 按药品、库位、单位、效期登记实际收货。
+    requiredPermissions:
+      - P-lot.receive
+    invokedRules:
+      - scope
+      - config
+      - stock
+  - id: lot.dispense
+    name: 按院内处方发放
+    alias: 按院内处方发放
+    ownerEntity: DrugLot
+    behaviorType: COMMAND
+    description: 登记实际出库，拒绝缺货或过期批次，不能由此推断患者已服用。
+    requiredPermissions:
+      - P-lot.dispense
+    invokedRules:
+      - scope
+      - stock
+  - id: lot.adjust
+    name: 登记盘点差异或退回
+    alias: 登记盘点差异或退回
+    ownerEntity: DrugLot
+    behaviorType: COMMAND
+    description: 以原因及原业务依据追加流水，不改旧出库。
+    requiredPermissions:
+      - P-lot.adjust
+    invokedRules:
+      - scope
+      - stock
+  - id: stay.admit
+    name: 办理入院与床位占用
+    alias: 办理入院与床位占用
+    ownerEntity: Stay
+    behaviorType: COMMAND
+    description: 核对接收病区及可用床，再登记实际占用。
+    requiredPermissions:
+      - P-stay.admit
+    invokedRules:
+      - scope
+      - config
+      - bed
+  - id: stay.depart
+    name: 记录实际离院
+    alias: 记录实际离院
+    ownerEntity: Stay
+    behaviorType: COMMAND
+    description: 记录离院时点，不隐含清床、结算或归档。
+    requiredPermissions:
+      - P-stay.depart
+    invokedRules:
+      - scope
+      - bed
+    producedEvents:
+      - StayDeparted
+  - id: stay.release
+    name: 按机构政策释放原床
+    alias: 按机构政策释放原床
+    ownerEntity: Stay
+    behaviorType: COMMAND
+    description: 仅结束床位占用；不改费用余额。
+    requiredPermissions:
+      - P-stay.release
+    invokedRules:
+      - scope
+      - bed
+  - id: account.charge
+    name: 登记逐项应收
+    alias: 登记逐项应收
+    ownerEntity: Account
+    behaviorType: COMMAND
+    description: 以来源事实、机构计价版本和币种记账。
+    requiredPermissions:
+      - P-account.charge
+    invokedRules:
+      - scope
+      - config
+      - money
+  - id: payment.collect
+    name: 办理收款
+    alias: 办理收款
+    ownerEntity: Payment
+    behaviorType: COMMAND
+    description: 以固定意图记录原支付，待定时不视为实收。
+    requiredPermissions:
+      - P-payment.collect
+    invokedRules:
+      - scope
+      - money
+  - id: payment.recover
+    name: 核实原支付结果
+    alias: 核实原支付结果
+    ownerEntity: Payment
+    behaviorType: COMMAND
+    description: 核对同一尝试；重连后不得另起同笔支付。
+    requiredPermissions:
+      - P-payment.recover
+    invokedRules:
+      - scope
+      - money
+  - id: payment.refund
+    name: 办理原款退款
+    alias: 办理原款退款
+    ownerEntity: Payment
+    behaviorType: COMMAND
+    description: 关联原成功收款并按可退额办理，原应收不因退款自动撤销。
+    requiredPermissions:
+      - P-payment.refund
+    invokedRules:
+      - scope
+      - money
+  - id: queue.inbound
+    name: 查看未匹配回报
+    alias: 查看未匹配回报
+    ownerEntity: InboundResult
+    behaviorType: QUERY
+    description: 显示待核原因和来源，不向普通临床队列暴露未匹配内容。
+    requiredPermissions:
+      - P-queue.inbound
+    invokedRules:
+      - scope
+      - match
+    queryReportRef: Query-inbound
+  - id: queue.results
+    name: 查看未回与待阅结果
+    alias: 查看未回与待阅结果
+    ownerEntity: Request
+    behaviorType: QUERY
+    description: 分别列出逾期未回与最新版待阅；离诊不移除申请。
+    requiredPermissions:
+      - P-queue.results
+    invokedRules:
+      - scope
+      - latest
+      - owner
+    queryReportRef: Query-results
+  - id: queue.follow
+    name: 查看未结后续行动
+    alias: 查看未结后续行动
+    ownerEntity: FollowUp
+    behaviorType: QUERY
+    description: 按责任人和约定期限筛选；完成须以任务结果而非报告状态判定。
+    requiredPermissions:
+      - P-queue.follow
+    invokedRules:
+      - scope
+      - owner
+    queryReportRef: Query-follow
+  - id: queue.funds
+    name: 核对未结账与未知款
+    alias: 核对未结账与未知款
+    ownerEntity: Account
+    behaviorType: QUERY
+    description: 区分逐项应收、确定净收及待核尝试；按币种展示。
+    requiredPermissions:
+      - P-queue.funds
+    invokedRules:
+      - scope
+      - money
+    queryReportRef: Query-funds

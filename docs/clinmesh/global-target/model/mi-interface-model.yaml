@@ -1,0 +1,26 @@
+domain: GlobalMiniHIS
+interfaces:
+  - interfaceId: Inbound
+    name: 接收外送报告
+    direction: PROVIDED
+    interfaceCategory: COMMAND
+    relatedBehaviorRef: inbound.receive
+    relatedEntityRef: InboundResult
+    businessPurpose: 人工按来源登记或由同一核对流程接收外部消息；待核件不是已签发的本院报告。
+    contractNote: 拟议合同，未发布端点。来源机构、原申请号、来源结果标识、版本和签发依据。歧义待核；同键同版同文返回原处理状态。
+  - interfaceId: Funds
+    name: 核实原支付结果
+    direction: PROVIDED
+    interfaceCategory: COMMAND
+    relatedBehaviorRef: payment.recover
+    relatedEntityRef: Payment
+    businessPurpose: 核对同一尝试；重连后不得另起同笔支付。
+    contractNote: 拟议合同，未发布端点。仅查询原办理标识；暂时无法取得结果仍保持未知，不假设成功。
+  - interfaceId: Worklist
+    name: 读取岗位后续行动清单
+    direction: PROVIDED
+    interfaceCategory: QUERY
+    relatedBehaviorRef: queue.follow
+    relatedEntityRef: FollowUp
+    businessPurpose: 按责任人和约定期限筛选；完成须以任务结果而非报告状态判定。
+    contractNote: 拟议合同，未发布端点。按当前机构、责任范围与期限筛选，不返回未匹配外部来件。

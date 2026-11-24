@@ -1,0 +1,158 @@
+model_type: UI
+version: '5.0'
+domain: ClinMesh
+application:
+  name: ClinMesh 岗位工作区
+  description: 按对业务事实负责的岗位抽象交互。工作域不是物理页面；元素名表示办理意图而非界面逐字文案。查询可随选中对象而加载，读操作不代表已签署或已确认。
+  evidence: apps/web/src/app/role-workspaces.tsx
+screens:
+  - screenId: CasePreparation
+    name: 仿真病例准备
+    roleRefs: [administrator]
+    screenType: FORM
+    description: 来源 apps/web/src/app/pci-preparation.tsx；管理员查看准备回执，不为患者代办就诊。
+    elements:
+      - {elementId: prep, name: PreparePack, label: 准备选定的合成病例包, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: preparePack, name: 提交病例包准备, triggerElementId: prep, permissions: [P-admin.authored-case-pack.prepare], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: admin.authored-case-pack.prepare}]}
+  - screenId: RegistrationDesk
+    name: 门诊挂号与直接住院登记
+    roleRefs: [registrar]
+    screenType: FORM
+    description: 来源 apps/web/src/app/registrar-workspace.tsx 及 apps/web/src/app/inpatient-workspace.tsx；选择就绪病例，门诊选挂号项，直接住院选接收病区。
+    elements:
+      - {elementId: registerVisit, name: RegisterVisit, label: 为就绪病例办理门诊挂号, elementType: BUTTON, io: ACTION}
+      - {elementId: registerStay, name: RegisterStay, label: 为就绪病例办理直接住院登记, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: beginVisit, name: 确认本次挂号, triggerElementId: registerVisit, permissions: [P-registration.synthetic-case.start], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: registration.synthetic-case.start}]}
+      - {eventId: beginStay, name: 确认直接住院, triggerElementId: registerStay, permissions: [P-registration.synthetic-case.start-inpatient], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: registration.synthetic-case.start-inpatient}]}
+  - screenId: TriageDesk
+    name: 分诊候诊与登记
+    roleRefs: [triage-nurse]
+    screenType: MASTER_DETAIL_FORM
+    description: 来源 apps/web/src/app/triage-workspace.tsx；区分读取队列与正式留存分诊初记。
+    elements:
+      - {elementId: triageList, name: TriageList, label: 待分诊队列, elementType: LISTVIEW, io: OUT}
+      - {elementId: triageNote, name: TriageNote, label: 核对并提交分诊初记和测量, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: readTriage, name: 读取当前候诊队列, triggerElementId: triageList, triggerAction: LOAD, permissions: [P-triage.queue.list], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: triage.queue.list}]}
+      - {eventId: submitTriage, name: 完成分诊, triggerElementId: triageNote, permissions: [P-triage.record], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: triage.record}]}
+  - screenId: OutpatientConsultation
+    name: 门诊医生经治病例
+    roleRefs: [outpatient-doctor]
+    screenType: MASTER_DETAIL_FORM
+    description: 来源 apps/web/src/app/doctor-workspace.tsx 及 apps/web/src/app/doctor/doctor-order-workspace.tsx；问诊、开立、签署和完诊分别办理。
+    elements:
+      - {elementId: ask, name: Ask, label: 提交本次医生问话, elementType: BUTTON, io: ACTION}
+      - {elementId: diagnosis, name: Diagnosis, label: 核对并确认主次诊断, elementType: BUTTON, io: ACTION}
+      - {elementId: labIssue, name: LabIssue, label: 签发选定的本院检验, elementType: BUTTON, io: ACTION}
+      - {elementId: ackLab, name: AckLab, label: 确认此版检验报告已阅, elementType: BUTTON, io: ACTION}
+      - {elementId: rx, name: Prescription, label: 核对待开药品并签发整张处方, elementType: BUTTON, io: ACTION}
+      - {elementId: noRx, name: NoMedication, label: 记录本次无需用药, elementType: BUTTON, io: ACTION}
+      - {elementId: signDoc, name: SignNote, label: 确认签署预览中的结构化病历, elementType: BUTTON, io: ACTION}
+      - {elementId: visitGates, name: VisitGates, label: 完诊条件与待补事项, elementType: VIEWER, io: OUT}
+      - {elementId: finishVisit, name: FinishVisit, label: 确认本次临床完诊, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: sendQuestion, name: 发送问话, triggerElementId: ask, permissions: [P-encounter.consultation.ask], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: encounter.consultation.ask}]}
+      - {eventId: confirmDiagnosis, name: 确认本次诊断, triggerElementId: diagnosis, permissions: [P-encounter.diagnosis.confirm], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: encounter.diagnosis.confirm}]}
+      - {eventId: requestLab, name: 开立检验申请, triggerElementId: labIssue, permissions: [P-encounter.laboratory-request.issue], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: encounter.laboratory-request.issue}]}
+      - {eventId: readConfirmed, name: 确认已阅, triggerElementId: ackLab, permissions: [P-laboratory-report.acknowledge], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: laboratory-report.acknowledge}]}
+      - {eventId: issueRx, name: 正式开具处方, triggerElementId: rx, permissions: [P-encounter.prescription.issue], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: encounter.prescription.issue}]}
+      - {eventId: confirmNone, name: 确认无需用药, triggerElementId: noRx, permissions: [P-encounter.medication-conclusion.confirm-none], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: encounter.medication-conclusion.confirm-none}]}
+      - {eventId: sign, name: 签署病历, triggerElementId: signDoc, permissions: [P-document.sign], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: document.sign}]}
+      - {eventId: previewVisit, name: 查阅完诊条件, triggerElementId: visitGates, triggerAction: LOAD, permissions: [P-encounter.completion.preview], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: encounter.completion.preview}]}
+      - {eventId: completeVisit, name: 提交门诊完诊, triggerElementId: finishVisit, permissions: [P-encounter.complete], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: encounter.complete}]}
+  - screenId: CashierAccounts
+    name: 门诊收款与住院结算
+    roleRefs: [cashier]
+    screenType: MASTER_DETAIL_FORM
+    description: 来源 apps/web/src/app/billing-workspace.tsx 及 apps/web/src/app/inpatient-discharge.tsx；待遇、收款与首次住院封账各有独立确认。
+    elements:
+      - {elementId: pay, name: Pay, label: 核对原费用与支付方式并收款, elementType: BUTTON, io: ACTION}
+      - {elementId: recover, name: Recover, label: 恢复原收款尝试结果, elementType: BUTTON, io: ACTION}
+      - {elementId: benefit, name: Benefit, label: 确认患者门诊待遇试算, elementType: BUTTON, io: ACTION}
+      - {elementId: settlementPreview, name: SettlementPreview, label: 住院首次结算费用及资金明细, elementType: VIEWER, io: OUT}
+      - {elementId: settle, name: Settle, label: 确认首次住院结算, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: confirmPayment, name: 确认原费用收款, triggerElementId: pay, permissions: [P-payment.confirm], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: payment.confirm}]}
+      - {eventId: recoverPayment, name: 恢复原收款, triggerElementId: recover, permissions: [P-payment.recover], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: payment.recover}]}
+      - {eventId: confirmBenefit, name: 确认待遇, triggerElementId: benefit, permissions: [P-insurance.confirm], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: insurance.confirm}]}
+      - {eventId: previewSettle, name: 查阅首次结算明细, triggerElementId: settlementPreview, triggerAction: LOAD, permissions: [P-inpatient.discharge.preview], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.preview}]}
+      - {eventId: freezeSettle, name: 办理首次封账, triggerElementId: settle, permissions: [P-inpatient.discharge.settle], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.settle}]}
+  - screenId: PharmacyFulfillment
+    name: 门诊调剂与住院发药
+    roleRefs: [pharmacist]
+    screenType: MASTER_DETAIL_FORM
+    description: 来源 apps/web/src/app/pharmacy-workspace.tsx 及 apps/web/src/app/inpatient-pharmacy.tsx；门诊按处方，住院按执行单，两者均不在此记录患者实际给药。
+    elements:
+      - {elementId: pharmacyList, name: PharmacyList, label: 待审方和调剂队列, elementType: LISTVIEW, io: OUT}
+      - {elementId: reviewRx, name: ReviewRx, label: 核对所选处方, elementType: BUTTON, io: ACTION}
+      - {elementId: dispenseRx, name: DispenseRx, label: 登记实际发放的批次和数量, elementType: BUTTON, io: ACTION}
+      - {elementId: dispenseDose, name: DispenseDose, label: 为所选住院执行单发药, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: listRx, name: 查阅门诊药房队列, triggerElementId: pharmacyList, triggerAction: LOAD, permissions: [P-pharmacy.queue.list], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: pharmacy.queue.list}]}
+      - {eventId: checkRx, name: 审方, triggerElementId: reviewRx, permissions: [P-prescription.review], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: prescription.review}]}
+      - {eventId: issueToPatient, name: 按处方发药, triggerElementId: dispenseRx, permissions: [P-prescription.dispense], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: prescription.dispense}]}
+      - {eventId: issueToWard, name: 按住院执行单发药, triggerElementId: dispenseDose, permissions: [P-inpatient.execution.dispense], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.execution.dispense}]}
+  - screenId: WardNursing
+    name: 病区护理接诊、执行及出区
+    roleRefs: [ward-nurse]
+    screenType: MASTER_DETAIL_FORM
+    description: 来源 apps/web/src/app/inpatient-nurse-bench.tsx、apps/web/src/app/inpatient-execution-batch.tsx 及 apps/web/src/app/inpatient-discharge.tsx；实际出区和清床是两次办理。
+    elements:
+      - {elementId: admissions, name: Admissions, label: 当前岗位可见的住院清单, elementType: LISTVIEW, io: OUT}
+      - {elementId: receive, name: Receive, label: 选择可用床并接收住院患者, elementType: BUTTON, io: ACTION}
+      - {elementId: verifyOrder, name: VerifyOrder, label: 校对新医嘱, elementType: BUTTON, io: ACTION}
+      - {elementId: administer, name: Administer, label: 核实并登记实际给药, elementType: BUTTON, io: ACTION}
+      - {elementId: depart, name: Depart, label: 登记离院方式和实际出区, elementType: BUTTON, io: ACTION}
+      - {elementId: clearBed, name: ClearBed, label: 结算后确认清床, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: listWard, name: 查阅责任范围内住院清单, triggerElementId: admissions, triggerAction: LOAD, permissions: [P-inpatient.admission.list], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.admission.list}]}
+      - {eventId: admitToBed, name: 接诊分床, triggerElementId: receive, permissions: [P-inpatient.admission.receive], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.admission.receive}]}
+      - {eventId: verifyNew, name: 提交医嘱校对, triggerElementId: verifyOrder, permissions: [P-inpatient.order.verify], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.order.verify}]}
+      - {eventId: recordDose, name: 确认实际给药, triggerElementId: administer, permissions: [P-inpatient.execution.administer], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.execution.administer}]}
+      - {eventId: recordDeparture, name: 确认离区, triggerElementId: depart, permissions: [P-inpatient.discharge.depart], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.depart}]}
+      - {eventId: releaseBed, name: 释放原床, triggerElementId: clearBed, permissions: [P-inpatient.discharge.clear], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.clear}]}
+  - screenId: InpatientClinicalCare
+    name: 主管医生住院诊疗与交付首页
+    roleRefs: [inpatient-doctor]
+    screenType: MASTER_DETAIL_FORM
+    description: 来源 apps/web/src/app/inpatient-clinical.tsx、apps/web/src/app/inpatient-surgery-completion.tsx、apps/web/src/app/inpatient-discharge.tsx 和 apps/web/src/app/inpatient-record.tsx；不代护士确认执行或出区。
+    elements:
+      - {elementId: wardDiagnosis, name: WardDiagnosis, label: 确认住院主次诊断及入院病情, elementType: BUTTON, io: ACTION}
+      - {elementId: order, name: Order, label: 核对项目和频次并开立医嘱, elementType: BUTTON, io: ACTION}
+      - {elementId: material, name: Material, label: 逐笔登记本台实际耗材, elementType: BUTTON, io: ACTION}
+      - {elementId: surgery, name: Surgery, label: 核实实际术式和用材后完术, elementType: BUTTON, io: ACTION}
+      - {elementId: discharge, name: Discharge, label: 开出院医嘱, elementType: BUTTON, io: ACTION}
+      - {elementId: recall, name: Recall, label: 申请召回原住院, elementType: BUTTON, io: ACTION}
+      - {elementId: record, name: Record, label: 核对正式来源并提交首页修订, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: confirmWardDiagnosis, name: 确认住院诊断, triggerElementId: wardDiagnosis, permissions: [P-inpatient.diagnosis.confirm], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.diagnosis.confirm}]}
+      - {eventId: newOrder, name: 签发医嘱, triggerElementId: order, permissions: [P-inpatient.order.issue], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.order.issue}]}
+      - {eventId: recordUse, name: 登记实际使用, triggerElementId: material, permissions: [P-inpatient.surgery.record-material], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.surgery.record-material}]}
+      - {eventId: finishSurgery, name: 登记完成手术, triggerElementId: surgery, permissions: [P-inpatient.surgery.complete], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.surgery.complete}]}
+      - {eventId: issueDischarge, name: 签发出院医嘱, triggerElementId: discharge, permissions: [P-inpatient.discharge.issue], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.issue}]}
+      - {eventId: recallAdmission, name: 召回已离区患者, triggerElementId: recall, permissions: [P-inpatient.discharge.recall], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.recall}]}
+      - {eventId: submitRecord, name: 提交首页, triggerElementId: record, permissions: [P-inpatient.record.submit], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.record.submit}]}
+  - screenId: RecordsOffice
+    name: 病案首页审核与归档
+    roleRefs: [medical-records]
+    screenType: APPROVAL
+    description: 来源 apps/web/src/app/inpatient-record.tsx；退回由医生修订，批准并不自动归档。
+    elements:
+      - {elementId: review, name: Review, label: 核对来源后批准或附理由退回, elementType: BUTTON, io: ACTION}
+      - {elementId: archive, name: Archive, label: 复核并冻结当前已批准的病案, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: reviewRecord, name: 提交审核意见, triggerElementId: review, permissions: [P-inpatient.record.review], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.record.review}]}
+      - {eventId: archiveRecord, name: 办理病案归档, triggerElementId: archive, permissions: [P-inpatient.record.archive], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.record.archive}]}
+  - screenId: InsuranceOffice
+    name: 医保办模拟核定
+    roleRefs: [medical-insurance]
+    screenType: APPROVAL
+    description: 来源 apps/web/src/app/inpatient-drg-payer.tsx；使用归档分组与支付参数，不在此办理患者资金或待遇。
+    elements:
+      - {elementId: reviews, name: Reviews, label: 医院侧核定及差额记录, elementType: VIEWER, io: OUT}
+      - {elementId: payerConfirm, name: PayerConfirm, label: 核对冻结依据并确认模拟核定, elementType: BUTTON, io: ACTION}
+    events:
+      - {eventId: listReviews, name: 查阅核定与差额, triggerElementId: reviews, triggerAction: LOAD, permissions: [P-inpatient.drg.payer.reviews], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.drg.payer.reviews}]}
+      - {eventId: confirmPayer, name: 提交模拟核定, triggerElementId: payerConfirm, permissions: [P-inpatient.drg.payer.review], callChain: [{stepOrder: 1, stepType: BEHAVIOR_CALL, refId: inpatient.drg.payer.review}]}

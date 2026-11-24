@@ -1,0 +1,54 @@
+model_type: EVENT
+version: '5.0'
+domain: ClinMesh
+events:
+  - id: Registered
+    name: Registration.Registered
+    label: 合成病例已开始本院门诊
+    description: 记录登记员成功办理的本轮挂号及就诊，不把已准备来源误记为已挂号，也不表明医生已接诊。
+    sourceAggregate: Registration
+    producerBehaviorRef: registration.synthetic-case.start
+    triggerCondition: 当前病例及角色稿修订通过校验，挂号与门诊就诊正式建立。
+    payload:
+      - {name: registrationId, type: String, label: 本次挂号}
+      - {name: encounterId, type: String, label: 本院就诊}
+  - id: Signed
+    name: Document.Signed
+    label: 门诊病历已签署
+    description: 责任医生确认的是具体文书修订；打开、保存草稿或签署完成都不等于完诊。
+    sourceAggregate: Document
+    producerBehaviorRef: document.sign
+    triggerCondition: 当次就诊的文书校验通过，产生可追溯到签署人的正式修订。
+    payload:
+      - {name: documentId, type: String, label: 文书标识}
+      - {name: encounterId, type: String, label: 所属就诊}
+  - id: Dispensed
+    name: Prescription.Dispensed
+    label: 本院门诊药品已按批发放
+    description: 事实仅覆盖该次发放的明细和数量，可为部分发放；不表示整张处方已发齐或患者已服用。
+    sourceAggregate: Prescription
+    producerBehaviorRef: prescription.dispense
+    triggerCondition: 院内处方可供发放，药师对实际品规、数量和批次的登记已与库存移动一并成立。
+    payload:
+      - {name: prescriptionId, type: String, label: 所属处方}
+      - {name: dispenseId, type: String, label: 实际发放记录}
+  - id: Departed
+    name: Admission.Departed
+    label: 住院患者已实际出区
+    description: 病区护士确认患者实际离区；原床尚可保留，本事件不意味着已结算或清床。
+    sourceAggregate: Admission
+    producerBehaviorRef: inpatient.discharge.depart
+    triggerCondition: 待出院且医嘱和执行已收口，护士登记实际离区及离院方式。
+    payload:
+      - {name: admissionId, type: String, label: 所属住院}
+      - {name: departedAt, type: DateTime, label: 实际出区时间}
+  - id: Archived
+    name: Record.Archived
+    label: 住院病案已归档
+    description: 冻结本次归档所据的病案修订及其来源，不代表医保办已核定或真实转款。
+    sourceAggregate: Record
+    producerBehaviorRef: inpatient.record.archive
+    triggerCondition: 审核、结算、清床及归档时重新核验的条件全部满足，病案快照正式冻结。
+    payload:
+      - {name: admissionId, type: String, label: 所属住院}
+      - {name: recordRevision, type: Integer, label: 已归档修订}

@@ -1,0 +1,110 @@
+domain: GlobalMiniHIS
+query_reports:
+  - id: Query-inbound
+    name: 查看未匹配回报
+    alias: 查看未匹配回报
+    behaviorRef: queue.inbound
+    queryType: LIST_QUERY
+    description: 显示待核原因和来源，不向普通临床队列暴露未匹配内容。
+    primarySource:
+      aggregateRef: InboundResult
+      alias: item
+    resultColumns:
+      - name: sender
+        label: 来件来源
+        dataType: String
+        sourceExpr: item.sender
+      - name: sourceKey
+        label: 来源结果及修订
+        dataType: String
+        sourceExpr: item.sourceKey
+      - name: reason
+        label: 待核原因
+        dataType: String
+        sourceExpr: item.reason
+    referenceSql:
+      dialect: SQLite
+      sql: ''
+  - id: Query-results
+    name: 查看未回与待阅结果
+    alias: 查看未回与待阅结果
+    behaviorRef: queue.results
+    queryType: LIST_QUERY
+    description: 分别列出逾期未回与最新版待阅；离诊不移除申请。
+    primarySource:
+      aggregateRef: Request
+      alias: item
+    resultColumns:
+      - name: requestId
+        label: 原申请
+        dataType: String
+        sourceExpr: item.requestId
+      - name: resultOwner
+        label: 接收责任人
+        dataType: String
+        sourceExpr: item.resultOwner
+      - name: expectedAt
+        label: 预计回报时间
+        dataType: DateTime
+        sourceExpr: item.expectedAt
+      - name: status
+        label: 未回或待阅
+        dataType: String
+        sourceExpr: item.status
+      - name: latestRevision
+        label: 最新结果修订
+        dataType: String
+        sourceExpr: item.latestRevision
+    referenceSql:
+      dialect: SQLite
+      sql: ''
+  - id: Query-follow
+    name: 查看未结后续行动
+    alias: 查看未结后续行动
+    behaviorRef: queue.follow
+    queryType: LIST_QUERY
+    description: 按责任人和约定期限筛选；完成须以任务结果而非报告状态判定。
+    primarySource:
+      aggregateRef: FollowUp
+      alias: item
+    resultColumns:
+      - name: owner
+        label: 当前责任人
+        dataType: String
+        sourceExpr: item.owner
+      - name: dueAt
+        label: 应办时限
+        dataType: DateTime
+        sourceExpr: item.dueAt
+      - name: status
+        label: 待办状态
+        dataType: String
+        sourceExpr: item.status
+    referenceSql:
+      dialect: SQLite
+      sql: ''
+  - id: Query-funds
+    name: 核对未结账与未知款
+    alias: 核对未结账与未知款
+    behaviorRef: queue.funds
+    queryType: LIST_QUERY
+    description: 区分逐项应收、确定净收及待核尝试；按币种展示。
+    primarySource:
+      aggregateRef: Account
+      alias: item
+    resultColumns:
+      - name: currency
+        label: 币种
+        dataType: String
+        sourceExpr: item.currency
+      - name: outstanding
+        label: 尚应收
+        dataType: String
+        sourceExpr: item.outstanding
+      - name: uncertain
+        label: 待核资金
+        dataType: String
+        sourceExpr: item.uncertain
+    referenceSql:
+      dialect: SQLite
+      sql: ''

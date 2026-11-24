@@ -1,0 +1,32 @@
+model_type: SCENARIO
+version: '5.0'
+domain: ClinMesh
+event_scenarios:
+  - id: RegisteredCaseHandoff
+    name: 挂号成功后，同次就诊进入分诊交接
+    description: 已挂号是业务事实，不代表已分诊；候诊任务在挂号事务内形成，护士后续明确提交分诊才产生新的临床观察。
+    sourceObjectRef: Registration
+    targetObjectRefs: [Encounter]
+    triggerBehaviorRef: registration.synthetic-case.start
+    triggerEventRef: Registered
+    involvedAggregates: [Case, Patient, Registration, Encounter]
+    preconditions: [就绪病例的本次现场挂号成功，当前世代可定位其院内患者与就诊。]
+    postconditions: [分诊观察与医生候诊任务均归本次就诊；不重复挂号，不把候诊等同于已接诊。]
+    steps:
+      - {stepOrder: 1, stepId: reg-fact, stepType: EVENT_EMIT, refId: Registered, targetAggregate: Registration, description: 本次已挂号并有待分诊记录。, nextSteps: [reg-triage]}
+      - {stepOrder: 2, stepId: reg-triage, stepType: BEHAVIOR_CALL, refId: triage.record, targetAggregate: Encounter, description: 护士选择此病例，记录实际分诊内容，把工作交给医生。}
+
+  - id: DepartedCaseSettlement
+    name: 实际出区后，结算与清床分两次交接
+    description: 选取未召回且能够正常结算的路径。出区记录不会自动扣款、封账或清床；有未知资金时暂停本场景，另见出区协作流程。
+    sourceObjectRef: Admission
+    targetObjectRefs: [Settlement, Bed]
+    triggerBehaviorRef: inpatient.discharge.depart
+    triggerEventRef: Departed
+    involvedAggregates: [Admission, Payment, Settlement, Bed]
+    preconditions: [护士已记录实际出区，床位仍保留；本情形下未发生召回。]
+    postconditions: [首次结算已冻结，床位占用随后结束；不自动归档病案。]
+    steps:
+      - {stepOrder: 1, stepId: dep-fact, stepType: EVENT_EMIT, refId: Departed, targetAggregate: Admission, description: 实际在床时段结束，尚不释放领域占用。, nextSteps: [dep-settle]}
+      - {stepOrder: 2, stepId: dep-settle, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.settle, targetAggregate: Settlement, description: 收费员在金额确定、收退差额已结清且预览有效时确认结算。, nextSteps: [dep-clear]}
+      - {stepOrder: 3, stepId: dep-clear, stepType: BEHAVIOR_CALL, refId: inpatient.discharge.clear, targetAggregate: Bed, description: 护士在已结算后另行清床，原床才可分配给下一人。}

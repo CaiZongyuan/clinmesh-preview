@@ -1,0 +1,189 @@
+domain: GlobalMiniHIS
+flows:
+  - id: Clinic
+    name: 免费门诊：无证件也能完成直接接诊
+    primaryAggregate: Visit
+    businessObjectRefs:
+      - Patient
+      - Visit
+      - Contact
+      - ClinicalNote
+      - Request
+    description: 办理无需预约、药房、账务、仿真或公网。
+    flowType: COLLABORATION
+    trigger:
+      triggerType: MANUAL
+    roleRefs:
+      - clerk
+      - doctor
+    startActivity: begin
+    activities:
+      - id: begin
+        name: 开始
+        activityType: START
+        nextActivity: reg
+      - id: reg
+        name: 登记患者或创建临时身份
+        activityType: USER_TASK
+        roleRef: clerk
+        behaviorRef: patient.register
+        nextActivity: open
+      - id: open
+        name: 开始本次接诊
+        activityType: USER_TASK
+        roleRef: clerk
+        behaviorRef: visit.start
+        nextActivity: see
+      - id: see
+        name: 登记实际岗位接触
+        activityType: USER_TASK
+        roleRef: doctor
+        behaviorRef: contact.record
+        nextActivity: sign
+      - id: sign
+        name: 签署临床记录
+        activityType: USER_TASK
+        roleRef: doctor
+        behaviorRef: note.sign
+        nextActivity: leave
+      - id: leave
+        name: 办理离诊及未决事项交接
+        activityType: USER_TASK
+        roleRef: doctor
+        behaviorRef: visit.end
+        nextActivity: done
+      - id: done
+        name: 结束本次来院；未回结果另有人负责
+        activityType: END
+  - id: Incoming
+    name: 迟到的报告：从核对到随访结案
+    primaryAggregate: Request
+    businessObjectRefs:
+      - InboundResult
+      - Report
+      - FollowUp
+    description: 关注原申请、具体报告版本和独立的责任单。
+    flowType: COLLABORATION
+    trigger:
+      triggerType: MANUAL
+    roleRefs:
+      - reviewer
+      - doctor
+    startActivity: begin
+    activities:
+      - id: begin
+        name: 开始
+        activityType: START
+        nextActivity: receive
+      - id: receive
+        name: 登记外部回报
+        activityType: USER_TASK
+        roleRef: reviewer
+        behaviorRef: inbound.receive
+        nextActivity: decision
+      - id: decision
+        name: 能否唯一匹配原申请？
+        activityType: XOR_GATEWAY
+        branches:
+          - condition: 同一来源同版同文已处理
+            targetActivity: duplicate
+          - condition: 身份或申请存在歧义
+            targetActivity: hold
+          - condition: 来源可信且唯一匹配
+            targetActivity: match
+      - id: duplicate
+        name: 返回原处理结果，不重建业务记录
+        activityType: END
+      - id: hold
+        name: 留在待核清单，不写临床病历
+        activityType: END
+      - id: match
+        name: 核对来件与原申请
+        activityType: USER_TASK
+        roleRef: reviewer
+        behaviorRef: inbound.match
+        nextActivity: file
+      - id: file
+        name: 归入原申请的正式结果
+        activityType: USER_TASK
+        roleRef: reviewer
+        behaviorRef: report.file
+        nextActivity: ack
+      - id: ack
+        name: 确认本版本已阅
+        activityType: USER_TASK
+        roleRef: doctor
+        behaviorRef: report.ack
+        nextActivity: need
+      - id: need
+        name: 是否需要后续行动？
+        activityType: XOR_GATEWAY
+        branches:
+          - condition: 无进一步行动
+            targetActivity: read
+          - condition: 需复查或患者联系
+            targetActivity: assign
+      - id: read
+        name: 已阅且无需另开任务
+        activityType: END
+      - id: assign
+        name: 建立后续行动
+        activityType: USER_TASK
+        roleRef: doctor
+        behaviorRef: follow.assign
+        nextActivity: finish
+      - id: finish
+        name: 记录后续处理结果
+        activityType: USER_TASK
+        roleRef: doctor
+        behaviorRef: follow.finish
+        nextActivity: done
+      - id: done
+        name: 实际行动已记录
+        activityType: END
+  - id: Ward
+    name: 小医院：离院与释放床位
+    primaryAggregate: Stay
+    businessObjectRefs:
+      - Visit
+      - Stay
+      - FacilityProfile
+      - Account
+    description: 启用住院，不从欠费推导患者仍在院。
+    flowType: COLLABORATION
+    trigger:
+      triggerType: MANUAL
+    roleRefs:
+      - nurse
+    startActivity: begin
+    activities:
+      - id: begin
+        name: 开始
+        activityType: START
+        nextActivity: depart
+      - id: depart
+        name: 记录实际离院
+        activityType: USER_TASK
+        roleRef: nurse
+        behaviorRef: stay.depart
+        nextActivity: policy
+      - id: policy
+        name: 按本次适用政策判定
+        activityType: XOR_GATEWAY
+        branches:
+          - condition: 允许释放，或不要求财务结清
+            targetActivity: release
+          - condition: 要求的财务确认尚未完成
+            targetActivity: hold
+      - id: hold
+        name: 保留占用，交责任岗位办理；不撤销离院
+        activityType: END
+      - id: release
+        name: 按机构政策释放原床
+        activityType: USER_TASK
+        roleRef: nurse
+        behaviorRef: stay.release
+        nextActivity: done
+      - id: done
+        name: 占用结束，尚欠费用仍可追踪
+        activityType: END

@@ -1,0 +1,260 @@
+model_type: MAPPING
+version: '1.0'
+domain: ClinMesh
+# 这是从 ClinMesh SQLite 实现提取的关键映射，不是建库脚本。primaryKey 为完整物理键列序列。
+# 表名与复合键取自 apps/server/drizzle/；共享 FHIR 资源表必须同时按 resource_type 区分。
+mappings:
+  - id: mapCase
+    objectRef: Case
+    objectName: 合成病例实例
+    tableMappings:
+      - tableName: synthetic_case_instance
+        primaryKey: 'workspace_id, case_id'
+        tableNote: 0029_synthetic-case.sql。病例来源跨轮次；synthetic_case_materialization 才按轮次关联办理事实，不能给来源表补 epoch 主键。
+        columnMappings:
+          - {attributeRef: id, column: case_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: profileId, column: profile_id, columnType: TEXT}
+          - {attributeRef: profileRevision, column: profile_revision, columnType: INTEGER}
+          - {attributeRef: status, column: status, columnType: TEXT}
+  - id: mapRun
+    objectRef: Run
+    objectName: 场景运行
+    tableMappings:
+      - tableName: scenario_run
+        primaryKey: 'workspace_id, epoch, scenario_run_id'
+        tableNote: 0000_foundation.sql。场景定义和具体运行不是同一标识。
+        columnMappings:
+          - {attributeRef: id, column: scenario_run_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: epoch, column: epoch, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: status, column: status, columnType: TEXT}
+  - id: mapPatient
+    objectRef: Patient
+    objectName: 院内患者
+    tableMappings:
+      - tableName: fhir_resource
+        primaryKey: 'workspace_id, epoch, resource_type, resource_id'
+        tableNote: 0000_foundation.sql。只取 Patient；患者号与出生日期在 content_json 中，历史表另加 version_id 作键。
+        columnMappings:
+          - {attributeRef: id, column: resource_id, columnType: TEXT, isPrimaryKey: true}
+  - id: mapRegistration
+    objectRef: Registration
+    objectName: 门诊挂号
+    tableMappings:
+      - tableName: registration
+        primaryKey: 'workspace_id, epoch, registration_id'
+        tableNote: 0003_outpatient-workflow.sql。挂号号在工作区与轮次内唯一，不是患者主键。
+        columnMappings:
+          - {attributeRef: id, column: registration_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: patientId, column: patient_id, columnType: TEXT}
+          - {attributeRef: encounterId, column: encounter_id, columnType: TEXT}
+          - {attributeRef: number, column: registration_number, columnType: TEXT}
+          - {attributeRef: status, column: status, columnType: TEXT}
+  - id: mapEncounter
+    objectRef: Encounter
+    objectName: 一次就诊
+    tableMappings:
+      - tableName: fhir_resource
+        primaryKey: 'workspace_id, epoch, resource_type, resource_id'
+        tableNote: 0000_foundation.sql。只取 Encounter；subject、status 等临床字段在内容内。住院的行政和财务状态另归 inpatient_admission。
+        columnMappings:
+          - {attributeRef: id, column: resource_id, columnType: TEXT, isPrimaryKey: true}
+  - id: mapDiagnosis
+    objectRef: Diagnosis
+    objectName: 正式诊断
+    tableMappings:
+      - tableName: fhir_resource
+        primaryKey: 'workspace_id, epoch, resource_type, resource_id'
+        tableNote: 取 Condition 正式编码事实，非病例底稿；0038_diagnosis-confirmation-revision.sql 的 diagnosis_entry 按工作区、轮次、门诊确认标识及序号另存组内角色与确认来源。
+        columnMappings:
+          - {attributeRef: id, column: resource_id, columnType: TEXT, isPrimaryKey: true}
+  - id: mapDocument
+    objectRef: Document
+    objectName: 临床文书
+    tableMappings:
+      - tableName: clinical_document_draft
+        primaryKey: 'workspace_id, epoch, case_id'
+        tableNote: 0011_structured-clinical-document.sql。此处只映射门诊暂存稿；已签署的结构化资源另有 FHIR 权威版本，不能拿可变稿替代签署件。
+        columnMappings:
+          - {attributeRef: version, column: version, columnType: INTEGER}
+  - id: mapInvestigation
+    objectRef: Investigation
+    objectName: 医技申请
+    tableMappings:
+      - tableName: laboratory_request
+        primaryKey: 'workspace_id, epoch, request_id'
+        tableNote: 0071_inpatient-investigations-transfer.sql。虽有历史表名，request_kind 区分检验、放射、病理与功能检查；case_id 经 clinical_request_context 解析就诊，不等于 encounter_id。
+        columnMappings:
+          - {attributeRef: id, column: request_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: kind, column: request_kind, columnType: TEXT}
+          - {attributeRef: status, column: status, columnType: TEXT}
+  - id: mapReport
+    objectRef: Report
+    objectName: 正式医技报告
+    tableMappings:
+      - tableName: fhir_resource
+        primaryKey: 'workspace_id, epoch, resource_type, resource_id'
+        tableNote: 取 DiagnosticReport。由原申请的 diagnostic_report_id 追踪；修订与医生确认记录独立，不能把报告 status 当作申请已阅状态。
+        columnMappings:
+          - {attributeRef: id, column: resource_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: version, column: version_id, columnType: INTEGER}
+  - id: mapPrescription
+    objectRef: Prescription
+    objectName: 门诊处方
+    tableMappings:
+      - tableName: prescription
+        primaryKey: 'workspace_id, epoch, prescription_id'
+        tableNote: 0003_outpatient-workflow.sql。原表头经 case_id 关联门诊；品规明细另存 prescription_item，撤方与外延结论不能仅凭表头状态还原。
+        columnMappings:
+          - {attributeRef: id, column: prescription_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: status, column: status, columnType: TEXT}
+  - id: mapPayment
+    objectRef: Payment
+    objectName: 收款交易
+    tableMappings:
+      - tableName: collection_transaction
+        primaryKey: 'workspace_id, epoch, payment_id'
+        tableNote: 0101_shared-payment-collection.sql。outcome 是初始渠道结果；当前结果优先读 collection_resolution。支付方式与费用分配分别记录，不能重复累加整笔金额。
+        columnMappings:
+          - {attributeRef: id, column: payment_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: encounterId, column: encounter_id, columnType: TEXT}
+          - {attributeRef: amountFen, column: amount_fen, columnType: INTEGER}
+          - {attributeRef: purpose, column: purpose, columnType: TEXT}
+      - tableName: collection_tender
+        tableRole: DETAIL
+        primaryKey: 'workspace_id, epoch, payment_id, method'
+        tableNote: 复合外键使用同一工作区、轮次和原款标识；每种方式每原款至多一条。
+        foreignKeys:
+          - {fkName: 原款复合外键, localColumn: 'workspace_id, epoch, payment_id', targetTable: collection_transaction, targetColumn: 'workspace_id, epoch, payment_id'}
+        columnMappings:
+          - {attributeRef: Tender.method, column: method, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: Tender.amountFen, column: amount_fen, columnType: INTEGER}
+  - id: mapBenefit
+    objectRef: Benefit
+    objectName: 患者医保待遇事实
+    tableMappings:
+      - tableName: insurance_event
+        primaryKey: 'workspace_id, epoch, event_id'
+        tableNote: 0090_insurance-benefits.sql。累计额、基金与个人账户变化分别记账，reverses_id 在同一轮次唯一；不把合成待遇写入现金表。
+        columnMappings:
+          - {attributeRef: id, column: event_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: patientId, column: patient_id, columnType: TEXT}
+          - {attributeRef: year, column: year, columnType: TEXT}
+          - {attributeRef: planCode, column: plan_code, columnType: TEXT}
+          - {attributeRef: reversesId, column: reverses_id, columnType: TEXT, nullable: true}
+  - id: mapLot
+    objectRef: Lot
+    objectName: 药品库存批次
+    tableMappings:
+      - tableName: inventory_lot
+        primaryKey: 'workspace_id, epoch, lot_id'
+        tableNote: 0003_outpatient-workflow.sql。品规、地点、批号在同一轮次内组合唯一；不可覆盖的扣减来源另存 inventory_movement。
+        columnMappings:
+          - {attributeRef: id, column: lot_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: lotNumber, column: lot_number, columnType: TEXT}
+          - {attributeRef: locationId, column: location_id, columnType: TEXT}
+          - {attributeRef: expiresOn, column: expires_on, columnType: TEXT}
+          - {attributeRef: quantityOnHand, column: quantity_on_hand, columnType: INTEGER}
+  - id: mapAdmission
+    objectRef: Admission
+    objectName: 一次住院
+    tableMappings:
+      - tableName: inpatient_admission
+        primaryKey: 'workspace_id, epoch, admission_id'
+        tableNote: 0069_inpatient-admission.sql。住院号另设轮次内唯一约束；行政、财务与病案状态独立。
+        columnMappings:
+          - {attributeRef: id, column: admission_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: patientId, column: patient_id, columnType: TEXT}
+          - {attributeRef: number, column: inpatient_number, columnType: TEXT}
+          - {attributeRef: status, column: status, columnType: TEXT}
+          - {attributeRef: financialStatus, column: financial_status, columnType: TEXT}
+          - {attributeRef: recordStatus, column: record_status, columnType: TEXT}
+  - id: mapBed
+    objectRef: Bed
+    objectName: 病区床位
+    tableMappings:
+      - tableName: inpatient_bed
+        primaryKey: 'workspace_id, epoch, bed_id'
+        tableNote: 0069_inpatient-admission.sql。当前占用查询 inpatient_bed_occupancy，未结束记录对床位以及住院分别唯一，不在床位行覆盖患者。
+        columnMappings:
+          - {attributeRef: id, column: bed_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: wardId, column: ward_id, columnType: TEXT}
+          - {attributeRef: dailyPriceFen, column: daily_price_fen, columnType: INTEGER}
+  - id: mapOrder
+    objectRef: Order
+    objectName: 住院医嘱
+    tableMappings:
+      - tableName: inpatient_order
+        primaryKey: 'workspace_id, epoch, order_id'
+        tableNote: 0070_inpatient-orders.sql、0112_medication-frequency.sql。签发、校对和停嘱状态不同于具体执行单的状态。
+        columnMappings:
+          - {attributeRef: id, column: order_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: admissionId, column: admission_id, columnType: TEXT}
+          - {attributeRef: duration, column: duration, columnType: TEXT}
+          - {attributeRef: status, column: state, columnType: TEXT}
+  - id: mapExecution
+    objectRef: Execution
+    objectName: 住院医嘱执行单
+    tableMappings:
+      - tableName: inpatient_execution
+        primaryKey: 'workspace_id, epoch, execution_id'
+        tableNote: 0070_inpatient-orders.sql。排定时点、发药与实际给药分开，执行单不是一条预生成的已给药记录。
+        columnMappings:
+          - {attributeRef: id, column: execution_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: orderId, column: order_id, columnType: TEXT}
+          - {attributeRef: scheduledFor, column: scheduled_for, columnType: TEXT}
+          - {attributeRef: status, column: status, columnType: TEXT}
+  - id: mapSurgery
+    objectRef: Surgery
+    objectName: 住院手术申请
+    tableMappings:
+      - tableName: inpatient_surgery_request
+        primaryKey: 'workspace_id, epoch, request_id'
+        tableNote: 0072_inpatient-surgery.sql。这里只映射申请；实际术式与材料使用不能从该表的计划术式产生。
+        columnMappings:
+          - {attributeRef: id, column: request_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: admissionId, column: admission_id, columnType: TEXT}
+          - {attributeRef: plannedFor, column: planned_for, columnType: TEXT}
+          - {attributeRef: status, column: status, columnType: TEXT}
+  - id: mapSettlement
+    objectRef: Settlement
+    objectName: 住院首次冻结结算
+    tableMappings:
+      - tableName: inpatient_settlement
+        primaryKey: 'workspace_id, epoch, settlement_id'
+        tableNote: 0073_inpatient-discharge.sql。另有同工作区/轮次下 admission_id 唯一约束；冻结金额及组成见 preview_json 和关联资金行。
+        columnMappings:
+          - {attributeRef: id, column: settlement_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: admissionId, column: admission_id, columnType: TEXT}
+          - {attributeRef: settledAt, column: settled_at, columnType: TEXT}
+  - id: mapRecord
+    objectRef: Record
+    objectName: 住院病案首页
+    tableMappings:
+      - tableName: inpatient_record_revision
+        primaryKey: 'workspace_id, epoch, admission_id, revision'
+        tableNote: 0074_inpatient-record.sql。一份住院首页可多次提交；每一修订冻结来源与内容，审核另有记录。
+        columnMappings:
+          - {attributeRef: admissionId, column: admission_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: revision, column: revision, columnType: INTEGER, isPrimaryKey: true}
+          - {attributeRef: sourcesHash, column: sources_hash, columnType: TEXT}
+      - tableName: inpatient_record_archive
+        tableRole: SNAPSHOT
+        primaryKey: 'workspace_id, epoch, admission_id'
+        tableNote: 按住院唯一归档；archive_id 另设唯一约束而非此表主键。保留原修订和审核的复合引用。
+        columnMappings:
+          - {attributeRef: archiveId, column: archive_id, columnType: TEXT}
+          - {attributeRef: revision, column: revision, columnType: INTEGER}
+          - {attributeRef: sourcesHash, column: sources_hash, columnType: TEXT}
+  - id: mapPayerReview
+    objectRef: PayerReview
+    objectName: 医保办模拟核定
+    tableMappings:
+      - tableName: inpatient_drg_payer_review
+        primaryKey: 'workspace_id, epoch, review_id'
+        tableNote: 0081_inpatient-drg-payer-review.sql。冻结分组、支付参数、归档来源及核定理由，区别医院参考额和患者实际付款。
+        columnMappings:
+          - {attributeRef: id, column: review_id, columnType: TEXT, isPrimaryKey: true}
+          - {attributeRef: admissionId, column: admission_id, columnType: TEXT}
+          - {attributeRef: drgCode, column: drg_code, columnType: TEXT}
+          - {attributeRef: simulatedPaymentFen, column: simulated_payment_fen, columnType: INTEGER}
+          - {attributeRef: archiveSourcesHash, column: archive_sources_hash, columnType: TEXT}

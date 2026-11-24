@@ -1,0 +1,181 @@
+model_type: INTERFACE
+version: '1.0'
+domain: ClinMesh
+interfaces:
+  - interfaceId: API-triage-queue
+    name: 查询分诊候诊队列
+    direction: PROVIDED
+    interfaceCategory: QUERY
+    relatedBehaviorRef: triage.queue.list
+    relatedReportRef: Q-triage
+    relatedEntityRef: Registration
+    contractNote: GET /api/his/v1/triage/queue
+    authMethod: triage-nurse；受信活动工作区及岗位
+    businessPurpose: 按所选分组查看候诊任务；结果字段见 Q-triage。
+    inputFields: &queueInput
+      - {name: status, label: 队列分组, type: string, required: true, allowedValues: [pending, completed, exception]}
+      - {name: page, label: 页码, type: integer}
+      - {name: pageSize, label: 每页条数, type: integer}
+    outputFields: &queueOutput
+      - {name: items, label: 当前页业务项, type: 'array<object>', required: true}
+      - {name: total, label: 总项数, type: integer, required: true}
+      - {name: page, label: 当前页码, type: integer, required: true}
+      - {name: pageSize, label: 每页条数, type: integer, required: true}
+
+  - interfaceId: API-completion-check
+    name: 查询完诊条件
+    direction: PROVIDED
+    interfaceCategory: QUERY
+    relatedBehaviorRef: encounter.completion.preview
+    relatedReportRef: Q-completion
+    relatedEntityRef: Encounter
+    contractNote: GET /api/his/v1/encounters/:encounterId/completion
+    authMethod: outpatient-doctor；经治责任
+    businessPurpose: 只读核对七项门禁，预览不是完诊回执。
+    inputFields: [{name: encounterId, label: 本次就诊, type: string, required: true}]
+    outputFields:
+      - {name: canComplete, label: 是否满足完诊清单, type: boolean, required: true}
+      - {name: encounterVersion, label: 就诊版本, type: string, required: true}
+      - {name: items, label: 各项办理状态, type: 'array<object>', required: true}
+
+  - interfaceId: API-pharmacy-queue
+    name: 查询门诊药房队列
+    direction: PROVIDED
+    interfaceCategory: QUERY
+    relatedBehaviorRef: pharmacy.queue.list
+    relatedReportRef: Q-pharmacy
+    relatedEntityRef: Prescription
+    contractNote: GET /api/his/v1/pharmacy/queue
+    authMethod: pharmacist
+    businessPurpose: 按队列分组分拣待审与已处理处方，不在此接口发药。
+    inputFields: *queueInput
+    outputFields: *queueOutput
+
+  - interfaceId: API-admissions
+    name: 查询岗位可见住院清单
+    direction: PROVIDED
+    interfaceCategory: QUERY
+    relatedBehaviorRef: inpatient.admission.list
+    relatedReportRef: Q-admissions
+    relatedEntityRef: Admission
+    contractNote: GET /api/his/v1/inpatient/admissions
+    authMethod: registrar、inpatient-doctor、ward-nurse、medical-records 或 cashier，保留岗位筛选
+    businessPurpose: 查询患者及住院状态摘要，不授予读完整病案权限。
+    outputFields: [{name: items, label: 各次住院摘要, type: 'array<object>', required: true}]
+
+  - interfaceId: API-settlement-preview
+    name: 读取住院结算预览
+    direction: PROVIDED
+    interfaceCategory: QUERY
+    relatedBehaviorRef: inpatient.discharge.preview
+    relatedReportRef: Q-settlement
+    relatedEntityRef: Settlement
+    contractNote: GET /api/his/v1/inpatient/admissions/:admissionId/discharge/preview
+    authMethod: cashier
+    businessPurpose: 收费员核对本次住院逐项费用、资金和指纹；读取不封账。
+    inputFields: &admissionInput [{name: admissionId, label: 本次住院, type: string, required: true}]
+    outputFields:
+      - {name: charges, label: 费用明细, type: 'array<object>', required: true}
+      - {name: balanceFen, label: 原费用与预交金差额, type: integer, required: true}
+      - {name: fingerprint, label: 结算指纹, type: string, required: true}
+
+  - interfaceId: API-payer-history
+    name: 读取归档后的模拟核定历史
+    direction: PROVIDED
+    interfaceCategory: QUERY
+    relatedBehaviorRef: inpatient.drg.payer.reviews
+    relatedReportRef: Q-payer
+    relatedEntityRef: PayerReview
+    contractNote: GET /api/his/v1/inpatient/admissions/:admissionId/drg/payer-reviews
+    authMethod: medical-insurance 或 medical-records
+    businessPurpose: 两个岗位都可查历史，只有医保办可追加核定。
+    inputFields: *admissionInput
+    outputFields: [{name: reviews, label: 不可变核定历史, type: 'array<object>', required: true}]
+
+  - interfaceId: API-start-ready-case
+    name: 从就绪病例发起门诊挂号
+    direction: PROVIDED
+    interfaceCategory: COMMAND
+    relatedBehaviorRef: registration.synthetic-case.start
+    relatedEntityRef: Registration
+    contractNote: POST /api/his/v1/synthetic-cases/:caseId/actions/start-outpatient-visit
+    authMethod: registrar 或 administrator；病例、工作区和数据世代须匹配
+    idempotency: IDEMPOTENT
+    businessPurpose: 以病例及已选设定修订开立本次门诊。同一意图同键重放；不同意图竞争同一病例不能二次挂号。
+    inputFields:
+      - {name: caseId, label: 合成病例, type: string, required: true}
+      - {name: expectedCaseRevision, label: 已核对病例修订, type: integer, required: true}
+      - {name: activeBriefRevision, label: 已选人物设定修订, type: integer, required: true}
+      - {name: departmentId, label: 挂号科室, type: string, required: true}
+      - {name: locationId, label: 地点, type: string, required: true}
+      - {name: visitTypeId, label: 号别, type: string, required: true}
+      - {name: visitDate, label: 就诊日期, type: string, required: true}
+    outputFields:
+      - {name: data, label: 患者、就诊、挂号与分诊任务标识, type: object, required: true}
+      - {name: auditId, label: 审计关联, type: string, required: true}
+
+  - interfaceId: API-encounter-complete
+    name: 医生办理当次门诊完诊
+    direction: PROVIDED
+    interfaceCategory: COMMAND
+    relatedBehaviorRef: encounter.complete
+    relatedEntityRef: Encounter
+    contractNote: POST /api/his/v1/encounters/:encounterId/actions/complete
+    authMethod: outpatient-doctor；经治责任
+    idempotency: IDEMPOTENT
+    businessPurpose: 以原意图及就诊版本提交，重验完诊条件；不代替发药或结账。
+    inputFields:
+      - {name: encounterId, label: 当次就诊, type: string, required: true}
+      - {name: encounterVersion, label: 已核对版本, type: string, required: true}
+      - {name: clinicalOverride, label: 适用时附具的临床路径偏离理由, type: object}
+    outputFields: [{name: data, label: 本次就诊完诊时间、版本和状态, type: object, required: true}]
+
+  - interfaceId: API-payment-confirm
+    name: 确认门诊收费预览
+    direction: PROVIDED
+    interfaceCategory: COMMAND
+    relatedBehaviorRef: payment.confirm
+    relatedEntityRef: Payment
+    contractNote: POST /api/his/v1/payments/:previewId/actions/confirm
+    authMethod: cashier；受信预览凭据
+    idempotency: IDEMPOTENT
+    businessPurpose: 确认原预览及原费用版本；结果未知先查询原款，不能按新意图反复收费。
+    inputFields:
+      - {name: previewId, label: 收款预览, type: string, required: true}
+      - {name: chargeItemId, label: 原费用项, type: string, required: true}
+      - {name: chargeVersion, label: 原费用版本, type: string, required: true}
+      - {name: commitToken, label: 原预览确认凭据, type: string, required: true}
+    outputFields: [{name: data, label: 款项标识、结果、金额与待收额, type: object, required: true}]
+
+  - interfaceId: API-record-archive
+    name: 病案人员归档本次住院首页
+    direction: PROVIDED
+    interfaceCategory: COMMAND
+    relatedBehaviorRef: inpatient.record.archive
+    relatedEntityRef: Record
+    contractNote: POST /api/his/v1/inpatient/admissions/:admissionId/record/archive
+    authMethod: medical-records
+    idempotency: IDEMPOTENT
+    businessPurpose: 重新核对来源、审核、清床与冻结账，保留不可变快照；来源变更不能静默替换指纹。
+    inputFields:
+      - {name: admissionId, label: 本次住院, type: string, required: true}
+      - {name: expectedRevision, label: 已审核的首页修订, type: integer, required: true}
+      - {name: expectedSourcesHash, label: 原来源指纹, type: string, required: true}
+    outputFields: [{name: data, label: 首页修订、审核与归档结果, type: object, required: true}]
+
+  - interfaceId: API-payer-review
+    name: 医保办追加模拟核定
+    direction: PROVIDED
+    interfaceCategory: COMMAND
+    relatedBehaviorRef: inpatient.drg.payer.review
+    relatedEntityRef: PayerReview
+    contractNote: POST /api/his/v1/inpatient/admissions/:admissionId/drg/payer-review
+    authMethod: medical-insurance
+    idempotency: IDEMPOTENT
+    businessPurpose: 核对原预览及归档依据后追加该次核定，不改写历史，不形成真实医保拨款。
+    inputFields:
+      - {name: admissionId, label: 本次住院, type: string, required: true}
+      - {name: encounterVersion, label: 就诊版本, type: string, required: true}
+      - {name: expectedFingerprint, label: 原核定预览指纹, type: string, required: true}
+      - {name: reason, label: 核定理由, type: string, required: true}
+    outputFields: [{name: data, label: 含本次核定的住院核定历史, type: object, required: true}]

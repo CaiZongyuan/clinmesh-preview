@@ -1,0 +1,124 @@
+model_type: ACTOR
+version: '5.0'
+domain: ClinMesh
+# 职责依据：ClinMesh packages/contracts/src/his-operations.ts 各操作 roles；document.sign 为门诊医生的原生签署动作。
+# 角色权限只枚举本模型 M2 收录的操作，不是全院目录全表；系统执行者没有人类会话权限。
+actors:
+  - {id: A-registrar, name: 在岗挂号员, roles: [registrar]}
+  - {id: A-triage, name: 在岗分诊护士, roles: [triage-nurse]}
+  - {id: A-outpatient, name: 门诊经治医生, roles: [outpatient-doctor]}
+  - {id: A-cashier, name: 在岗收费员, roles: [cashier]}
+  - {id: A-pharmacist, name: 在岗药师, roles: [pharmacist]}
+  - {id: A-inpatient, name: 住院责任医生, roles: [inpatient-doctor]}
+  - {id: A-ward, name: 在岗病区护士, roles: [ward-nurse]}
+  - {id: A-records, name: 病案审核人员, roles: [medical-records]}
+  - {id: A-insurance, name: 医保办复核人员, roles: [medical-insurance]}
+  - {id: A-admin, name: 仿真管理员, roles: [administrator]}
+  - {id: A-lis, name: 受控检验执行者, actorType: SYSTEM, roles: [lis-system]}
+  - {id: A-ris, name: 受控放射执行者, actorType: SYSTEM, roles: [ris-system]}
+  - {id: A-pathology, name: 受控病理执行者, actorType: SYSTEM, roles: [pathology-system]}
+roles:
+  - id: registrar
+    name: 挂号员
+    code: registrar
+    dataScope: CUSTOM
+    description: 当前工作区、轮次内登记与接收入院来源；不办理护理入科。
+    permissions: [P-registration.synthetic-case.start, P-registration.synthetic-case.start-inpatient, P-inpatient.admission.list]
+  - id: triage-nurse
+    name: 分诊护士
+    code: triage-nurse
+    dataScope: CUSTOM
+    description: 在分诊队列记录体征并交接，不签发诊断与处方。
+    permissions: [P-triage.queue.list, P-triage.record]
+  - id: outpatient-doctor
+    name: 门诊医生
+    code: outpatient-doctor
+    dataScope: CUSTOM
+    description: 当次门诊受理、责任岗位及文书状态仍须校验；能读报告不等于以受控系统身份签发报告。
+    permissions: [P-encounter.consultation.ask, P-encounter.diagnosis.confirm, P-encounter.laboratory-request.issue, P-laboratory-report.acknowledge, P-encounter.prescription.issue, P-encounter.medication-conclusion.confirm-none, P-document.sign, P-encounter.complete, P-encounter.completion.preview]
+  - id: cashier
+    name: 收费员
+    code: cashier
+    dataScope: CUSTOM
+    description: 仅读原就诊的财务明细及办理所需字段；不因此获得临床全文或医保办核定权。
+    permissions: [P-payment.confirm, P-payment.recover, P-insurance.confirm, P-inpatient.discharge.settle, P-inpatient.admission.list, P-inpatient.discharge.preview]
+  - id: pharmacist
+    name: 药师
+    code: pharmacist
+    dataScope: CUSTOM
+    description: 在原药房范围核对审方、库存批次及发药条件，不代护士确认患者实际给药。
+    permissions: [P-prescription.review, P-prescription.dispense, P-pharmacy.queue.list, P-inpatient.execution.dispense]
+  - id: inpatient-doctor
+    name: 住院医生
+    code: inpatient-doctor
+    dataScope: DEPARTMENT
+    abacCondition: 依当前有效科室、病区、住院责任和动作状态核对，不因曾负责此病例延续授权。
+    permissions: [P-inpatient.admission.list, P-inpatient.diagnosis.confirm, P-inpatient.order.issue, P-inpatient.surgery.record-material, P-inpatient.surgery.complete, P-inpatient.discharge.issue, P-inpatient.discharge.recall, P-inpatient.record.submit]
+  - id: ward-nurse
+    name: 病区护士
+    code: ward-nurse
+    dataScope: DEPARTMENT
+    abacCondition: 受当前病区、相应住院、床位及执行条件约束。
+    permissions: [P-inpatient.admission.list, P-inpatient.admission.receive, P-inpatient.order.verify, P-inpatient.execution.administer, P-inpatient.discharge.depart, P-inpatient.discharge.clear]
+  - id: medical-records
+    name: 病案人员
+    code: medical-records
+    dataScope: CUSTOM
+    description: 审核归档及读取相关核定对照，不代医师改诊断，不替医保办核定。
+    permissions: [P-inpatient.admission.list, P-inpatient.record.review, P-inpatient.record.archive, P-inpatient.drg.payer.reviews]
+  - id: medical-insurance
+    name: 医保办
+    code: medical-insurance
+    dataScope: CUSTOM
+    description: 依据已归档冻结分组及必要摘要进行医院侧核定，不是患者待遇结算或实收部门。
+    permissions: [P-inpatient.drg.payer.review, P-inpatient.drg.payer.reviews]
+  - id: administrator
+    name: 仿真管理员
+    code: administrator
+    dataScope: CUSTOM
+    description: 准备仿真来源，并可按目录启动合成门诊；不继承临床签发、收费或病案权。
+    permissions: [P-admin.authored-case-pack.prepare, P-registration.synthetic-case.start]
+  - {id: lis-system, name: 检验系统, code: lis-system, dataScope: CUSTOM, description: 原申请受控事件内推进检验执行与报告；不是病员检索、医生已阅或任一人类 M2 操作。}
+  - {id: ris-system, name: 放射系统, code: ris-system, dataScope: CUSTOM, description: 仅在对应申请及受信运行上下文内推进放射业务，无交互式登录。}
+  - {id: pathology-system, name: 病理系统, code: pathology-system, dataScope: CUSTOM, description: 仅在对应申请及受信运行上下文内推进病理业务，无交互式登录。}
+permissions:
+  - {id: P-admin.authored-case-pack.prepare, name: 准备合成病例包, code: admin.authored-case-pack.prepare, targetAggregate: Case, allowedBehaviors: [admin.authored-case-pack.prepare]}
+  - {id: P-registration.synthetic-case.start, name: 启动合成门诊, code: registration.synthetic-case.start, targetAggregate: Registration, allowedBehaviors: [registration.synthetic-case.start]}
+  - {id: P-registration.synthetic-case.start-inpatient, name: 登记合成住院, code: registration.synthetic-case.start-inpatient, targetAggregate: Admission, allowedBehaviors: [registration.synthetic-case.start-inpatient]}
+  - {id: P-triage.record, name: 确认分诊, code: triage.record, targetAggregate: Encounter, allowedBehaviors: [triage.record]}
+  - {id: P-encounter.consultation.ask, name: 进行门诊问诊, code: encounter.consultation.ask, targetAggregate: Encounter, allowedBehaviors: [encounter.consultation.ask]}
+  - {id: P-encounter.diagnosis.confirm, name: 确认门诊诊断, code: encounter.diagnosis.confirm, targetAggregate: Diagnosis, allowedBehaviors: [encounter.diagnosis.confirm]}
+  - {id: P-encounter.laboratory-request.issue, name: 正式申请门诊检验, code: encounter.laboratory-request.issue, targetAggregate: Investigation, allowedBehaviors: [encounter.laboratory-request.issue]}
+  - {id: P-laboratory-report.acknowledge, name: 确认已阅检验报告, code: laboratory-report.acknowledge, targetAggregate: Report, allowedBehaviors: [laboratory-report.acknowledge]}
+  - {id: P-encounter.prescription.issue, name: 开具门诊处方, code: encounter.prescription.issue, targetAggregate: Prescription, allowedBehaviors: [encounter.prescription.issue]}
+  - {id: P-encounter.medication-conclusion.confirm-none, name: 确认无需用药, code: encounter.medication-conclusion.confirm-none, targetAggregate: Encounter, allowedBehaviors: [encounter.medication-conclusion.confirm-none]}
+  - {id: P-document.sign, name: 签署门诊文书, code: document.sign, targetAggregate: Document, allowedBehaviors: [document.sign]}
+  - {id: P-encounter.complete, name: 门诊完诊, code: encounter.complete, targetAggregate: Encounter, allowedBehaviors: [encounter.complete]}
+  - {id: P-payment.confirm, name: 确认原款收款, code: payment.confirm, targetAggregate: Payment, allowedBehaviors: [payment.confirm]}
+  - {id: P-payment.recover, name: 核查原收款结果, code: payment.recover, targetAggregate: Payment, allowedBehaviors: [payment.recover]}
+  - {id: P-insurance.confirm, name: 确认患者待遇, code: insurance.confirm, targetAggregate: Benefit, allowedBehaviors: [insurance.confirm]}
+  - {id: P-prescription.review, name: 药师审方, code: prescription.review, targetAggregate: Prescription, allowedBehaviors: [prescription.review]}
+  - {id: P-prescription.dispense, name: 门诊发药, code: prescription.dispense, targetAggregate: Prescription, allowedBehaviors: [prescription.dispense]}
+  - {id: P-inpatient.admission.receive, name: 护士接收入科, code: inpatient.admission.receive, targetAggregate: Admission, allowedBehaviors: [inpatient.admission.receive]}
+  - {id: P-inpatient.diagnosis.confirm, name: 确认住院诊断, code: inpatient.diagnosis.confirm, targetAggregate: Diagnosis, allowedBehaviors: [inpatient.diagnosis.confirm]}
+  - {id: P-inpatient.order.issue, name: 签发住院医嘱, code: inpatient.order.issue, targetAggregate: Order, allowedBehaviors: [inpatient.order.issue]}
+  - {id: P-inpatient.order.verify, name: 校对住院医嘱, code: inpatient.order.verify, targetAggregate: Order, allowedBehaviors: [inpatient.order.verify]}
+  - {id: P-inpatient.execution.dispense, name: 住院按执行单发药, code: inpatient.execution.dispense, targetAggregate: Execution, allowedBehaviors: [inpatient.execution.dispense]}
+  - {id: P-inpatient.execution.administer, name: 记录实际给药或执行, code: inpatient.execution.administer, targetAggregate: Execution, allowedBehaviors: [inpatient.execution.administer]}
+  - {id: P-inpatient.surgery.record-material, name: 登记手术实用耗材, code: inpatient.surgery.record-material, targetAggregate: Surgery, allowedBehaviors: [inpatient.surgery.record-material]}
+  - {id: P-inpatient.surgery.complete, name: 完成手术核实, code: inpatient.surgery.complete, targetAggregate: Surgery, allowedBehaviors: [inpatient.surgery.complete]}
+  - {id: P-inpatient.discharge.issue, name: 签发出院医嘱, code: inpatient.discharge.issue, targetAggregate: Admission, allowedBehaviors: [inpatient.discharge.issue]}
+  - {id: P-inpatient.discharge.depart, name: 办理实际出区, code: inpatient.discharge.depart, targetAggregate: Admission, allowedBehaviors: [inpatient.discharge.depart]}
+  - {id: P-inpatient.discharge.recall, name: 召回住院患者, code: inpatient.discharge.recall, targetAggregate: Admission, allowedBehaviors: [inpatient.discharge.recall]}
+  - {id: P-inpatient.discharge.settle, name: 首次住院结算, code: inpatient.discharge.settle, targetAggregate: Settlement, allowedBehaviors: [inpatient.discharge.settle]}
+  - {id: P-inpatient.discharge.clear, name: 结算后清床, code: inpatient.discharge.clear, targetAggregate: Bed, allowedBehaviors: [inpatient.discharge.clear]}
+  - {id: P-inpatient.record.submit, name: 提交病案首页修订, code: inpatient.record.submit, targetAggregate: Record, allowedBehaviors: [inpatient.record.submit]}
+  - {id: P-inpatient.record.review, name: 审核病案首页, code: inpatient.record.review, targetAggregate: Record, allowedBehaviors: [inpatient.record.review]}
+  - {id: P-inpatient.record.archive, name: 病案归档, code: inpatient.record.archive, targetAggregate: Record, allowedBehaviors: [inpatient.record.archive]}
+  - {id: P-inpatient.drg.payer.review, name: 办理医保办模拟核定, code: inpatient.drg.payer.review, targetAggregate: PayerReview, allowedBehaviors: [inpatient.drg.payer.review]}
+  - {id: P-triage.queue.list, name: 读取分诊队列, code: triage.queue.list, targetAggregate: Registration, allowedBehaviors: [triage.queue.list]}
+  - {id: P-encounter.completion.preview, name: 读取完诊门禁, code: encounter.completion.preview, targetAggregate: Encounter, allowedBehaviors: [encounter.completion.preview]}
+  - {id: P-pharmacy.queue.list, name: 读取调剂队列, code: pharmacy.queue.list, targetAggregate: Prescription, allowedBehaviors: [pharmacy.queue.list]}
+  - {id: P-inpatient.admission.list, name: 按本岗范围读住院清单, code: inpatient.admission.list, targetAggregate: Admission, allowedBehaviors: [inpatient.admission.list]}
+  - {id: P-inpatient.discharge.preview, name: 查看首次结算预览, code: inpatient.discharge.preview, targetAggregate: Settlement, allowedBehaviors: [inpatient.discharge.preview]}
+  - {id: P-inpatient.drg.payer.reviews, name: 回查核定记录, code: inpatient.drg.payer.reviews, targetAggregate: PayerReview, allowedBehaviors: [inpatient.drg.payer.reviews]}

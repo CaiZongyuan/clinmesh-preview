@@ -1,0 +1,115 @@
+domain: GlobalMiniHIS
+rules:
+  - id: identity
+    name: 身份不可按姓名自动并档
+    alias: 身份不可按姓名自动并档
+    ruleType: POLICY
+    referencedObjects:
+      - Patient
+      - IdentityReview
+    expression: 同名或证件缺失仅提示候选；同一标识由签发方、类别和值共同界定。核实方记录证据、来源与版本；错并追加逆向决定，并人工复核期间新增资料归属。
+  - id: history
+    name: 未知不能当作阴性
+    alias: 未知不能当作阴性
+    ruleType: POLICY
+    referencedObjects:
+      - Patient
+      - ClinicalHistory
+    expression: 未询问、不详、核实无已知和明确存在分别留存；声明无已知须有核实者与时间。
+  - id: local
+    name: 本地接诊不依赖公网
+    alias: 本地接诊不依赖公网
+    ruleType: POLICY
+    referencedObjects:
+      - FacilityProfile
+      - Patient
+      - Visit
+      - ClinicalNote
+    expression: 当前机构本地授权和目录版本有效即可接诊签署；不可用的外部接口不伪造成功。院内系统停机时以受控停机单稍后核对补录，分记发生与录入时间。
+  - id: scope
+    name: 受信岗位及责任范围
+    alias: 受信岗位及责任范围
+    ruleType: POLICY
+    referencedObjects:
+      - FacilityProfile
+      - Visit
+    expression: 岗位由机构授权而非自报；服务端按当前责任、有效身份和记录范围复核，撤权后不得继续；读取敏感资料、身份核对、正式写入与交接留审计。
+  - id: document
+    name: 签署与离诊相互独立
+    alias: 签署与离诊相互独立
+    ruleType: POLICY
+    referencedObjects:
+      - Visit
+      - ClinicalNote
+      - Request
+    expression: 签署冻结当前修订；更正追加。结束就诊须交接未完成事项；外送未回若已有跟踪责任、预期时间且机构允许，可离诊，不生成零元收款。
+  - id: match
+    name: 原申请核对与来件去重
+    alias: 原申请核对与来件去重
+    ruleType: POLICY
+    referencedObjects:
+      - Request
+      - InboundResult
+      - Report
+    expression: 按来源、原结果标识和来源修订去重；来自已授权来源且能唯一匹配患者和申请方可入档。歧义隔离待核；同键异文拒绝静默覆盖。
+  - id: latest
+    name: 已阅仅对本版有效
+    alias: 已阅仅对本版有效
+    ruleType: POLICY
+    referencedObjects:
+      - Report
+      - Request
+      - FollowUp
+    expression: 更正保留旧报告和旧已阅记录，新版重开待阅；老版本的后续任务须核对，不自动结案或重复派单。
+  - id: owner
+    name: 未决事项必须有人负责
+    alias: 未决事项必须有人负责
+    ruleType: POLICY
+    referencedObjects:
+      - Request
+      - Report
+      - FollowUp
+    expression: 回报前由原申请责任人跟踪；如需后续行动，指定责任人、期限与依据。转交须接收人确认；完成需行动依据，不能由报告已阅代办。
+  - id: config
+    name: 机构版本与停用收尾
+    alias: 机构版本与停用收尾
+    ruleType: POLICY
+    referencedObjects:
+      - FacilityProfile
+      - Visit
+      - Account
+    expression: 按地区默认与机构覆写形成明确生效版本；停用模块先禁止新办，保留未决事项办理和历史读取；改时区、币种精度、术语或价目不得重算历史。
+  - id: appointment
+    name: 预约不是就诊或费用
+    alias: 预约不是就诊或费用
+    ruleType: POLICY
+    referencedObjects:
+      - Appointment
+      - Visit
+    expression: 同一号源不得超订；取消、未到不产生来院或基础诊疗费用。到诊时显式关联一次来院。
+  - id: stock
+    name: 真实出入才动库存
+    alias: 真实出入才动库存
+    ruleType: POLICY
+    referencedObjects:
+      - DrugLot
+      - Prescription
+    expression: 外配处方不占本院批次；院内发放核对有效处方、单位、批次、效期、库存和版本；收货或盘点差异追加实际流水。
+  - id: bed
+    name: 释放床位不改欠费
+    alias: 释放床位不改欠费
+    ruleType: POLICY
+    referencedObjects:
+      - Stay
+      - Account
+      - FacilityProfile
+    expression: 活动占用不得双占。记录离院不等于释放床位；释放时核对实际离院与适用政策。允许欠费释放时仍保留应收；未装账务时不得要求创建零元结算。
+  - id: money
+    name: 原账与资金尝试分立
+    alias: 原账与资金尝试分立
+    ruleType: POLICY
+    referencedObjects:
+      - Account
+      - Payment
+      - FacilityProfile
+    expression: 以原币种与冻结精度逐项记账。未知先查原款，不另起同一意图；退款须关联成功原款且不超可退额。成功确定后才入实收。

@@ -1,0 +1,337 @@
+domain: GlobalMiniHIS
+actors:
+  - id: Actor-admin
+    name: 机构配置负责人
+    roles:
+      - admin
+  - id: Actor-clerk
+    name: 登记与身份核对员
+    roles:
+      - clerk
+  - id: Actor-doctor
+    name: 经治医生
+    roles:
+      - doctor
+  - id: Actor-nurse
+    name: 护理人员
+    roles:
+      - nurse
+  - id: Actor-reviewer
+    name: 外部回报核对员
+    roles:
+      - reviewer
+  - id: Actor-pharmacist
+    name: 药师
+    roles:
+      - pharmacist
+  - id: Actor-cashier
+    name: 收款员
+    roles:
+      - cashier
+roles:
+  - id: admin
+    name: 机构配置负责人
+    code: admin
+    dataScope: CUSTOM
+    abacCondition: 活动机构、有效授权、具体对象责任范围；按机构定义岗位组合。
+    permissions:
+      - P-profile.publish
+  - id: clerk
+    name: 登记与身份核对员
+    code: clerk
+    dataScope: CUSTOM
+    abacCondition: 活动机构、有效授权、具体对象责任范围；按机构定义岗位组合。
+    permissions:
+      - P-patient.register
+      - P-identity.check
+      - P-identity.reverse
+      - P-visit.start
+      - P-appt.book
+      - P-appt.cancel
+      - P-appt.arrive
+  - id: doctor
+    name: 经治医生
+    code: doctor
+    dataScope: CUSTOM
+    abacCondition: 活动机构、有效授权、具体对象责任范围；按机构定义岗位组合。
+    permissions:
+      - P-history.record
+      - P-contact.record
+      - P-note.sign
+      - P-note.correct
+      - P-visit.end
+      - P-request.issue
+      - P-report.ack
+      - P-follow.assign
+      - P-follow.handoff
+      - P-follow.finish
+      - P-rx.issue
+      - P-queue.results
+      - P-queue.follow
+  - id: nurse
+    name: 护理人员
+    code: nurse
+    dataScope: CUSTOM
+    abacCondition: 活动机构、有效授权、具体对象责任范围；按机构定义岗位组合。
+    permissions:
+      - P-contact.record
+      - P-follow.handoff
+      - P-follow.finish
+      - P-stay.admit
+      - P-stay.depart
+      - P-stay.release
+      - P-queue.follow
+  - id: reviewer
+    name: 外部回报核对员
+    code: reviewer
+    dataScope: CUSTOM
+    abacCondition: 活动机构、有效授权、具体对象责任范围；按机构定义岗位组合。
+    permissions:
+      - P-inbound.receive
+      - P-inbound.match
+      - P-report.file
+      - P-report.amend
+      - P-queue.inbound
+  - id: pharmacist
+    name: 药师
+    code: pharmacist
+    dataScope: CUSTOM
+    abacCondition: 活动机构、有效授权、具体对象责任范围；按机构定义岗位组合。
+    permissions:
+      - P-lot.receive
+      - P-lot.dispense
+      - P-lot.adjust
+  - id: cashier
+    name: 收款员
+    code: cashier
+    dataScope: CUSTOM
+    abacCondition: 活动机构、有效授权、具体对象责任范围；按机构定义岗位组合。
+    permissions:
+      - P-account.charge
+      - P-payment.collect
+      - P-payment.recover
+      - P-payment.refund
+      - P-queue.funds
+permissions:
+  - id: P-profile.publish
+    code: P-profile.publish
+    name: 发布机构生效配置
+    targetAggregate: FacilityProfile
+    allowedBehaviors:
+      - profile.publish
+  - id: P-patient.register
+    code: P-patient.register
+    name: 登记患者或创建临时身份
+    targetAggregate: Patient
+    allowedBehaviors:
+      - patient.register
+  - id: P-identity.check
+    code: P-identity.check
+    name: 审结重复身份候选
+    targetAggregate: IdentityReview
+    allowedBehaviors:
+      - identity.check
+  - id: P-identity.reverse
+    code: P-identity.reverse
+    name: 纠正误并
+    targetAggregate: IdentityReview
+    allowedBehaviors:
+      - identity.reverse
+  - id: P-history.record
+    code: P-history.record
+    name: 核实病史与过敏状态
+    targetAggregate: ClinicalHistory
+    allowedBehaviors:
+      - history.record
+  - id: P-visit.start
+    code: P-visit.start
+    name: 开始本次接诊
+    targetAggregate: Visit
+    allowedBehaviors:
+      - visit.start
+  - id: P-contact.record
+    code: P-contact.record
+    name: 登记实际岗位接触
+    targetAggregate: Contact
+    allowedBehaviors:
+      - contact.record
+  - id: P-note.sign
+    code: P-note.sign
+    name: 签署临床记录
+    targetAggregate: ClinicalNote
+    allowedBehaviors:
+      - note.sign
+  - id: P-note.correct
+    code: P-note.correct
+    name: 更正已签病历
+    targetAggregate: ClinicalNote
+    allowedBehaviors:
+      - note.correct
+  - id: P-visit.end
+    code: P-visit.end
+    name: 办理离诊及未决事项交接
+    targetAggregate: Visit
+    allowedBehaviors:
+      - visit.end
+  - id: P-request.issue
+    code: P-request.issue
+    name: 开立院内或外送申请
+    targetAggregate: Request
+    allowedBehaviors:
+      - request.issue
+  - id: P-inbound.receive
+    code: P-inbound.receive
+    name: 登记外部回报
+    targetAggregate: InboundResult
+    allowedBehaviors:
+      - inbound.receive
+  - id: P-inbound.match
+    code: P-inbound.match
+    name: 核对来件与原申请
+    targetAggregate: InboundResult
+    allowedBehaviors:
+      - inbound.match
+  - id: P-report.file
+    code: P-report.file
+    name: 归入原申请的正式结果
+    targetAggregate: Report
+    allowedBehaviors:
+      - report.file
+  - id: P-report.amend
+    code: P-report.amend
+    name: 登记来源方更正版本
+    targetAggregate: Report
+    allowedBehaviors:
+      - report.amend
+  - id: P-report.ack
+    code: P-report.ack
+    name: 确认本版本已阅
+    targetAggregate: Report
+    allowedBehaviors:
+      - report.ack
+  - id: P-follow.assign
+    code: P-follow.assign
+    name: 建立后续行动
+    targetAggregate: FollowUp
+    allowedBehaviors:
+      - follow.assign
+  - id: P-follow.handoff
+    code: P-follow.handoff
+    name: 承接后续责任
+    targetAggregate: FollowUp
+    allowedBehaviors:
+      - follow.handoff
+  - id: P-follow.finish
+    code: P-follow.finish
+    name: 记录后续处理结果
+    targetAggregate: FollowUp
+    allowedBehaviors:
+      - follow.finish
+  - id: P-rx.issue
+    code: P-rx.issue
+    name: 开具院内或外配处方
+    targetAggregate: Prescription
+    allowedBehaviors:
+      - rx.issue
+  - id: P-appt.book
+    code: P-appt.book
+    name: 承诺预约号源
+    targetAggregate: Appointment
+    allowedBehaviors:
+      - appt.book
+  - id: P-appt.cancel
+    code: P-appt.cancel
+    name: 取消预约
+    targetAggregate: Appointment
+    allowedBehaviors:
+      - appt.cancel
+  - id: P-appt.arrive
+    code: P-appt.arrive
+    name: 确认预约到诊
+    targetAggregate: Appointment
+    allowedBehaviors:
+      - appt.arrive
+  - id: P-lot.receive
+    code: P-lot.receive
+    name: 记录批次入库
+    targetAggregate: DrugLot
+    allowedBehaviors:
+      - lot.receive
+  - id: P-lot.dispense
+    code: P-lot.dispense
+    name: 按院内处方发放
+    targetAggregate: DrugLot
+    allowedBehaviors:
+      - lot.dispense
+  - id: P-lot.adjust
+    code: P-lot.adjust
+    name: 登记盘点差异或退回
+    targetAggregate: DrugLot
+    allowedBehaviors:
+      - lot.adjust
+  - id: P-stay.admit
+    code: P-stay.admit
+    name: 办理入院与床位占用
+    targetAggregate: Stay
+    allowedBehaviors:
+      - stay.admit
+  - id: P-stay.depart
+    code: P-stay.depart
+    name: 记录实际离院
+    targetAggregate: Stay
+    allowedBehaviors:
+      - stay.depart
+  - id: P-stay.release
+    code: P-stay.release
+    name: 按机构政策释放原床
+    targetAggregate: Stay
+    allowedBehaviors:
+      - stay.release
+  - id: P-account.charge
+    code: P-account.charge
+    name: 登记逐项应收
+    targetAggregate: Account
+    allowedBehaviors:
+      - account.charge
+  - id: P-payment.collect
+    code: P-payment.collect
+    name: 办理收款
+    targetAggregate: Payment
+    allowedBehaviors:
+      - payment.collect
+  - id: P-payment.recover
+    code: P-payment.recover
+    name: 核实原支付结果
+    targetAggregate: Payment
+    allowedBehaviors:
+      - payment.recover
+  - id: P-payment.refund
+    code: P-payment.refund
+    name: 办理原款退款
+    targetAggregate: Payment
+    allowedBehaviors:
+      - payment.refund
+  - id: P-queue.inbound
+    code: P-queue.inbound
+    name: 查看未匹配回报
+    targetAggregate: InboundResult
+    allowedBehaviors:
+      - queue.inbound
+  - id: P-queue.results
+    code: P-queue.results
+    name: 查看未回与待阅结果
+    targetAggregate: Request
+    allowedBehaviors:
+      - queue.results
+  - id: P-queue.follow
+    code: P-queue.follow
+    name: 查看未结后续行动
+    targetAggregate: FollowUp
+    allowedBehaviors:
+      - queue.follow
+  - id: P-queue.funds
+    code: P-queue.funds
+    name: 核对未结账与未知款
+    targetAggregate: Account
+    allowedBehaviors:
+      - queue.funds

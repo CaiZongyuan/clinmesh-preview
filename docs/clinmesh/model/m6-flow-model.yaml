@@ -1,0 +1,86 @@
+model_type: FLOW
+version: '5.0'
+domain: ClinMesh
+flows:
+  - id: ReadyCaseToInterview
+    name: 就绪病例经现场挂号、分诊交给门诊医生
+    flowType: COLLABORATION
+    primaryAggregate: Registration
+    businessObjectRefs: [Case, Patient, Registration, Encounter]
+    roleRefs: [registrar, triage-nurse, outpatient-doctor]
+    description: 仅建模挂号员从待挂病例启动普通门诊的入口；不把已有患者再次挂号当作重启病例。
+    preconditions: [病例已就绪且已选患者设定，挂号员可见相应挂号目录。]
+    postconditions: [成功交接后医生在本次就诊开始问诊；并发落败的挂号意图不产生第二次就诊。]
+    trigger: {triggerType: USER_ACTION, description: 挂号员选择待挂病例及科室、地点和号别。}
+    startActivity: IntakeStart
+    endActivities: [InterviewStarted, DuplicateRefused]
+    activities:
+      - {id: IntakeStart, name: 选中待挂号病例, activityType: START, nextActivity: RegisterCase}
+      - {id: RegisterCase, name: 挂号员提交当次病例挂号, activityType: USER_TASK, roleRef: registrar, behaviorRef: registration.synthetic-case.start, nextActivity: RegistrationOutcome}
+      - id: RegistrationOutcome
+        name: 本次挂号意图是否成功
+        activityType: XOR_GATEWAY
+        branches:
+          - {targetActivity: Triage, condition: 本次成功建立挂号且待分诊, label: 已挂号}
+          - {targetActivity: DuplicateRefused, condition: 其他挂号员以不同意图先办理了同一病例, label: 版本冲突}
+      - {id: DuplicateRefused, name: 提示冲突并刷新待挂队列，不重复建档, activityType: END}
+      - {id: Triage, name: 护士记录主诉与实测体征后交给医生, activityType: USER_TASK, roleRef: triage-nurse, behaviorRef: triage.record, nextActivity: Interview}
+      - {id: Interview, name: 医生首次发问并绑定接诊责任, activityType: USER_TASK, roleRef: outpatient-doctor, behaviorRef: encounter.consultation.ask, nextActivity: InterviewStarted}
+      - {id: InterviewStarted, name: 已记录医生发言，患者是否成功回答另行记录, activityType: END}
+
+  - id: WardMedicationExecution
+    name: 从住院药物医嘱到一次实际给药
+    flowType: COLLABORATION
+    primaryAggregate: Order
+    businessObjectRefs: [Admission, Order, Execution, Lot]
+    roleRefs: [inpatient-doctor, ward-nurse, pharmacist]
+    description: 只描述非按需药物医嘱的一次执行，不把一条长期医嘱的结束等同于本次给药完成。
+    preconditions: [患者已入科，负责医生选择本院可开的药品。]
+    postconditions: [成功时可区分正式医嘱、药品出库与实际给药；发药失败不得产生库存移动或给药事实。]
+    trigger: {triggerType: USER_ACTION, description: 住院医生决定开立药物医嘱。}
+    startActivity: OrderStart
+    endActivities: [DoseCompleted, StockConflict]
+    activities:
+      - {id: OrderStart, name: 开始住院用药, activityType: START, nextActivity: IssueOrder}
+      - {id: IssueOrder, name: 医生签发医嘱, activityType: USER_TASK, roleRef: inpatient-doctor, behaviorRef: inpatient.order.issue, nextActivity: VerifyOrder}
+      - {id: VerifyOrder, name: 病区护士校对已签医嘱, activityType: USER_TASK, roleRef: ward-nurse, behaviorRef: inpatient.order.verify, nextActivity: DispenseDose}
+      - {id: DispenseDose, name: 对本次待执行单选批次并办理实际发药, activityType: USER_TASK, roleRef: pharmacist, behaviorRef: inpatient.execution.dispense, nextActivity: DispenseOutcome}
+      - id: DispenseOutcome
+        name: 本次发药是否成功扣减了合格批次
+        activityType: XOR_GATEWAY
+        branches:
+          - {targetActivity: Administer, condition: 发药成功且执行单已经标为已发药, label: 可交护士}
+          - {targetActivity: StockConflict, condition: 所选批次的药品、库位、效期、数量或版本不符合, label: 库存冲突}
+      - {id: StockConflict, name: 本笔未出库，不可登记为已给药, activityType: END}
+      - {id: Administer, name: 护士核对执行时点并记录实际给药, activityType: USER_TASK, roleRef: ward-nurse, behaviorRef: inpatient.execution.administer, nextActivity: DoseCompleted}
+      - {id: DoseCompleted, name: 本次执行单完成并保留给药记录, activityType: END}
+
+  - id: DischargeToBedRelease
+    name: 实际出区后召回或结算清床
+    flowType: COLLABORATION
+    primaryAggregate: Admission
+    businessObjectRefs: [Admission, Order, Execution, Settlement, Payment, Bed]
+    roleRefs: [inpatient-doctor, ward-nurse, cashier]
+    description: 出院医嘱、护理出区、财务封账和物理床位释放分属不同岗位；并发召回与封账不能同时成功。
+    preconditions: [住院仍在本科室病区责任范围；妨碍出院的手术、检查、转科已收束或取消。]
+    postconditions: [清床才释放领域占用；未封账的挂起或召回均保留原床。]
+    trigger: {triggerType: USER_ACTION, description: 医生在院内评估后决定开出院医嘱。}
+    startActivity: DischargeStart
+    endActivities: [BedReleased, RecalledToWard, FinancialReviewPending]
+    activities:
+      - {id: DischargeStart, name: 进入出院交接, activityType: START, nextActivity: DischargeIssue}
+      - {id: DischargeIssue, name: 住院医生下达出院医嘱, activityType: USER_TASK, roleRef: inpatient-doctor, behaviorRef: inpatient.discharge.issue, nextActivity: DepartWard}
+      - {id: DepartWard, name: 护士确认停嘱及执行单均收束后记录实际出区与离院方式, activityType: USER_TASK, roleRef: ward-nurse, behaviorRef: inpatient.discharge.depart, nextActivity: DepartureOutcome}
+      - id: DepartureOutcome
+        name: 哪一种办理条件已经成立
+        activityType: XOR_GATEWAY
+        branches:
+          - {targetActivity: Recall, condition: 医生决定召回且仍已出区未封账、未清床、原床保留, label: 召回}
+          - {targetActivity: Settle, condition: 未被召回且资金已确定、差额已结清、当前预览仍有效，收费员确认封账, label: 正常结算}
+          - {targetActivity: FinancialReviewPending, isDefault: true, label: 保持未结算}
+      - {id: Recall, name: 医生追加召回，不恢复旧医嘱, activityType: USER_TASK, roleRef: inpatient-doctor, behaviorRef: inpatient.discharge.recall, nextActivity: RecalledToWard}
+      - {id: RecalledToWard, name: 恢复行政在院并保留原出区记录, activityType: END}
+      - {id: FinancialReviewPending, name: 本轮不封账不清床；查原款或重新预览后另行办理, activityType: END}
+      - {id: Settle, name: 收费员按原预览复核并冻结首次结算, activityType: USER_TASK, roleRef: cashier, behaviorRef: inpatient.discharge.settle, nextActivity: ClearBed}
+      - {id: ClearBed, name: 病区护士在已结算后清床, activityType: USER_TASK, roleRef: ward-nurse, behaviorRef: inpatient.discharge.clear, nextActivity: BedReleased}
+      - {id: BedReleased, name: 原床可供重新分配，首页归档仍需单独办理, activityType: END}

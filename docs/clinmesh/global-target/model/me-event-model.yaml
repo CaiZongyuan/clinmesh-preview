@@ -1,0 +1,38 @@
+domain: GlobalMiniHIS
+events:
+  - id: VisitOpened
+    name: Visit.Opened
+    label: 已开始本次来院
+    sourceAggregate: Visit
+    producerBehaviorRef: visit.start
+    description: 业务事实，不等于自动执行下一岗位动作。
+  - id: VisitEnded
+    name: Visit.Ended
+    label: 已交接并离诊
+    sourceAggregate: Visit
+    producerBehaviorRef: visit.end
+    description: 业务事实，不等于自动执行下一岗位动作。
+  - id: ResultFiled
+    name: Report.Filed
+    label: 结果已归入原申请
+    sourceAggregate: Report
+    producerBehaviorRef: report.file
+    description: 业务事实，不等于自动执行下一岗位动作。
+  - id: ResultAmended
+    name: Report.Amended
+    label: 原报告已有新版本
+    sourceAggregate: Report
+    producerBehaviorRef: report.amend
+    description: 业务事实，不等于自动执行下一岗位动作。
+  - id: FollowAssigned
+    name: FollowUp.Assigned
+    label: 已指派后续行动
+    sourceAggregate: FollowUp
+    producerBehaviorRef: follow.assign
+    description: 业务事实，不等于自动执行下一岗位动作。
+  - id: StayDeparted
+    name: Stay.Departed
+    label: 患者已实际离院
+    sourceAggregate: Stay
+    producerBehaviorRef: stay.depart
+    description: 业务事实，不等于自动执行下一岗位动作。

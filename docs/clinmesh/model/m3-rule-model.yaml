@@ -1,0 +1,91 @@
+model_type: RULE
+version: '5.0'
+domain: ClinMesh
+rules:
+  - id: case-once
+    name: StartCaseOnce
+    alias: 来源病例不能重复开始
+    referencedObjects: [Case, Run, Registration, Admission]
+    expression: 普通开始须使用当前轮次、预期病例及已选成功角色稿修订，且病例尚未被消费；相同办理意图恢复原结果，不建立第二次就诊。管理员重放属于新轮次。
+  - id: diagnosis-primary
+    name: ExactlyOnePrimaryDiagnosis
+    alias: 本次诊断恰有一个主诊断
+    referencedObjects: [Encounter, Diagnosis]
+    expression: 正式确认时主诊断条数必须等于一；修订须保留原确认，当前就诊只引用最新确认的主次诊断。
+  - id: prepaid-release
+    name: ReleaseFundedInvestigation
+    alias: 门诊预付检查收齐后受理
+    referencedObjects: [Investigation, Payment, Benefit]
+    expression: 采用预付策略的门诊独立检查须就原申请形成唯一应收，足额确定的资金与有效待遇完成放行后方可受理；未知收款不计入。住院送检和历史未计费策略不套用此门禁。
+  - id: latest-report
+    name: AcknowledgeCurrentReport
+    alias: 已阅只对确认的报告修订有效
+    referencedObjects: [Report, Investigation, Encounter]
+    expression: 当前必要报告须已签发且其最新修订由有权医生明确确认；更正保留旧确认但要求重阅。阅片条件未满足不能确认放射报告。
+  - id: prescription-safety
+    name: ValidatePrescriptionAsAWhole
+    alias: 门诊处方整单审方
+    referencedObjects: [Prescription, Diagnosis, Encounter, Patient]
+    expression: 签发时须有已确认诊断、无已生效的互斥用药结论，整单仅一种目录来源，所选药品、适应、过敏、组合及剂量等通过对应规则；任一行拒绝均不签发整张处方。
+  - id: completion-gates
+    name: VerifyOutpatientCompletion
+    alias: 门诊完诊重验七项条件
+    referencedObjects: [Encounter, Document, Diagnosis, Investigation, Report, Prescription]
+    expression: 有问诊的门诊在完诊时须同时满足主诊断确认、结构化病历签署、必要报告最新版本已阅、有效用药结论、无阻塞草稿、处置完整与随访完整；通过不能推断已收款或发药。
+  - id: tender-recovery
+    name: ResolveUncertainTender
+    alias: 未知收退款先查原流水
+    referencedObjects: [Payment, Settlement]
+    expression: 未知支付或退款既非成功也非失败；就同一款项先恢复原办理并核实资金结果，不能以新的收退意图绕过未决金额。
+  - id: bed-exclusive
+    name: AllocateBedExclusively
+    alias: 同一床位不能重占
+    referencedObjects: [Bed, Admission]
+    expression: 入区或转入分配须核实目标床可用且无有效占用；患者实际离区不释放原床，出院结算后清床才解除该占用。
+  - id: order-verified
+    name: VerifyBeforeScheduling
+    alias: 住院新医嘱先校对后排程
+    referencedObjects: [Order, Execution, Admission]
+    expression: 签发不生成已执行事实；由当前病区护士校对后才可按频次排程，按需医嘱另须理由并显式发起。申请停嘱立即冻结新执行。
+  - id: dispense-before-dose
+    name: AdministerDispensedDose
+    alias: 住院实际给药先有发药
+    referencedObjects: [Order, Execution, Lot]
+    expression: 护士确认给药要求有效医嘱、该执行单已实际发药且已到执行时点；批次扣减或时钟到点不自动证明患者已给药。
+  - id: discharge-ready
+    name: ConfirmActualDeparture
+    alias: 出院医嘱与实际出区分别把关
+    referencedObjects: [Admission, Order, Execution, Investigation, Surgery]
+    expression: 办理出院医嘱须无阻塞检查、转科或未收口手术；护士记录实际出区另须待出院、医嘱停止或完成且执行单已收口。离区不等于结算或归档。
+  - id: settlement-frozen
+    name: FreezeFirstSettlement
+    alias: 首次出院结算冻结原账
+    referencedObjects: [Admission, Settlement, Payment, Benefit]
+    expression: 已离区且资金可核实、原待遇和患者负担对账平衡方可首次结算；后续差额以关联原账的调整记录处理，不覆写首次冻结值。
+  - id: recall-window
+    name: RecallWithinRetainedBedWindow
+    alias: 召回限未结账且原床保留窗口
+    referencedObjects: [Admission, Bed, Settlement, Order]
+    expression: 医生仅可召回已出区、未结算且原床保留的本次住院；召回保留原离院事实，不自动复活已停医嘱。
+  - id: archive-freeze
+    name: FreezeApprovedRecord
+    alias: 已审核且来源未变才能归档
+    referencedObjects: [Record, Admission, Settlement, Diagnosis, Surgery]
+    expression: 清床、结算、必要内容及账款核对完成且无阻塞在途任务；首页须对应仍有效的获准来源修订。归档冻结当时的事实，后续独立财务或医保核定不能改写。
+  - id: payer-separated
+    name: SeparatePatientAndPayerLedgers
+    alias: 医院侧核定不等于患者待遇
+    ruleType: POLICY
+    referencedObjects: [PayerReview, Record, Settlement, Benefit, Payment]
+    expression: 医保办核定只使用已归档的冻结分组和合成支付参数；不修改患者待遇或收费，不生成现金转款，也不是病案归档条件。
+  - id: actual-material
+    name: ChargeOnlyActualMaterialUse
+    alias: 预计、预留和实际用材分开
+    referencedObjects: [Admission, Surgery, Settlement]
+    expression: 手术预计或预留不产生材料费用；按实际登记用量及有效计价单位、冻结价格形成费用。更正保留原使用和反向费用，不把预留余额当作原计划。
+  - id: no-truth-leak
+    name: IsolatePrivateCaseTruth
+    alias: 普通临床岗位不可读取隐藏底稿
+    ruleType: POLICY
+    referencedObjects: [Case, Run, Patient, Encounter, Report]
+    expression: 隐藏真值限仿真执行及授权管理员专门核对；普通岗位只见授权的既往来源及本轮经问诊、执行和签发产生的临床资料，不跨轮借用旧业务事实。

@@ -1,0 +1,99 @@
+model_type: QUERY_REPORT
+version: '5.0'
+domain: ClinMesh
+query_reports:
+  - id: Q-triage
+    name: 分诊候诊队列
+    alias: triageQueue
+    queryType: LIST_QUERY
+    behaviorRef: triage.queue.list
+    description: 分诊护士按待办、已办或异常查看本岗候诊工作；用本次门诊号区分同一患者的不同挂号。各查询的结果路径取自业务返回合同，不是数据库列；本组均不提供参考 SQL。
+    primarySource: {aggregateRef: Registration, alias: registration}
+    parameters: &queueParameters
+      - {name: status, label: 队列分组, type: 'pending | completed | exception', required: true}
+      - {name: page, label: 页码, type: integer}
+      - {name: pageSize, label: 每页条数, type: integer}
+    resultColumns:
+      - {name: registrationNumber, label: 本次门诊号, sourceExpr: 'items[].registrationNumber', dataType: string}
+      - {name: encounterId, label: 本次就诊标识, sourceExpr: 'items[].encounterId', dataType: string}
+      - {name: triage, label: 实际分诊记录, sourceExpr: 'items[].triage', dataType: 'object | absent'}
+      - {name: total, label: 此分组总记录数, sourceExpr: total, dataType: integer}
+    referenceSql: &noSql {dialect: SQLite, sql: ''}
+
+  - id: Q-completion
+    name: 本次门诊能否完诊
+    alias: completionPreview
+    queryType: DETAIL_QUERY
+    behaviorRef: encounter.completion.preview
+    description: 经治医生查看七项完诊门禁和待办去向；预览不写完诊时间，不取代正式命令对版本、门禁及临床质控的重验。
+    primarySource: {aggregateRef: Encounter, alias: encounter}
+    parameters:
+      - {name: encounterId, label: 本次就诊, type: string, required: true}
+    resultColumns:
+      - {name: canComplete, label: 七项条件是否满足, sourceExpr: canComplete, dataType: boolean}
+      - {name: encounterVersion, label: 已核对的就诊版本, sourceExpr: encounterVersion, dataType: string}
+      - {name: items, label: 逐项条件代码、状态、说明及办理目标, sourceExpr: items, dataType: 'array<object>'}
+    referenceSql: *noSql
+
+  - id: Q-pharmacy
+    name: 门诊药房审方与发药队列
+    alias: pharmacyQueue
+    queryType: LIST_QUERY
+    behaviorRef: pharmacy.queue.list
+    description: 药师对照处方状态、药品及过敏提示办理；读取处方队列不代表审核通过、已发药或批次库存已扣减。
+    primarySource: {aggregateRef: Prescription, alias: prescription}
+    parameters: *queueParameters
+    resultColumns:
+      - {name: prescriptionNumber, label: 处方号, sourceExpr: 'items[].prescriptionNumber', dataType: string}
+      - {name: prescriptionStatus, label: 处方状态, sourceExpr: 'items[].prescriptionStatus', dataType: string}
+      - {name: medications, label: 处方药品明细, sourceExpr: 'items[].medications', dataType: 'array<object>'}
+      - {name: allergyWarnings, label: 过敏提示, sourceExpr: 'items[].allergyWarnings', dataType: array}
+    referenceSql: *noSql
+
+  - id: Q-admissions
+    name: 可见住院清单
+    alias: admissions
+    queryType: LIST_QUERY
+    behaviorRef: inpatient.admission.list
+    description: 岗位可见范围内按次展示住院。行政、财务、病案状态各自读取，欠费摘要不确定时不应推断为零。
+    primarySource: {aggregateRef: Admission, alias: admission}
+    resultColumns:
+      - {name: inpatientNumber, label: 本次住院号, sourceExpr: 'items[].inpatientNumber', dataType: string}
+      - {name: status, label: 行政在院状态, sourceExpr: 'items[].status', dataType: string}
+      - {name: financialStatus, label: 财务结算状态, sourceExpr: 'items[].financialStatus', dataType: string}
+      - {name: recordStatus, label: 病案状态, sourceExpr: 'items[].recordStatus', dataType: string}
+      - {name: outstandingFen, label: 当前尚应收金额（分，可能缺失或待定）, sourceExpr: 'items[].outstandingFen', dataType: 'integer | null | absent'}
+    referenceSql: *noSql
+
+  - id: Q-settlement
+    name: 收费员的首次住院结算预览
+    alias: settlementPreview
+    queryType: DETAIL_QUERY
+    behaviorRef: inpatient.discharge.preview
+    description: 展示费用、原预交金与逐项依据。balanceFen 按原费用减原预交金计算，不可用作独立收退后尚需收付金额；同净额也可能因明细变化而使指纹失效。
+    primarySource: {aggregateRef: Settlement, alias: settlement}
+    parameters: &admissionParameter
+      - {name: admissionId, label: 本次住院, type: string, required: true}
+    resultColumns:
+      - {name: charges, label: 正反费用逐项明细, sourceExpr: charges, dataType: 'array<object>'}
+      - {name: chargesFen, label: 正式费用净额（分）, sourceExpr: chargesFen, dataType: integer}
+      - {name: depositFen, label: 预交金（分）, sourceExpr: depositFen, dataType: integer}
+      - {name: balanceFen, label: 原费用减原预交金（分）, sourceExpr: balanceFen, dataType: integer}
+      - {name: fingerprint, label: 本次核对的来源指纹, sourceExpr: fingerprint, dataType: string}
+    referenceSql: *noSql
+
+  - id: Q-payer
+    name: 住院医保办模拟核定历史
+    alias: payerReviews
+    queryType: LIST_QUERY
+    behaviorRef: inpatient.drg.payer.reviews
+    description: 医保办及病案人员可读已有核定。两种差额分别对比归档正式费用、归档支付预估；不是患者应付额，也不代表实际拨款。
+    primarySource: {aggregateRef: PayerReview, alias: review}
+    parameters: *admissionParameter
+    resultColumns:
+      - {name: recordRevision, label: 归档首页修订, sourceExpr: 'reviews[].recordRevision', dataType: integer}
+      - {name: simulatedPaymentFen, label: 模拟核定额（分）, sourceExpr: 'reviews[].simulatedPaymentFen', dataType: integer}
+      - {name: differenceFen, label: 核定减正式费用（分）, sourceExpr: 'reviews[].differenceFen', dataType: integer}
+      - {name: estimateDifferenceFen, label: 核定减归档预估（分，缺依据时不补算）, sourceExpr: 'reviews[].estimateDifferenceFen', dataType: 'integer | null | absent'}
+      - {name: reviewedAt, label: 核定业务时间, sourceExpr: 'reviews[].reviewedAt', dataType: string}
+    referenceSql: *noSql

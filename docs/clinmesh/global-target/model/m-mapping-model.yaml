@@ -1,0 +1,110 @@
+domain: GlobalMiniHIS
+mappings:
+  - id: Map-Patient
+    objectRef: Patient
+    objectName: 患者主档
+    mappingNote: 目标逻辑映射，仅供设计；非现有 ClinMesh 物理表。
+    tableMappings:
+      - tableName: target_patient
+        primaryKey: record_id
+        tableNote: 按机构授权范围隔离，具体物理实现待交付阶段确定。
+        columnMappings:
+          - attributeRef: displayName
+            column: displayName
+            columnType: TEXT
+  - id: Map-Visit
+    objectRef: Visit
+    objectName: 一次来院
+    mappingNote: 目标逻辑映射，仅供设计；非现有 ClinMesh 物理表。
+    tableMappings:
+      - tableName: target_visit
+        primaryKey: record_id
+        tableNote: 按机构授权范围隔离，具体物理实现待交付阶段确定。
+        columnMappings:
+          - attributeRef: patient
+            column: patient
+            columnType: TEXT
+          - attributeRef: profile
+            column: profile
+            columnType: TEXT
+          - attributeRef: owner
+            column: owner
+            columnType: TEXT
+  - id: Map-Report
+    objectRef: Report
+    objectName: 正式结果修订
+    mappingNote: 目标逻辑映射，仅供设计；非现有 ClinMesh 物理表。
+    tableMappings:
+      - tableName: target_report
+        primaryKey: record_id
+        tableNote: 按机构授权范围隔离，具体物理实现待交付阶段确定。
+        columnMappings:
+          - attributeRef: request
+            column: request
+            columnType: TEXT
+          - attributeRef: revision
+            column: revision
+            columnType: INTEGER
+          - attributeRef: source
+            column: source
+            columnType: TEXT
+          - attributeRef: acknowledgedBy
+            column: acknowledgedBy
+            columnType: TEXT
+  - id: Map-FollowUp
+    objectRef: FollowUp
+    objectName: 后续行动责任单
+    mappingNote: 目标逻辑映射，仅供设计；非现有 ClinMesh 物理表。
+    tableMappings:
+      - tableName: target_follow_up
+        primaryKey: record_id
+        tableNote: 按机构授权范围隔离，具体物理实现待交付阶段确定。
+        columnMappings:
+          - attributeRef: report
+            column: report
+            columnType: TEXT
+          - attributeRef: owner
+            column: owner
+            columnType: TEXT
+          - attributeRef: dueAt
+            column: dueAt
+            columnType: TEXT
+          - attributeRef: outcome
+            column: outcome
+            columnType: TEXT
+  - id: Map-FacilityProfile
+    objectRef: FacilityProfile
+    objectName: 机构业务配置版本
+    mappingNote: 目标逻辑映射，仅供设计；非现有 ClinMesh 物理表。
+    tableMappings:
+      - tableName: target_facility_profile
+        primaryKey: record_id
+        tableNote: 按机构授权范围隔离，具体物理实现待交付阶段确定。
+        columnMappings:
+          - attributeRef: siteId
+            column: siteId
+            columnType: TEXT
+          - attributeRef: revision
+            column: revision
+            columnType: INTEGER
+          - attributeRef: effectiveFrom
+            column: effectiveFrom
+            columnType: TEXT
+          - attributeRef: locale
+            column: locale
+            columnType: TEXT
+          - attributeRef: zone
+            column: zone
+            columnType: TEXT
+          - attributeRef: currency
+            column: currency
+            columnType: TEXT
+          - attributeRef: scale
+            column: scale
+            columnType: INTEGER
+          - attributeRef: catalogVersion
+            column: catalogVersion
+            columnType: TEXT
+          - attributeRef: releasePolicy
+            column: releasePolicy
+            columnType: TEXT

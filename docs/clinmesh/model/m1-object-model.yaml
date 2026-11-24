@@ -1,0 +1,219 @@
+model_type: OBJECT
+version: '5.0'
+domain: ClinMesh
+aggregates:
+  - id: Case
+    name: Case
+    alias: 合成病例实例
+    description: 绑定来源档案修订的仿真起点，不是患者或本院就诊；隐藏事实不是正式临床诊断。
+    lifecycle: [brief-pending, brief-ready, started, completed, retired]
+    attributes:
+      - {name: id, label: 病例标识, type: String, required: true}
+      - {name: profileId, label: 来源档案标识, type: String, required: true}
+      - {name: profileRevision, label: 固定档案修订, type: Integer, required: true}
+      - {name: status, label: 病例准备状态, type: Enum, enumValues: [brief-pending, brief-ready, started, completed, retired]}
+  - id: Run
+    name: Run
+    alias: 场景运行
+    description: 工作区某轮次中的实际办理上下文，重放不覆盖原轮次。
+    lifecycle: [active, completed, closed]
+    attributes:
+      - {name: id, label: 运行标识, type: String, required: true}
+      - {name: epoch, label: 仿真轮次, type: String, required: true}
+      - {name: status, label: 运行状态, type: Enum, enumValues: [active, completed, closed]}
+  - id: Patient
+    name: Patient
+    alias: 院内患者
+    description: 院内建档身份，跨同一轮次的多次就诊使用；与仿真来源档案分开。
+    attributes:
+      - {name: id, label: 患者资源标识, type: String, required: true}
+      - {name: identifier, label: 院内患者标识, type: String}
+      - {name: birthDate, label: 出生日期, type: Date}
+  - id: Registration
+    name: Registration
+    alias: 门诊挂号
+    attributes:
+      - {name: id, label: 挂号标识, type: String, required: true}
+      - {name: patientId, label: 挂号患者, type: AggregateRootRef, targetAggregate: Patient, required: true}
+      - {name: encounterId, label: 对应门诊就诊, type: AggregateRootRef, targetAggregate: Encounter, required: true}
+      - {name: number, label: 挂号号码, type: String, required: true}
+      - {name: status, label: 挂号办理状态, type: Enum, enumValues: [registered, triaged, in-progress, completed, cancelled], description: 挂号状态词表；不等于每个状态都有独立可办入口。}
+  - id: Encounter
+    name: Encounter
+    alias: 一次就诊
+    description: 绑定患者与当次照护；同次门诊的报告后复诊仍是原就诊，出院后复诊是新就诊。
+    attributes:
+      - {name: id, label: 就诊标识, type: String, required: true}
+      - {name: patientId, label: 就诊患者, type: AggregateRootRef, targetAggregate: Patient, required: true}
+      - {name: status, label: 临床就诊状态, type: String}
+  - id: Diagnosis
+    name: Diagnosis
+    alias: 正式诊断
+    description: 当次就诊中经医生确认的主次诊断条目；修订保留来源，不从病例真值或收费推断。
+    attributes:
+      - {name: id, label: 诊断标识, type: String, required: true}
+      - {name: encounterId, label: 所属就诊, type: AggregateRootRef, targetAggregate: Encounter, required: true}
+      - {name: code, label: 诊断编码, type: String, required: true}
+      - {name: primary, label: 是否主诊断, type: Boolean}
+      - {name: revision, label: 原诊断组修订, type: Integer}
+  - id: Document
+    name: Document
+    alias: 临床文书
+    description: 就诊文书可有草稿与不可覆盖的签署件；签后修改另作修订，不代表新就诊。
+    attributes:
+      - {name: id, label: 文书标识, type: String, required: true}
+      - {name: encounterId, label: 所属就诊, type: AggregateRootRef, targetAggregate: Encounter}
+      - {name: version, label: 文书版本, type: Integer}
+      - {name: status, label: 草稿或签署状态, type: String}
+  - id: Investigation
+    name: Investigation
+    alias: 医技申请
+    lifecycle: [issued, accepted, in-progress, generation-failed, reported, acknowledged, cancelled]
+    attributes:
+      - {name: id, label: 申请标识, type: String, required: true}
+      - {name: encounterId, label: 所属就诊, type: AggregateRootRef, targetAggregate: Encounter}
+      - {name: kind, label: 医技类别, type: Enum, enumValues: [laboratory, imaging, pathology, examination]}
+      - {name: status, label: 申请执行状态, type: Enum, enumValues: [issued, accepted, in-progress, generation-failed, reported, acknowledged, cancelled]}
+  - id: Report
+    name: Report
+    alias: 正式医技报告
+    description: 受理后按实际执行签发。更正与对应版本已阅分开，签发并不表示医生已读。
+    attributes:
+      - {name: id, label: 报告标识, type: String, required: true}
+      - {name: investigationId, label: 原申请, type: AggregateRootRef, targetAggregate: Investigation}
+      - {name: version, label: 报告版本, type: Integer}
+      - {name: status, label: 报告状态, type: String}
+  - id: Prescription
+    name: Prescription
+    alias: 门诊处方
+    description: 由本次就诊医生确认的药品与用法集合，本院与外延处方采取不同履行方式；无需用药不是一张空处方。
+    attributes:
+      - {name: id, label: 处方标识, type: String, required: true}
+      - {name: encounterId, label: 开方就诊, type: AggregateRootRef, targetAggregate: Encounter}
+      - {name: status, label: 处方状态, type: String}
+  - id: Payment
+    name: Payment
+    alias: 收款交易
+    description: 记录一次就诊的一次原收款尝试；未知不是失败，查原结果不新开交易。
+    lifecycle: [success, declined, ambiguous]
+    attributes:
+      - {name: id, label: 原款标识, type: String, required: true}
+      - {name: encounterId, label: 原就诊, type: AggregateRootRef, targetAggregate: Encounter, required: true}
+      - {name: amountFen, label: 整笔金额（分）, type: Integer, required: true}
+      - {name: purpose, label: 支付用途, type: Enum, enumValues: [outpatient-charge, inpatient-deposit, inpatient-supplement]}
+      - {name: status, label: 当前已知结果, type: Enum, enumValues: [success, declined, ambiguous]}
+    entities:
+      - name: Tender
+        alias: 支付方式明细
+        localId: method
+        attributes:
+          - {name: method, label: 支付方式, type: Enum, enumValues: [cash, bank-card, mobile], required: true}
+          - {name: amountFen, label: 该方式金额（分）, type: Integer, required: true}
+  - id: Benefit
+    name: Benefit
+    alias: 患者医保待遇事实
+    description: 患者待遇的确认或对原年度的反向补偿，与医院侧核定和现金收款分别记账。
+    attributes:
+      - {name: id, label: 待遇事实标识, type: String, required: true}
+      - {name: patientId, label: 参保患者, type: AggregateRootRef, targetAggregate: Patient, required: true}
+      - {name: year, label: 原待遇年度, type: String, required: true}
+      - {name: planCode, label: 合成方案, type: Enum, enumValues: [employee-v1, resident-v1]}
+      - {name: reversesId, label: 被补偿原待遇, type: AggregateRootRef, targetAggregate: Benefit}
+  - id: Lot
+    name: Lot
+    alias: 药品库存批次
+    attributes:
+      - {name: id, label: 批次标识, type: String, required: true}
+      - {name: lotNumber, label: 批号, type: String, required: true}
+      - {name: locationId, label: 库存地点, type: String, required: true}
+      - {name: expiresOn, label: 有效期, type: Date}
+      - {name: quantityOnHand, label: 在手数量, type: Integer, required: true}
+    invariants:
+      - {name: NonnegativeStock, expression: 'quantityOnHand >= 0', violationMessage: 发药不得使该批次可用量为负。}
+  - id: Admission
+    name: Admission
+    alias: 一次住院
+    description: 独立维护行政、首次结算和病案状态；已出区可以未清床，已归档仍可发生后续财务更正。
+    lifecycle: [registered, admitted, discharge-pending, departed, cleared]
+    attributes:
+      - {name: id, label: 住院标识, type: String, required: true}
+      - {name: patientId, label: 住院患者, type: AggregateRootRef, targetAggregate: Patient, required: true}
+      - {name: number, label: 本次住院号, type: String, required: true}
+      - {name: status, label: 行政状态, type: Enum, enumValues: [registered, admitted, discharge-pending, departed, cleared]}
+      - {name: financialStatus, label: 首次财务状态, type: Enum, enumValues: [open, settled]}
+      - {name: recordStatus, label: 病案摘要状态, type: Enum, enumValues: [open, reviewed, archived]}
+  - id: Bed
+    name: Bed
+    alias: 病区床位
+    description: 床位是资源，患者占用是带开始和结束时间的独立事实。
+    attributes:
+      - {name: id, label: 床位标识, type: String, required: true}
+      - {name: wardId, label: 所属病区, type: String, required: true}
+      - {name: dailyPriceFen, label: 床日价（分）, type: Integer}
+  - id: Order
+    name: Order
+    alias: 住院医嘱
+    lifecycle: [signed, verified, stop-requested, stopped, completed]
+    attributes:
+      - {name: id, label: 医嘱标识, type: String, required: true}
+      - {name: admissionId, label: 所属住院, type: AggregateRootRef, targetAggregate: Admission, required: true}
+      - {name: duration, label: 长期或临时, type: Enum, enumValues: [long, temporary]}
+      - {name: status, label: 医嘱状态, type: Enum, enumValues: [signed, verified, stop-requested, stopped, completed]}
+  - id: Execution
+    name: Execution
+    alias: 住院医嘱执行单
+    lifecycle: [pending, dispensed, completed, cancelled]
+    attributes:
+      - {name: id, label: 执行单标识, type: String, required: true}
+      - {name: orderId, label: 原医嘱, type: AggregateRootRef, targetAggregate: Order, required: true}
+      - {name: scheduledFor, label: 计划执行时间, type: DateTime}
+      - {name: status, label: 执行状态, type: Enum, enumValues: [pending, dispensed, completed, cancelled]}
+  - id: Surgery
+    name: Surgery
+    alias: 住院手术申请
+    description: 申请以计划术式为依据，准备、实际开始、实际术式与完成核实分别记录，不能将申请计作已实施操作。
+    lifecycle: [requested, ready, completed, cancelled]
+    attributes:
+      - {name: id, label: 手术申请标识, type: String, required: true}
+      - {name: admissionId, label: 所属住院, type: AggregateRootRef, targetAggregate: Admission}
+      - {name: plannedFor, label: 拟实施时间, type: DateTime}
+      - {name: status, label: 申请状态（非术中进度）, type: Enum, enumValues: [requested, ready, completed, cancelled]}
+  - id: Settlement
+    name: Settlement
+    alias: 住院首次冻结结算
+    description: 一次住院至多一份首次封账；保存当时费用、医保与资金，后续更正不覆盖它。
+    attributes:
+      - {name: id, label: 首次结算标识, type: String, required: true}
+      - {name: admissionId, label: 原住院, type: AggregateRootRef, targetAggregate: Admission, required: true}
+      - {name: settledAt, label: 封账时间, type: DateTime}
+  - id: Record
+    name: Record
+    alias: 住院病案首页
+    description: 属于一次住院的首页，提交按修订保留，审核绑定修订及来源，归档形成不可变快照；不是患者在院历次住院共用的病案号。
+    attributes:
+      - {name: admissionId, label: 本次住院, type: AggregateRootRef, targetAggregate: Admission, required: true}
+      - {name: revision, label: 提交修订, type: Integer}
+      - {name: sourcesHash, label: 所用正式来源指纹, type: String}
+      - {name: archiveId, label: 已归档快照标识, type: String}
+  - id: PayerReview
+    name: PayerReview
+    alias: 医保办模拟核定
+    description: 对归档分组进行医院侧核定，与患者医保待遇没有派生现金关系。
+    attributes:
+      - {name: id, label: 核定标识, type: String, required: true}
+      - {name: admissionId, label: 已归档住院, type: AggregateRootRef, targetAggregate: Admission, required: true}
+      - {name: drgCode, label: 冻结病组, type: String, required: true}
+      - {name: simulatedPaymentFen, label: 合成核定额（分）, type: Integer}
+      - {name: archiveSourcesHash, label: 冻结病案来源指纹, type: String}
+aggregate_associations:
+  - {id: registrationEncounter, sourceAggregate: Registration, targetAggregate: Encounter, sourceRole: 门诊挂号, targetRole: 本次门诊, cardinality: ONE_TO_ONE, referenceField: encounterId}
+  - {id: encounterPatient, sourceAggregate: Encounter, targetAggregate: Patient, sourceRole: 就诊, targetRole: 患者, cardinality: MANY_TO_ONE, referenceField: patientId}
+  - {id: investigationEncounter, sourceAggregate: Investigation, targetAggregate: Encounter, sourceRole: 医技申请, targetRole: 本次就诊, cardinality: MANY_TO_ONE, referenceField: encounterId}
+  - {id: reportInvestigation, sourceAggregate: Report, targetAggregate: Investigation, sourceRole: 正式报告, targetRole: 原申请, cardinality: MANY_TO_ONE, referenceField: investigationId}
+  - {id: paymentEncounter, sourceAggregate: Payment, targetAggregate: Encounter, sourceRole: 收款尝试, targetRole: 原就诊, cardinality: MANY_TO_ONE, referenceField: encounterId}
+  - {id: benefitPatient, sourceAggregate: Benefit, targetAggregate: Patient, sourceRole: 待遇分摊, targetRole: 患者, cardinality: MANY_TO_ONE, referenceField: patientId}
+  - {id: admissionPatient, sourceAggregate: Admission, targetAggregate: Patient, sourceRole: 住院, targetRole: 患者, cardinality: MANY_TO_ONE, referenceField: patientId}
+  - {id: orderAdmission, sourceAggregate: Order, targetAggregate: Admission, sourceRole: 医嘱, targetRole: 本次住院, cardinality: MANY_TO_ONE, referenceField: admissionId}
+  - {id: executionOrder, sourceAggregate: Execution, targetAggregate: Order, sourceRole: 执行单, targetRole: 原医嘱, cardinality: MANY_TO_ONE, referenceField: orderId}
+  - {id: settlementAdmission, sourceAggregate: Settlement, targetAggregate: Admission, sourceRole: 首次结算, targetRole: 原住院, cardinality: ONE_TO_ONE, referenceField: admissionId}
+  - {id: recordAdmission, sourceAggregate: Record, targetAggregate: Admission, sourceRole: 首页, targetRole: 原住院, cardinality: ONE_TO_ONE, referenceField: admissionId}

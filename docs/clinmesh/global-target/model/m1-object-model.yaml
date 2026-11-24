@@ -1,0 +1,124 @@
+domain: GlobalMiniHIS
+aggregates:
+  - id: FacilityProfile
+    name: FacilityProfile
+    alias: 机构业务配置版本
+    tags: [核心]
+    description: 地区默认与机构覆写共同形成不可覆盖的生效版本。能力、授权与计费政策分别配置；关掉新业务不抹掉历史。
+    lifecycle: [draft, effective, retired]
+    attributes:
+      - {name: siteId, label: 机构, type: String, required: true}
+      - {name: revision, label: 配置修订, type: Integer, required: true}
+      - {name: effectiveFrom, label: 生效时间, type: DateTime, required: true}
+      - {name: locale, label: 业务语言, type: String}
+      - {name: zone, label: 机构时区, type: String}
+      - {name: currency, label: 记账币种, type: String}
+      - {name: scale, label: 金额小数位, type: Integer}
+      - {name: catalogVersion, label: 术语及本地目录版本, type: String}
+      - {name: releasePolicy, label: 离院后床位释放条件, type: String}
+    entities:
+      - {name: CapabilitySetting, alias: 模块启用项, localId: capabilityCode, cardinality: ZERO_OR_MORE, attributes: [{name: capabilityCode, label: 预约／药房／住院／账务, type: String}, {name: mode, label: 未安装／接受新业务／只收尾, type: String}]}
+  - id: Patient
+    name: Patient
+    alias: 患者主档
+    tags: [核心]
+    description: 内部患者身份与任何证件号码分离。临时登记也可持有多次就诊；合并不销毁来源身份。
+    lifecycle: [provisional, verified, linked]
+    attributes: [{name: id, label: 患者内部标识, type: String, required: true}, {name: displayName, label: 显示姓名, type: String}]
+    entities:
+      - {name: Identifier, alias: 患者标识, localId: identifierId, cardinality: ZERO_OR_MORE, attributes: [{name: issuer, label: 签发方, type: String}, {name: kind, label: 标识类别, type: String}, {name: value, label: 标识值, type: String}]}
+  - id: IdentityReview
+    name: IdentityReview
+    alias: 身份核对单
+    tags: [核心]
+    lifecycle: [pending, linked, rejected, reversed]
+    attributes: [{name: sourcePatient, label: 待核身份, type: AggregateRootRef, targetAggregate: Patient}, {name: candidatePatient, label: 候选主档, type: AggregateRootRef, targetAggregate: Patient}, {name: evidence, label: 核对或纠错依据, type: String}]
+  - id: ClinicalHistory
+    name: ClinicalHistory
+    alias: 纵向病史条目
+    tags: [核心]
+    description: 问题、过敏或实际用药史；保留来源、核实者、时间和修订链，药品处方不自动证明患者实际服用。
+    attributes: [{name: patient, label: 患者, type: AggregateRootRef, targetAggregate: Patient}, {name: category, label: 类别, type: String}, {name: knowledge, label: 知悉状态, type: Enum, enumValues: [not-asked, unknown, none-known, present]}, {name: evidence, label: 信息来源, type: String}]
+  - id: Visit
+    name: Visit
+    alias: 一次来院
+    tags: [核心]
+    lifecycle: [open, ended, interrupted]
+    attributes: [{name: patient, label: 患者, type: AggregateRootRef, targetAggregate: Patient}, {name: profile, label: 办理依据版本, type: AggregateRootRef, targetAggregate: FacilityProfile}, {name: owner, label: 本次接诊责任人, type: String}]
+  - id: Contact
+    name: Contact
+    alias: 岗位接触记录
+    tags: [核心]
+    attributes: [{name: visit, label: 本次来院, type: AggregateRootRef, targetAggregate: Visit}, {name: practitioner, label: 实际办理人, type: String}, {name: occurredAt, label: 实际发生时间, type: DateTime}, {name: enteredAt, label: 录入时间, type: DateTime}]
+  - id: ClinicalNote
+    name: ClinicalNote
+    alias: 临床文书修订
+    tags: [核心]
+    lifecycle: [draft, signed, superseded]
+    description: 保存当次诊断判断、处置和后续计划；已签内容通过追加修订更正。
+    attributes: [{name: contact, label: 对应临床接触, type: AggregateRootRef, targetAggregate: Contact}, {name: revision, label: 修订号, type: Integer}, {name: signedBy, label: 签署人, type: String}]
+  - id: Request
+    name: Request
+    alias: 医技申请
+    tags: [核心]
+    description: 院内执行与外送共用原申请。结果尚未返回时仍有明确责任人与预计回报时间。
+    attributes: [{name: visit, label: 原就诊, type: AggregateRootRef, targetAggregate: Visit}, {name: serviceCode, label: 项目代码及版本, type: String}, {name: resultOwner, label: 结果接收责任人, type: String}, {name: expectedAt, label: 预计回报时间, type: DateTime}]
+  - id: InboundResult
+    name: InboundResult
+    alias: 待核外部回报
+    tags: [核心]
+    lifecycle: [received, unmatched, reconciled]
+    attributes: [{name: sender, label: 来源机构, type: String}, {name: sourceKey, label: 原结果标识及修订, type: String}, {name: request, label: 经核对的原申请, type: AggregateRootRef, targetAggregate: Request}]
+  - id: Report
+    name: Report
+    alias: 正式结果修订
+    tags: [核心]
+    attributes: [{name: request, label: 原申请, type: AggregateRootRef, targetAggregate: Request}, {name: revision, label: 结果修订号, type: Integer}, {name: source, label: 签发方及原结果标识, type: String}, {name: acknowledgedBy, label: 本版确认已阅人, type: String}]
+  - id: FollowUp
+    name: FollowUp
+    alias: 后续行动责任单
+    tags: [核心]
+    lifecycle: [open, completed, cancelled]
+    attributes: [{name: report, label: 依据的报告版本, type: AggregateRootRef, targetAggregate: Report}, {name: owner, label: 当前责任人, type: String}, {name: dueAt, label: 约定完成时间, type: DateTime}, {name: outcome, label: 完成依据或取消原因, type: String}]
+  - id: Prescription
+    name: Prescription
+    alias: 处方
+    tags: [核心]
+    attributes: [{name: visit, label: 开立就诊, type: AggregateRootRef, targetAggregate: Visit}, {name: fulfillment, label: 履行路径, type: Enum, enumValues: [external, onsite]}, {name: medication, label: 药品与用法快照, type: String}]
+  - id: Appointment
+    name: Appointment
+    alias: 预约承诺
+    tags: [选装-预约]
+    lifecycle: [booked, arrived, cancelled, no-show]
+    attributes: [{name: patient, label: 患者, type: AggregateRootRef, targetAggregate: Patient}, {name: slot, label: 号源时段, type: String}, {name: visit, label: 到诊后关联就诊, type: AggregateRootRef, targetAggregate: Visit}]
+  - id: DrugLot
+    name: DrugLot
+    alias: 药房批次库存
+    tags: [选装-药房]
+    attributes: [{name: location, label: 库位, type: String}, {name: product, label: 药品品规, type: String}, {name: expiry, label: 有效期, type: Date}, {name: available, label: 可用数量, type: Decimal}]
+    entities: [{name: Movement, alias: 库存流水, localId: moveId, cardinality: ZERO_OR_MORE, attributes: [{name: kind, label: 入库／发放／退回／盘点差异, type: String}, {name: reason, label: 实际办理依据, type: String}, {name: prescriptionId, label: 发放对应原处方, type: AggregateRootRef, targetAggregate: Prescription}, {name: quantity, label: 带方向数量, type: Decimal}]}]
+  - id: Stay
+    name: Stay
+    alias: 住院与床位占用
+    tags: [选装-住院]
+    lifecycle: [registered, admitted, departed]
+    attributes: [{name: visit, label: 住院就诊, type: AggregateRootRef, targetAggregate: Visit}, {name: ward, label: 责任病区, type: String}, {name: bed, label: 床位, type: String}, {name: releasedAt, label: 释放时间, type: DateTime}]
+  - id: Account
+    name: Account
+    alias: 就诊账目
+    tags: [选装-账务]
+    attributes: [{name: visit, label: 费用所属就诊, type: AggregateRootRef, targetAggregate: Visit}, {name: profile, label: 原计价口径, type: AggregateRootRef, targetAggregate: FacilityProfile}, {name: currency, label: 本账币种, type: String}]
+    entities: [{name: Charge, alias: 应收项目, localId: chargeId, attributes: [{name: source, label: 计价事实, type: String}, {name: amount, label: 逐项金额, type: Decimal}]}]
+  - id: Payment
+    name: Payment
+    alias: 原收退款尝试
+    tags: [选装-账务]
+    lifecycle: [pending, unknown, succeeded, declined]
+    attributes: [{name: account, label: 原账目, type: AggregateRootRef, targetAggregate: Account}, {name: original, label: 退款引用原款, type: AggregateRootRef, targetAggregate: Payment}, {name: intent, label: 同一次资金办理标识, type: String}, {name: amount, label: 金额, type: Decimal}]
+aggregate_associations:
+  - {id: visit-patient, sourceAggregate: Visit, targetAggregate: Patient, sourceRole: 一次来院, targetRole: 患者主档, cardinality: MANY_TO_ONE, referenceField: patient}
+  - {id: contact-visit, sourceAggregate: Contact, targetAggregate: Visit, sourceRole: 岗位接触, targetRole: 本次来院, cardinality: MANY_TO_ONE, referenceField: visit}
+  - {id: request-visit, sourceAggregate: Request, targetAggregate: Visit, sourceRole: 医技申请, targetRole: 原就诊, cardinality: MANY_TO_ONE, referenceField: visit}
+  - {id: report-request, sourceAggregate: Report, targetAggregate: Request, sourceRole: 正式结果修订, targetRole: 原申请, cardinality: MANY_TO_ONE, referenceField: request}
+  - {id: follow-report, sourceAggregate: FollowUp, targetAggregate: Report, sourceRole: 后续行动, targetRole: 依据的结果修订, cardinality: MANY_TO_ONE, referenceField: report}
+  - {id: payment-account, sourceAggregate: Payment, targetAggregate: Account, sourceRole: 资金尝试, targetRole: 原就诊账目, cardinality: MANY_TO_ONE, referenceField: account}
