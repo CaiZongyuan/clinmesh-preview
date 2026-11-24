@@ -1,6 +1,7 @@
 import type { EncounterError, EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
-import { goldenCase1Chart, goldenCase1QueueEntry } from '../fixtures/golden-case-1'
+import { BODY_SYSTEM_NAME, isBodySystem, type PhysicalExaminationView } from '../../src/shared/physical-examination'
+import { goldenCase1Chart, goldenCase1Findings, goldenCase1QueueEntry } from '../fixtures/golden-case-1'
 
 const STATUS: Record<EncounterError['code'], number> = {
   'invalid-request': 400,
@@ -8,6 +9,7 @@ const STATUS: Record<EncounterError['code'], number> = {
   'encounter-not-found': 404,
   'active-encounter-exists': 409,
   'encounter-not-active': 409,
+  'body-system-already-examined': 409,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })
@@ -24,8 +26,15 @@ export function encounterFor(overrides: Partial<EncounterView> = {}): EncounterV
 }
 
 // Stands in for the Worker at the fetch boundary, following the HTTP contract the Worker seam tests pin down.
-export function createFakeClinicApi({ encounters = [] as EncounterView[] } = {}) {
-  const state = { encounters: [...encounters], started: 0 }
+export function examinationFor(system: keyof typeof goldenCase1Findings, examinedAt = new Date().toISOString()): PhysicalExaminationView {
+  return { system, ...goldenCase1Findings[system], practitionerId: goldenCase1Chart.practitionerId, examinedAt }
+}
+
+export function createFakeClinicApi({
+  encounters = [] as EncounterView[],
+  examinations = {} as Record<string, PhysicalExaminationView[]>,
+} = {}) {
+  const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0 }
   const active = () => state.encounters.find((e) => e.status === 'active') ?? null
 
   const queue = (): GoldenCaseQueueEntry[] => [
@@ -51,6 +60,19 @@ export function createFakeClinicApi({ encounters = [] as EncounterView[] } = {})
     const encounter = state.encounters.find((e) => e.encounterId === encounterId)
     if (!encounter) return refuse('encounter-not-found', `找不到就诊记录 ${encounterId}`)
     if (method === 'GET' && action === undefined) return Response.json({ encounter })
+    if (action === 'physical-examinations') {
+      const performed = (state.examinations[encounter.encounterId] ??= [])
+      if (method === 'GET') return Response.json({ examinations: performed })
+      const { system } = JSON.parse(String(init?.body)) as { system: unknown }
+      if (!isBodySystem(system)) return refuse('invalid-request', '请求体须为 { "system": BodySystem }')
+      if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
+      if (performed.some((e) => e.system === system)) {
+        return refuse('body-system-already-examined', `本次就诊已查过${BODY_SYSTEM_NAME[system]}，每个部位只查一次。`)
+      }
+      const examination = examinationFor(system)
+      performed.push(examination)
+      return Response.json({ examination }, { status: 201 })
+    }
     if (method === 'POST' && action === 'abandonment') {
       if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
       Object.assign(encounter, { status: 'abandoned', endedAt: new Date().toISOString() })

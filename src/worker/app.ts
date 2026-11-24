@@ -9,6 +9,12 @@ import type {
   ErrorResponse,
 } from '../shared/encounter'
 import type { GoldenCaseQueueResponse } from '../shared/golden-case-queue'
+import {
+  BODY_SYSTEMS,
+  isBodySystem,
+  type PhysicalExaminationResponse,
+  type PhysicalExaminationsResponse,
+} from '../shared/physical-examination'
 
 const WORKSPACE_NAME = 'default'
 
@@ -18,6 +24,7 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'encounter-not-found': 404,
   'active-encounter-exists': 409,
   'encounter-not-active': 409,
+  'body-system-already-examined': 409,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -60,4 +67,23 @@ app.get('/encounters/:encounterId/audit-events', async (c) => {
 app.post('/encounters/:encounterId/abandonment', async (c) => {
   const result = await workspace(c).abandonEncounter(c.req.param('encounterId'))
   return result.ok ? c.json<EncounterResponse>({ encounter: result.encounter }) : refuse(c, result.error)
+})
+
+app.get('/encounters/:encounterId/physical-examinations', async (c) => {
+  const result = await workspace(c).listPhysicalExaminations(c.req.param('encounterId'))
+  return result.ok
+    ? c.json<PhysicalExaminationsResponse>({ examinations: result.examinations })
+    : refuse(c, result.error)
+})
+
+app.post('/encounters/:encounterId/physical-examinations', async (c) => {
+  const body: unknown = await c.req.json().catch(() => null)
+  const system = (body as { system?: unknown } | null)?.system
+  if (!isBodySystem(system)) {
+    return refuse(c, { code: 'invalid-request', message: `请求体须为 { "system": ${BODY_SYSTEMS.map((s) => `"${s}"`).join(' | ')} }` })
+  }
+  const result = await workspace(c).performPhysicalExamination(c.req.param('encounterId'), system)
+  return result.ok
+    ? c.json<PhysicalExaminationResponse>({ examination: result.examination }, 201)
+    : refuse(c, result.error)
 })

@@ -1,7 +1,8 @@
 import { Button } from '@ui-sdk/react/button'
 import { CheckIcon, ClockIcon, CopyIcon, TriangleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { EncounterStatus, EncounterView, Triage, VitalSignKind } from '../../shared/encounter'
+import type { EncounterStatus, EncounterView, VitalSign, VitalSignKind } from '../../shared/encounter'
+import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { formatClock, formatDuration, SEX_LABEL, VISIT_KIND_LABEL } from './format'
 import { HealthRecordPopover } from './health-record'
 import { badge, iconButton } from './pane-styles'
@@ -18,7 +19,13 @@ const VITAL_LABEL: Record<VitalSignKind, { short: string; name: string }> = {
   spo2: { short: 'SpO₂', name: '血氧饱和度' },
 }
 
-export function PatientBanner({ encounter }: { encounter: EncounterView }) {
+export function PatientBanner({
+  encounter,
+  examinedVitals,
+}: {
+  encounter: EncounterView
+  examinedVitals?: PhysicalExaminationView
+}) {
   const { patient, triage, visibleSourceHistory: history } = encounter
   return (
     <section aria-label="患者信息" className="flex max-h-[45%] flex-none flex-col gap-2 overflow-y-auto border-b px-4 pt-3 pb-2.5">
@@ -63,16 +70,21 @@ export function PatientBanner({ encounter }: { encounter: EncounterView }) {
           主诉：<span className="text-foreground">{patient.chiefComplaint}</span>
         </span>
       </div>
-      <TriageVitals triage={triage} />
+      {examinedVitals?.vitals ? (
+        <VitalSignTiles source="查体" measuredAt={examinedVitals.examinedAt} vitals={examinedVitals.vitals} />
+      ) : (
+        <VitalSignTiles source="分诊" measuredAt={triage.measuredAt} vitals={triage.vitals} />
+      )}
     </section>
   )
 }
 
-function TriageVitals({ triage }: { triage: Triage }) {
+// The latest reading wins the tiles: triage until the vitals Physical Examination, which leaves triage on record.
+function VitalSignTiles({ source, measuredAt, vitals }: { source: '分诊' | '查体'; measuredAt: string; vitals: VitalSign[] }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <ul aria-label="分诊生命体征" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-        {triage.vitals.map((vital) => {
+      <ul aria-label={`${source}生命体征`} className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+        {vitals.map((vital) => {
           const label = VITAL_LABEL[vital.kind]
           return (
             <li
@@ -101,7 +113,7 @@ function TriageVitals({ triage }: { triage: Triage }) {
         })}
       </ul>
       <span className="text-[11px] text-muted-foreground">
-        分诊 <time dateTime={triage.measuredAt}>{formatClock(triage.measuredAt)}</time>
+        {source} <time dateTime={measuredAt}>{formatClock(measuredAt)}</time>
       </span>
     </div>
   )

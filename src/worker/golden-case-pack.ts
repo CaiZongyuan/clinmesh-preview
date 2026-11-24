@@ -1,7 +1,8 @@
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import type { EncounterView, PriorMedication } from '../shared/encounter'
 import type { Sex, VisitKind } from '../shared/golden-case-queue'
-import { triageVitalSigns } from './triage-vitals'
+import type { BodySystem, PhysicalExaminationView } from '../shared/physical-examination'
+import { vitalSigns, vitalSignsSentence } from './vital-signs'
 
 export interface GoldenCaseRegistration {
   caseId: string
@@ -53,7 +54,7 @@ export function encounterChart(caseId: string): EncounterChart | undefined {
       insurance: registration.insurance,
       chiefComplaint: goldenCase.chiefComplaint,
     },
-    triage: { level: triage.level, measuredAt: triage.measuredAt, vitals: triageVitalSigns(triage.vitals) },
+    triage: { level: triage.level, measuredAt: triage.measuredAt, vitals: vitalSigns(triage.vitals) },
     visibleSourceHistory: {
       priorVisits: goldenCase.visibleHistory.map((visit) => ({
         visitedAt: visit.encounterDateTime,
@@ -67,6 +68,18 @@ export function encounterChart(caseId: string): EncounterChart | undefined {
       priorMedications: medications.filter((m, i) => medications.findIndex((o) => o.id === m.id) === i).map(medication),
     },
   }
+}
+
+export type PhysicalExaminationFinding = Pick<PhysicalExaminationView, 'finding' | 'vitals'>
+
+// Reveals one body system's finding from Case Truth, and nothing else of it.
+export function physicalExaminationFinding(caseId: string, system: BodySystem): PhysicalExaminationFinding | undefined {
+  const goldenCase = casePack.cases.find((c) => c.id === caseId)
+  if (!goldenCase) return undefined
+  if (system !== 'vitals') return { finding: goldenCase.physicalExamination[system], vitals: null }
+  const { spo2Condition, ...readings } = goldenCase.physicalExamination.vitals
+  const vitals = vitalSigns(readings)
+  return { finding: vitalSignsSentence(vitals, spo2Condition), vitals }
 }
 
 // Both inputs carry the clinic-local calendar date in their first ten characters.

@@ -1,6 +1,7 @@
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import type { EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
+import type { BodySystem, PhysicalExaminationView } from '../../src/shared/physical-examination'
 
 export const goldenCase1QueueEntry: GoldenCaseQueueEntry = {
   caseId: 'golden-case-01',
@@ -71,3 +72,22 @@ export const goldenCase1Chart = {
     priorMedications: [{ display: '苯磺酸氨氯地平片', dosageText: '5 mg 每日一次 口服' }],
   },
 } satisfies Omit<EncounterView, 'encounterId' | 'status' | 'startedAt' | 'endedAt'>
+
+// What each body system's Physical Examination reveals for Golden Case 1, apart from who examined it and when.
+export const goldenCase1Findings = {
+  vitals: {
+    finding: 'T 38.6℃，P 102 次/分，R 22 次/分，BP 138/84 mmHg，SpO₂ 94%（未吸氧）',
+    vitals: [
+      { kind: 'temperature', value: '38.6', unit: '℃', flag: 'high' },
+      { kind: 'pulse', value: '102', unit: '次/分', flag: 'high' },
+      { kind: 'respiratory-rate', value: '22', unit: '次/分', flag: 'high' },
+      { kind: 'blood-pressure', value: '138/84', unit: 'mmHg', flag: null },
+      { kind: 'spo2', value: '94', unit: '%', flag: 'low' },
+    ],
+  },
+  general: { finding: '神志清，急性病容，对答切题', vitals: null },
+  pharynx: { finding: '咽部轻度充血，扁桃体无肿大', vitals: null },
+  lungs: { finding: '右下肺呼吸音减低，可闻及湿性啰音；左肺呼吸音清', vitals: null },
+  heart: { finding: '心率 102 次/分，律齐，各瓣膜区未闻及杂音', vitals: null },
+  abdomen: { finding: '腹软，无压痛及反跳痛', vitals: null },
+} satisfies Record<BodySystem, Pick<PhysicalExaminationView, 'finding' | 'vitals'>>

@@ -96,7 +96,7 @@ export interface ActiveEncounterResponse {
   encounter: EncounterView | null
 }
 
-export type AuditEventType = 'encounter-started' | 'encounter-abandoned'
+export type AuditEventType = 'encounter-started' | 'encounter-abandoned' | 'physical-examination-performed'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -114,6 +114,7 @@ export type EncounterErrorCode =
   | 'encounter-not-found'
   | 'active-encounter-exists'
   | 'encounter-not-active'
+  | 'body-system-already-examined'
 
 export interface EncounterError {
   code: EncounterErrorCode

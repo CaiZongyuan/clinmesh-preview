@@ -95,7 +95,7 @@ export class EncounterRepository {
     return row && toView(row)
   }
 
-  private audit(encounterId: string, eventType: AuditEventType, practitionerId: string, occurredAt: string) {
+  audit(encounterId: string, eventType: AuditEventType, practitionerId: string, occurredAt: string) {
     this.sql.exec(
       'INSERT INTO audit_event (encounter_id, event_type, practitioner_id, occurred_at) VALUES (?, ?, ?, ?)',
       encounterId, eventType, practitionerId, occurredAt,
