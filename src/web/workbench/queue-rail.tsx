@@ -1,24 +1,21 @@
+import { useNavigate } from '@tanstack/react-router'
+import { Button } from '@ui-sdk/react/button'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@ui-sdk/react/tabs'
 import { UsersIcon } from 'lucide-react'
 import type { GoldenCaseQueueEntry, QueueStatus } from '../../shared/golden-case-queue'
+import { formatClock, SEX_LABEL, VISIT_KIND_LABEL } from './format'
 
 export const CLINIC_DEPARTMENT = '全科医学科门诊'
 
 const QUEUE_GROUPS: readonly QueueStatus[] = ['in-encounter', 'waiting', 'completed']
 const STATUS_LABEL: Record<QueueStatus, string> = { 'in-encounter': '在诊', waiting: '待诊', completed: '完诊' }
 
-const SEX_LABEL = { male: '男', female: '女' } as const
-const VISIT_KIND_LABEL = { first: '初诊', return: '复诊' } as const
-
-const registrationClock = new Intl.DateTimeFormat('zh-CN', {
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-  timeZone: 'Asia/Shanghai',
-})
-
-export function QueueRail({ queue }: { queue: GoldenCaseQueueEntry[] }) {
+export function QueueRail({ queue, focusedCaseId }: { queue: GoldenCaseQueueEntry[]; focusedCaseId?: string }) {
+  const navigate = useNavigate()
+  // The workbench root opens the active Encounter by itself; a waiting patient opens their registration.
+  const open = (entry: GoldenCaseQueueEntry) =>
+    navigate({ to: '/', search: entry.queueStatus === 'in-encounter' ? {} : { case: entry.caseId } })
   const groups = QUEUE_GROUPS.map((status) => ({
     status,
     label: STATUS_LABEL[status],
@@ -66,19 +63,25 @@ export function QueueRail({ queue }: { queue: GoldenCaseQueueEntry[] }) {
       <span aria-hidden="true" className="h-px w-6 bg-border" />
       <ol aria-label="候诊患者" className="m-0 flex list-none flex-col items-center gap-2 p-0">
         {queue.map((entry) => (
-          <li
-            key={entry.caseId}
-            title={`${entry.queueNumber} 号 ${entry.patientName} · ${entry.chiefComplaint}`}
-            aria-label={`${entry.queueNumber} 号 ${entry.patientName} · ${STATUS_LABEL[entry.queueStatus]}`}
-            className="relative grid size-9 place-items-center rounded-[9px] border bg-card text-sm"
-          >
-            <span aria-hidden="true">{entry.patientName[0]}</span>
-            <span
-              aria-hidden="true"
-              className="absolute -right-1 -bottom-1 rounded bg-secondary px-[3px] font-mono text-[10px] text-muted-foreground"
+          <li key={entry.caseId}>
+            <Button
+              title={`${entry.queueNumber} 号 ${entry.patientName} · ${entry.chiefComplaint}`}
+              aria-label={`${entry.queueNumber} 号 ${entry.patientName} · ${STATUS_LABEL[entry.queueStatus]}`}
+              aria-current={entry.caseId === focusedCaseId ? 'true' : undefined}
+              onClick={() => open(entry)}
+              className="relative grid size-9 place-items-center rounded-[9px] border bg-card p-0 text-sm aria-[current=true]:border-foreground aria-[current=true]:shadow-[inset_0_0_0_1px_var(--foreground)]"
             >
-              {entry.queueNumber}
-            </span>
+              <span aria-hidden="true">{entry.patientName[0]}</span>
+              <span
+                aria-hidden="true"
+                className="absolute -right-1 -bottom-1 rounded bg-secondary px-[3px] font-mono text-[10px] text-muted-foreground"
+              >
+                {entry.queueNumber}
+              </span>
+              {entry.queueStatus === 'in-encounter' && (
+                <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-success" />
+              )}
+            </Button>
           </li>
         ))}
       </ol>
@@ -105,7 +108,7 @@ function QueueEntryRow({ entry }: { entry: GoldenCaseQueueEntry }) {
         </div>
         <div className="text-xs text-muted-foreground">{entry.chiefComplaint}</div>
         <div className="text-[11px] text-muted-foreground">
-          挂号 <time dateTime={entry.registeredAt}>{registrationClock.format(new Date(entry.registeredAt))}</time>
+          挂号 <time dateTime={entry.registeredAt}>{formatClock(entry.registeredAt)}</time>
         </div>
       </div>
     </li>

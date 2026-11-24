@@ -13,6 +13,21 @@ pnpm dev         # Vite + Cloudflare Workers runtime: http://localhost:5173
 
 `pnpm dev` serves the workbench page and the Worker API from one origin, with `ClinicWorkspaceDO` running locally on embedded SQLite (state under `.wrangler/`). Try `curl http://localhost:5173/api/golden-cases`.
 
+### HTTP API
+
+Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "code", "message" } }`.
+
+| Route | What it does |
+| ----- | ------------ |
+| `GET /api/golden-cases` | The queue; `queueStatus` is `in-encounter` while a Golden Case has the active Encounter |
+| `POST /api/encounters` `{ caseId }` | Starts an Encounter (201); `409 active-encounter-exists` while another is active |
+| `GET /api/encounters/active` | The workspace's active Encounter, or `null` |
+| `GET /api/encounters/:encounterId` | One Encounter: patient banner, triage vitals and Visible Source History only |
+| `POST /api/encounters/:encounterId/abandonment` | Encounter Abandonment; `409 encounter-not-active` once it is frozen |
+| `GET /api/encounters/:encounterId/audit-events` | Audit trail with `practitionerId` |
+
+Every new HTTP or WebSocket route must be added to the probe table in `test/worker/truth-isolation.test.ts`, which fails until it is.
+
 | Script           | What it does                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------ |
 | `pnpm dev`       | Local dev server (pass `--port <n>` to change the port)                                          |
@@ -29,5 +44,5 @@ Run one seam with `pnpm test --project worker` or `pnpm test --project web`.
 - `src/web/` React app: TanStack Router routes (`router.tsx`), workbench components, styles and tokens.
 - `src/shared/` Types shared by the API and the browser.
 - `data/` Pinned data snapshots. `data/provenance.json` records each snapshot's source paths and reference commit.
-- `test/worker/`, `test/web/` The two test seams.
+- `test/worker/`, `test/web/` The two test seams; `test/fixtures/` holds what both seams expect of Golden Case 1.
 - `prototypes/copilot-workbench/` Reference prototype, not production code.
