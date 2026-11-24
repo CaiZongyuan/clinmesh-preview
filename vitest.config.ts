@@ -10,6 +10,7 @@ export default defineConfig({
         test: {
           name: 'worker',
           include: ['test/worker/**/*.test.ts'],
+          setupFiles: ['test/worker/setup.ts'],
         },
       },
       {

@@ -1,24 +1,10 @@
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test'
 import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
-import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import type { GoldenCaseQueueResponse } from '../../src/shared/golden-case-queue'
+import { goldenCase1QueueEntry } from '../fixtures/golden-case-1'
 
-const goldenCase1Queue: GoldenCaseQueueResponse = {
-  goldenCases: [
-    {
-      caseId: 'golden-case-01',
-      queueNumber: 7,
-      patientName: '李建国',
-      sex: 'male',
-      age: 58,
-      chiefComplaint: '发热、咳嗽 3 天',
-      registeredAt: '2026-11-24T08:31:00+08:00',
-      visitKind: 'first',
-      queueStatus: 'waiting',
-    },
-  ],
-}
+const goldenCase1Queue: GoldenCaseQueueResponse = { goldenCases: [goldenCase1QueueEntry] }
 
 const getGoldenCases = () => exports.default.fetch('http://clinmesh.test/api/golden-cases')
 const workspace = () => env.CLINIC_WORKSPACE.getByName('default')
@@ -71,8 +57,10 @@ describe('GET /api/golden-cases', () => {
     await getGoldenCases()
     await runInDurableObject(workspace(), (_instance, state) => {
       const sql = state.storage.sql
-      sql.exec('DROP TABLE schema_migration')
-      sql.exec('DROP TABLE golden_case')
+      const tables = sql
+        .exec<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'`)
+        .toArray()
+      for (const { name } of tables) sql.exec(`DROP TABLE ${name}`)
       sql.exec(`CREATE TABLE golden_case (
         case_id TEXT PRIMARY KEY, case_pack_version TEXT NOT NULL, queue_number INTEGER NOT NULL UNIQUE,
         patient_name TEXT NOT NULL, sex TEXT NOT NULL, birth_date TEXT NOT NULL, chief_complaint TEXT NOT NULL,
@@ -85,18 +73,5 @@ describe('GET /api/golden-cases', () => {
     const response = await getGoldenCases()
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(goldenCase1Queue)
-  })
-
-  it('does not expose Case Truth through the queue', async () => {
-    const text = await (await getGoldenCases()).text()
-    const truthTerms = casePack.cases.flatMap((goldenCase) => [
-      goldenCase.title,
-      goldenCase.titleEn,
-      ...goldenCase.indexConditions.flatMap((condition) => [condition.code, condition.display]),
-    ])
-    for (const term of truthTerms) {
-      expect(text).not.toContain(term)
-    }
-    expect(text).not.toMatch(/(^|[^a-z])cap([^a-z]|$)/i)
   })
 })

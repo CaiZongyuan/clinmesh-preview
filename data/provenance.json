@@ -23,12 +23,14 @@
         {
           "path": "prototypes/copilot-workbench/workbench-prototype.html",
           "repository": "this repository",
-          "used": "Golden Case 1 clinical content: patient, queue registration, allergy, visible history, persona replies, Physical Examination findings, laboratory and imaging results, scripted Report amendments and debrief reference."
+          "used": "Golden Case 1 clinical content: patient, queue registration, allergy, chronic condition, visible history (with department), persona replies, Physical Examination findings, laboratory and imaging results, scripted Report amendments and debrief reference."
         }
       ],
       "notes": [
         "The reference repository has no community-acquired pneumonia case at this commit, so Golden Case 1 is authored here following its schema.",
-        "Fields added beyond the reference schema, per the Phase 1 spec: registration, triage, allergies, physicalExamination, laboratories[].catalogItem, textResults, reportAmendments, debriefReference.",
+        "Fields added beyond the reference schema, per the Phase 1 spec: registration, triage, allergies, chronicConditions, visibleHistory[].department, physicalExamination, laboratories[].catalogItem, textResults, reportAmendments, debriefReference.",
+        "Pack version 2026-11-24.2 adds the chronic problem list (chronicConditions) and the prior-visit department for the patient banner and its health-record popover, both taken from the prototype's HISTORY block; the department moved out of the 2015 visit's reasonText.",
+        "Pack version 2026-11-24.3 replaces triage.vitals with the prototype's pre-examination triage values (38.4 ℃, 98, 20, 136/82, SpO₂ 95 %) and adds triage.measuredAt from its \"分诊 08:20\" label. The earlier triage vitals equalled physicalExamination.vitals, which is Case Truth revealed only by the vitals Physical Examination, so showing them at triage leaked objective signs.",
         "Reference fields omitted as inpatient/PCI-specific: plannedStentCount, angiography, ttes, ecgs.",
         "LOINC codings for neutrophil %, lymphocyte %, CRP and procalcitonin are authored here, not copied.",
         "Case, patient and persona ids are diagnosis-neutral (golden-case-01, golden-patient-01) because they reach the browser; the reference repo's descriptive id style would leak Case Truth (ADR-0002)."

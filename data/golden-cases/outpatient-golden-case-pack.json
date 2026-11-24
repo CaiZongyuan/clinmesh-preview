@@ -2,7 +2,7 @@
   "id": "clinmesh-preview-outpatient-golden-cases",
   "name": "ClinMesh Preview 门诊 Golden Case",
   "nameEn": "ClinMesh Preview outpatient Golden Cases",
-  "version": "2026-11-24.1",
+  "version": "2026-11-24.3",
   "cases": [
     {
       "id": "golden-case-01",
@@ -27,13 +27,14 @@
       },
       "triage": {
         "level": 3,
+        "measuredAt": "2026-11-24T08:20:00+08:00",
         "vitals": {
-          "temperatureCelsius": 38.6,
-          "pulseBpm": 102,
-          "respiratoryRatePerMin": 22,
-          "systolicMmHg": 138,
-          "diastolicMmHg": 84,
-          "spo2Percent": 94
+          "temperatureCelsius": 38.4,
+          "pulseBpm": 98,
+          "respiratoryRatePerMin": 20,
+          "systolicMmHg": 136,
+          "diastolicMmHg": 82,
+          "spo2Percent": 95
         }
       },
       "allergies": [
@@ -46,10 +47,14 @@
           "source": "急诊抢救记录"
         }
       ],
+      "chronicConditions": [
+        { "id": "htn", "system": "http://hl7.org/fhir/sid/icd-10", "code": "I10", "display": "原发性高血压", "onset": "2014", "status": "规律服药，控制可" }
+      ],
       "visibleHistory": [
         {
           "id": "htn-follow-up-2024",
           "encounterDateTime": "2024-03-12T09:10:00+08:00",
+          "department": "全科医学科",
           "reasonText": "高血压复诊",
           "conditions": [
             { "id": "htn", "system": "http://hl7.org/fhir/sid/icd-10", "code": "I10", "display": "原发性高血压", "note": "2014 年起病，规律服药，控制可。" }
@@ -62,6 +67,7 @@
         {
           "id": "urti-2023",
           "encounterDateTime": "2023-11-02T10:20:00+08:00",
+          "department": "全科医学科",
           "reasonText": "咽痛流涕 2 天",
           "conditions": [
             { "id": "urti", "system": "http://hl7.org/fhir/sid/icd-10", "code": "J06.9", "display": "急性上呼吸道感染" }
@@ -72,7 +78,8 @@
         {
           "id": "penicillin-anaphylaxis-2015",
           "encounterDateTime": "2015-06-02T15:40:00+08:00",
-          "reasonText": "注射青霉素后呼吸困难、血压下降（急诊科）",
+          "department": "急诊科",
+          "reasonText": "注射青霉素后呼吸困难、血压下降",
           "conditions": [
             { "id": "drug-anaphylaxis", "system": "http://hl7.org/fhir/sid/icd-10", "code": "T88.6", "display": "药物过敏性休克", "note": "肾上腺素抢救后好转。" }
           ],

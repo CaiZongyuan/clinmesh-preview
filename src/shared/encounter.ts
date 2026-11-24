@@ -1,0 +1,125 @@
+import type { Sex, VisitKind } from './golden-case-queue'
+
+export type EncounterStatus = 'active' | 'abandoned' | 'completed'
+
+export type VitalSignKind = 'temperature' | 'pulse' | 'respiratory-rate' | 'blood-pressure' | 'spo2'
+
+// Which side of the reference range a reading falls on; null when it is within range.
+export type VitalSignFlag = 'high' | 'low' | null
+
+export interface VitalSign {
+  kind: VitalSignKind
+  value: string
+  unit: string
+  flag: VitalSignFlag
+}
+
+export interface BannerPatient {
+  name: string
+  sex: Sex
+  age: number
+  visitKind: VisitKind
+  outpatientNumber: string
+  registeredAt: string
+  department: string
+  insurance: string
+  chiefComplaint: string
+}
+
+export interface Triage {
+  level: number
+  measuredAt: string
+  vitals: VitalSign[]
+}
+
+export interface CodedCondition {
+  code: string
+  display: string
+}
+
+export interface PriorMedication {
+  display: string
+  dosageText: string
+}
+
+export interface PriorVisit {
+  visitedAt: string
+  department: string
+  reason: string
+  diagnoses: CodedCondition[]
+  medications: PriorMedication[]
+}
+
+export interface RecordedAllergy {
+  agent: string
+  reaction: string
+  onset: string
+  source: string
+}
+
+export interface ChronicCondition extends CodedCondition {
+  onset: string
+  status: string
+}
+
+// What the clinic knew before this Encounter started; never Case Truth.
+export interface VisibleSourceHistory {
+  priorVisits: PriorVisit[]
+  allergies: RecordedAllergy[]
+  chronicConditions: ChronicCondition[]
+  priorMedications: PriorMedication[]
+}
+
+export interface EncounterView {
+  encounterId: string
+  caseId: string
+  caseVersion: string
+  personaVersion: string
+  status: EncounterStatus
+  practitionerId: string
+  startedAt: string
+  endedAt: string | null
+  patient: BannerPatient
+  triage: Triage
+  visibleSourceHistory: VisibleSourceHistory
+}
+
+export interface StartEncounterRequest {
+  caseId: string
+}
+
+export interface EncounterResponse {
+  encounter: EncounterView
+}
+
+export interface ActiveEncounterResponse {
+  encounter: EncounterView | null
+}
+
+export type AuditEventType = 'encounter-started' | 'encounter-abandoned'
+
+export interface AuditEvent {
+  eventType: AuditEventType
+  practitionerId: string
+  occurredAt: string
+}
+
+export interface AuditEventsResponse {
+  auditEvents: AuditEvent[]
+}
+
+export type EncounterErrorCode =
+  | 'invalid-request'
+  | 'golden-case-not-found'
+  | 'encounter-not-found'
+  | 'active-encounter-exists'
+  | 'encounter-not-active'
+
+export interface EncounterError {
+  code: EncounterErrorCode
+  message: string
+}
+
+export interface ErrorResponse {
+  error: EncounterError
+}

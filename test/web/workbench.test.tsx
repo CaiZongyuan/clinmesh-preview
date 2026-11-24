@@ -3,30 +3,14 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createAgent } from '@ui-sdk/react/agent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GoldenCaseQueueResponse } from '../../src/shared/golden-case-queue'
 import { createAppRouter } from '../../src/web/router'
-
-const queueResponse: GoldenCaseQueueResponse = {
-  goldenCases: [
-    {
-      caseId: 'golden-case-01',
-      queueNumber: 7,
-      patientName: '李建国',
-      sex: 'male',
-      age: 58,
-      chiefComplaint: '发热、咳嗽 3 天',
-      registeredAt: '2026-11-24T08:31:00+08:00',
-      visitKind: 'first',
-      queueStatus: 'waiting',
-    },
-  ],
-}
+import { createFakeClinicApi } from './fake-clinic-api'
 
 const fetchStub = vi.fn<typeof fetch>()
 const agent = createAgent()
 
 beforeEach(() => {
-  fetchStub.mockImplementation(async () => Response.json(queueResponse))
+  fetchStub.mockImplementation(createFakeClinicApi().handle)
   vi.stubGlobal('fetch', fetchStub)
 })
 
@@ -45,11 +29,11 @@ describe('outpatient workbench', () => {
     renderWorkbench()
 
     const rail = await screen.findByRole('navigation', { name: '候诊队列' })
-    expect(fetchStub).toHaveBeenCalledWith('/api/golden-cases')
+    expect(fetchStub).toHaveBeenCalledWith('/api/golden-cases', undefined)
     expect(screen.getByRole('region', { name: '问诊记录' })).toBeInTheDocument()
     expect(screen.getByRole('main', { name: '病例工作区' })).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: '临床助手' })).toBeInTheDocument()
-    expect(within(rail).getByRole('listitem', { name: '7 号 李建国 · 待诊' })).toBeInTheDocument()
+    expect(within(rail).getByRole('button', { name: '7 号 李建国 · 待诊' })).toBeInTheDocument()
 
     await user.click(within(rail).getByRole('button', { name: '打开候诊队列' }))
     const groups = await screen.findByRole('tablist', { name: '候诊分组' })

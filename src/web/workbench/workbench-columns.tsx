@@ -5,8 +5,7 @@ import {
   ResizablePanel,
   type ResizableStorage,
 } from '@ui-sdk/react/resizable'
-import { useState, type MouseEvent } from 'react'
-import { CaseWorkspace } from './case-workspace'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import { ConsultationColumn, ConsultationStrip } from './consultation-column'
 import { CopilotPanel } from './copilot-panel'
 
@@ -31,7 +30,7 @@ const browserLayoutStorage: ResizableStorage = {
   },
 }
 
-export function WorkbenchColumns() {
+export function WorkbenchColumns({ caseWorkspace }: { caseWorkspace: ReactNode }) {
   const [columns] = useState(createResizableController)
 
   const resetConsultation = (event: MouseEvent) => {
@@ -74,7 +73,7 @@ export function WorkbenchColumns() {
         onDoubleClick={resetConsultation}
       />
       <ResizablePanel id="case-workspace" minSize="440px">
-        <CaseWorkspace />
+        {caseWorkspace}
       </ResizablePanel>
       <ResizableHandle
         aria-label="调整临床助手宽度"

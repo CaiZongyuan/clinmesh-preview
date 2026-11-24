@@ -1,5 +1,5 @@
 import type { GoldenCaseQueueEntry, Sex, VisitKind } from '../shared/golden-case-queue'
-import type { GoldenCaseRegistration } from './golden-case-pack'
+import { ageOn, type GoldenCaseRegistration } from './golden-case-pack'
 
 type GoldenCaseRow = {
   case_id: string
@@ -11,6 +11,8 @@ type GoldenCaseRow = {
   registered_at: string
   visit_kind: VisitKind
 }
+
+type QueueRow = GoldenCaseRow & { in_encounter: number }
 
 export class GoldenCaseRepository {
   constructor(private readonly sql: SqlStorage) {}
@@ -38,8 +40,9 @@ export class GoldenCaseRepository {
 
   listQueue(): GoldenCaseQueueEntry[] {
     const rows = this.sql
-      .exec<GoldenCaseRow>(
-        `SELECT case_id, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind
+      .exec<QueueRow>(
+        `SELECT case_id, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind,
+           EXISTS (SELECT 1 FROM encounter WHERE encounter.case_id = golden_case.case_id AND status = 'active') AS in_encounter
          FROM golden_case ORDER BY queue_number`,
       )
       .toArray()
@@ -52,15 +55,8 @@ export class GoldenCaseRepository {
       chiefComplaint: row.chief_complaint,
       registeredAt: row.registered_at,
       visitKind: row.visit_kind,
-      // No Encounter exists yet in this slice, so every Golden Case is waiting.
-      queueStatus: 'waiting',
+      // An abandoned Encounter is not a completed one, so its Golden Case waits to be started afresh.
+      queueStatus: row.in_encounter ? 'in-encounter' : 'waiting',
     }))
   }
-}
-
-// Both inputs carry the clinic-local calendar date in their first ten characters.
-function ageOn(birthDate: string, at: string): number {
-  const [by, bm, bd] = birthDate.slice(0, 10).split('-').map(Number)
-  const [y, m, d] = at.slice(0, 10).split('-').map(Number)
-  return y - by - (m < bm || (m === bm && d < bd) ? 1 : 0)
 }

@@ -3,26 +3,49 @@ import {
   createRoute,
   createRouter,
   Outlet,
+  redirect,
   type ErrorComponentProps,
   type RouterHistory,
 } from '@tanstack/react-router'
-import { fetchGoldenCaseQueue } from './api'
+import { fetchActiveEncounter, fetchEncounter, fetchGoldenCaseQueue } from './api'
 import { Workbench } from './workbench/workbench'
 
 const rootRoute = createRootRoute({ component: Outlet })
 
+// Without a selected case, the workbench opens the workspace's active Encounter, so a reload lands back in it.
 const workbenchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  loader: fetchGoldenCaseQueue,
-  component: WorkbenchRoute,
+  validateSearch: (search: Record<string, unknown>): { case?: string } =>
+    typeof search.case === 'string' ? { case: search.case } : {},
+  loaderDeps: ({ search }) => ({ caseId: search.case }),
+  loader: async ({ deps }) => {
+    const [queue, active] = await Promise.all([fetchGoldenCaseQueue(), fetchActiveEncounter()])
+    if (active && !deps.caseId) {
+      throw redirect({ to: '/encounters/$encounterId', params: { encounterId: active.encounterId }, replace: true })
+    }
+    return { queue, selected: queue.find((entry) => entry.caseId === deps.caseId) }
+  },
+  component: function WorkbenchRoute() {
+    const { queue, selected } = workbenchRoute.useLoaderData()
+    return <Workbench queue={queue} focus={selected ? { kind: 'registration', entry: selected } : { kind: 'none' }} />
+  },
   errorComponent: WorkbenchLoadError,
 })
 
-function WorkbenchRoute() {
-  const queue = workbenchRoute.useLoaderData()
-  return <Workbench queue={queue} />
-}
+const encounterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/encounters/$encounterId',
+  loader: async ({ params }) => {
+    const [queue, encounter] = await Promise.all([fetchGoldenCaseQueue(), fetchEncounter(params.encounterId)])
+    return { queue, encounter }
+  },
+  component: function EncounterRoute() {
+    const { queue, encounter } = encounterRoute.useLoaderData()
+    return <Workbench queue={queue} focus={{ kind: 'encounter', encounter }} />
+  },
+  errorComponent: WorkbenchLoadError,
+})
 
 function WorkbenchLoadError({ error }: ErrorComponentProps) {
   return (
@@ -34,7 +57,7 @@ function WorkbenchLoadError({ error }: ErrorComponentProps) {
   )
 }
 
-const routeTree = rootRoute.addChildren([workbenchRoute])
+const routeTree = rootRoute.addChildren([workbenchRoute, encounterRoute])
 
 export function createAppRouter(options: { history?: RouterHistory } = {}) {
   return createRouter({ routeTree, history: options.history })

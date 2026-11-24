@@ -12,6 +12,28 @@ const MIGRATIONS: readonly string[] = [
      registered_at TEXT NOT NULL,
      visit_kind TEXT NOT NULL CHECK (visit_kind IN ('first', 'return'))
    );`,
+  // Encounters keep the browser-visible chart they started with, so later case-pack edits don't rewrite them.
+  // The partial unique index makes "one active Encounter per workspace" a storage invariant too.
+  `CREATE TABLE encounter (
+     encounter_id TEXT PRIMARY KEY,
+     case_id TEXT NOT NULL,
+     case_version TEXT NOT NULL,
+     persona_version TEXT NOT NULL,
+     practitioner_id TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('active', 'abandoned', 'completed')),
+     started_at TEXT NOT NULL,
+     ended_at TEXT,
+     visible_chart TEXT NOT NULL
+   );
+   CREATE UNIQUE INDEX encounter_single_active ON encounter (status) WHERE status = 'active';
+   CREATE TABLE audit_event (
+     audit_event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     event_type TEXT NOT NULL,
+     practitioner_id TEXT NOT NULL,
+     occurred_at TEXT NOT NULL
+   );
+   CREATE INDEX audit_event_by_encounter ON audit_event (encounter_id, audit_event_id);`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {
