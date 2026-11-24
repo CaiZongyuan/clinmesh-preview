@@ -1,0 +1,52 @@
+{
+  "referenceRepository": "https://github.com/CaiZongyuan/clinmesh",
+  "referenceCommit": "8d5b4069249f17747353fb484f7ae959700bbd49",
+  "policy": "Pinned snapshots copied into this repository. Nothing is imported from the reference repository at build time or runtime.",
+  "snapshots": [
+    {
+      "target": "data/golden-cases/outpatient-golden-case-pack.json",
+      "snapshotAt": "2026-11-24",
+      "kind": "authored-following-reference-schema",
+      "sources": [
+        {
+          "path": "apps/server/src/application/scenario-data/authored-case-pack-compiler.ts",
+          "used": "Authored Case Pack shape: pack { id, name, nameEn, version, cases }; case { id, title, titleEn, recommendedEntry, indexDateTime, chiefComplaint, patient, persona { version, content }, visibleHistory, indexConditions, laboratories }; lab observation { id, codings, value, unit, unitDisplay, interpretation, referenceRange }."
+        },
+        {
+          "path": "packages/contracts/src/scenario.ts",
+          "used": "patientPersonaContentSchema fields (chiefComplaint, openingStatement, knownHistorySummary, symptomExperience, medicationMemory, persona { character, speechStyle, healthLiteracy, attitude })."
+        },
+        {
+          "path": "apps/server/src/application/scenario-data/cardiorenal-authored-case-pack.ts",
+          "used": "Coding systems (ICD-10, LOINC 2.83, WS/T 886-2026) and the WBC, RBC, hemoglobin and platelet codings copied verbatim; visible-history medication entry style for amlodipine."
+        },
+        {
+          "path": "prototypes/copilot-workbench/workbench-prototype.html",
+          "repository": "this repository",
+          "used": "Golden Case 1 clinical content: patient, queue registration, allergy, visible history, persona replies, Physical Examination findings, laboratory and imaging results, scripted Report amendments and debrief reference."
+        }
+      ],
+      "notes": [
+        "The reference repository has no community-acquired pneumonia case at this commit, so Golden Case 1 is authored here following its schema.",
+        "Fields added beyond the reference schema, per the Phase 1 spec: registration, triage, allergies, physicalExamination, laboratories[].catalogItem, textResults, reportAmendments, debriefReference.",
+        "Reference fields omitted as inpatient/PCI-specific: plannedStentCount, angiography, ttes, ecgs.",
+        "LOINC codings for neutrophil %, lymphocyte %, CRP and procalcitonin are authored here, not copied."
+      ]
+    },
+    {
+      "target": "src/web/styles/clinmesh-tokens.css",
+      "snapshotAt": "2026-11-24",
+      "kind": "copied",
+      "sources": [
+        {
+          "path": "packages/ui/src/styles.css",
+          "used": ":root and .dark color tokens (background through ring), --radius, --font-ui and --font-code fallbacks, and --clinmesh-glow."
+        }
+      ],
+      "notes": [
+        "Light and dark values are folded into light-dark() pairs; the dsw design-system variable indirection is dropped and its fallback values kept.",
+        "Sidebar, chart and font-scale tokens are not copied yet."
+      ]
+    }
+  ]
+}

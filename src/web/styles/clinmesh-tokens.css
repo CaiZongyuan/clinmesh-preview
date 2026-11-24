@@ -1,0 +1,46 @@
+/*
+  Pinned snapshot of the reference repo's shadcn-style token set, see data/provenance.json.
+  Values are copied as-is; light and dark are folded into light-dark() so one declaration covers both themes.
+*/
+:root {
+  color-scheme: light dark;
+  --font-ui: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --radius: 0.5rem;
+
+  --background: light-dark(#f5f6f7, #151517);
+  --foreground: light-dark(#0f1115, #f9fafb);
+  --card: light-dark(#ffffff, #232324);
+  --card-foreground: light-dark(#0f1115, #f9fafb);
+  --popover: light-dark(#ffffff, #353638);
+  --popover-foreground: light-dark(#0f1115, #f9fafb);
+  --primary: light-dark(#0f1115, #f9fafb);
+  --primary-foreground: light-dark(#ffffff, #151517);
+  --secondary: light-dark(#ebeef2, #43454a);
+  --secondary-foreground: light-dark(#0f1115, #f9fafb);
+  --muted: light-dark(#f5f6f7, #2c2c2e);
+  --muted-foreground: light-dark(#61666b, #cfd3d6);
+  --accent: light-dark(#e9f0fc, #24344c);
+  --accent-foreground: light-dark(#175fb8, #a7caff);
+  --destructive: light-dark(#b4232c, #ff9b9b);
+  --destructive-foreground: light-dark(#ffffff, #151517);
+  --success: light-dark(#187442, #7ddba4);
+  --success-foreground: light-dark(#ffffff, #151517);
+  --warning: light-dark(#875b0c, #f4ca7b);
+  --warning-foreground: light-dark(#ffffff, #151517);
+  /* info blue is reserved for Clinical Copilot involvement. */
+  --info: light-dark(#1764c0, #8dbbff);
+  --info-foreground: light-dark(#ffffff, #151517);
+  --border: light-dark(#dce0e5, #ffffff1f);
+  --input: light-dark(#7e8793, #848b96);
+  --ring: var(--info);
+  --clinmesh-glow: 0 0 0 1.5px color-mix(in srgb, var(--info) 35%, transparent), 0 0 16px color-mix(in srgb, var(--info) 16%, transparent);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
