@@ -1,0 +1,7 @@
+allowBuilds:
+  esbuild: true
+  workerd: true
+minimumReleaseAgeExclude:
+  # ui-sdk 0.1.0-beta.16 is the version AGENTS.md and the spec target; it is younger than the 24h release-age window.
+  - '@ui-sdk/core@0.1.0-beta.16'
+  - '@ui-sdk/react@0.1.0-beta.16'

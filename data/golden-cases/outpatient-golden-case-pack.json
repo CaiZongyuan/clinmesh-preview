@@ -1,0 +1,222 @@
+{
+  "id": "clinmesh-preview-outpatient-golden-cases",
+  "name": "ClinMesh Preview 门诊 Golden Case",
+  "nameEn": "ClinMesh Preview outpatient Golden Cases",
+  "version": "2026-11-24.1",
+  "cases": [
+    {
+      "id": "golden-case-01",
+      "title": "病例① 社区获得性肺炎伴青霉素过敏性休克史",
+      "titleEn": "Case 1: Community-acquired pneumonia with penicillin anaphylaxis history",
+      "recommendedEntry": "outpatient",
+      "indexDateTime": "2026-11-24T08:31:00+08:00",
+      "chiefComplaint": "发热、咳嗽 3 天",
+      "patient": {
+        "id": "golden-patient-01",
+        "name": "李建国",
+        "birthDate": "1968-05-16",
+        "gender": "male"
+      },
+      "registration": {
+        "queueNumber": 7,
+        "outpatientNumber": "20261124-0007",
+        "registeredAt": "2026-11-24T08:31:00+08:00",
+        "visitKind": "first",
+        "department": "全科医学科门诊",
+        "insurance": "城镇职工医保"
+      },
+      "triage": {
+        "level": 3,
+        "vitals": {
+          "temperatureCelsius": 38.6,
+          "pulseBpm": 102,
+          "respiratoryRatePerMin": 22,
+          "systolicMmHg": 138,
+          "diastolicMmHg": 84,
+          "spo2Percent": 94
+        }
+      },
+      "allergies": [
+        {
+          "id": "penicillin-anaphylaxis",
+          "agent": "青霉素",
+          "drugClass": "penicillin",
+          "reaction": "过敏性休克",
+          "onset": "2015-06",
+          "source": "急诊抢救记录"
+        }
+      ],
+      "visibleHistory": [
+        {
+          "id": "htn-follow-up-2024",
+          "encounterDateTime": "2024-03-12T09:10:00+08:00",
+          "reasonText": "高血压复诊",
+          "conditions": [
+            { "id": "htn", "system": "http://hl7.org/fhir/sid/icd-10", "code": "I10", "display": "原发性高血压", "note": "2014 年起病，规律服药，控制可。" }
+          ],
+          "medications": [
+            { "id": "amlodipine", "system": "urn:clinmesh:reference:drug-concept", "code": "CM-DRUG-AMLODIPINE-5MG-ORAL-TABLET", "display": "苯磺酸氨氯地平片", "dosageText": "5 mg 每日一次 口服" }
+          ],
+          "observations": []
+        },
+        {
+          "id": "urti-2023",
+          "encounterDateTime": "2023-11-02T10:20:00+08:00",
+          "reasonText": "咽痛流涕 2 天",
+          "conditions": [
+            { "id": "urti", "system": "http://hl7.org/fhir/sid/icd-10", "code": "J06.9", "display": "急性上呼吸道感染" }
+          ],
+          "medications": [],
+          "observations": []
+        },
+        {
+          "id": "penicillin-anaphylaxis-2015",
+          "encounterDateTime": "2015-06-02T15:40:00+08:00",
+          "reasonText": "注射青霉素后呼吸困难、血压下降（急诊科）",
+          "conditions": [
+            { "id": "drug-anaphylaxis", "system": "http://hl7.org/fhir/sid/icd-10", "code": "T88.6", "display": "药物过敏性休克", "note": "肾上腺素抢救后好转。" }
+          ],
+          "medications": [],
+          "observations": []
+        }
+      ],
+      "persona": {
+        "version": "golden-case-01-persona-v1",
+        "content": {
+          "chiefComplaint": "这三天一直发烧、咳嗽，晚上咳得睡不好。",
+          "openingStatement": "医生，我这三天一直发烧，咳嗽得厉害，晚上都睡不好。",
+          "knownHistorySummary": "高血压十来年，一直吃氨氯地平，血压还算稳。青霉素过敏，2015 年打针后休克过一次，抢救过来的。烟抽了三十年，一天差不多一包，酒不怎么喝。",
+          "symptomExperience": "最高烧到三十九度多，吃了退烧药能降一点，过几个钟头又上来，还怕冷打寒战。有痰，黄的、挺黏，今天早上还有点铁锈色。咳嗽的时候右边胸口扯着疼，爬两层楼就喘。",
+          "medicationMemory": "每天早上吃一片氨氯地平；这几天自己吃过退烧药，没吃别的药。",
+          "persona": {
+            "character": "朴实、有点着急",
+            "speechStyle": "口语化，回答简短直接",
+            "healthLiteracy": "普通",
+            "attitude": "配合，担心是不是严重了"
+          }
+        }
+      },
+      "indexConditions": [
+        { "id": "cap", "system": "http://hl7.org/fhir/sid/icd-10", "code": "J18.9", "display": "社区获得性肺炎", "note": "右下叶；CURB-65 0 分（尿素未测），可门诊治疗。" },
+        { "id": "htn", "system": "http://hl7.org/fhir/sid/icd-10", "code": "I10", "display": "原发性高血压" },
+        { "id": "penicillin-allergy", "system": "http://hl7.org/fhir/sid/icd-10", "code": "Z88.0", "display": "青霉素过敏个人史" }
+      ],
+      "physicalExamination": {
+        "vitals": "T 38.6℃，P 102 次/分，R 22 次/分，BP 138/84 mmHg，SpO₂ 94%（未吸氧）",
+        "general": "神志清，急性病容，对答切题",
+        "pharynx": "咽部轻度充血，扁桃体无肿大",
+        "lungs": "右下肺呼吸音减低，可闻及湿性啰音；左肺呼吸音清",
+        "heart": "心率 102 次/分，律齐，各瓣膜区未闻及杂音",
+        "abdomen": "腹软，无压痛及反跳痛"
+      },
+      "laboratories": [
+        {
+          "id": "cbc-wbc", "catalogItem": "cbc",
+          "codings": [
+            { "code": "0100101A", "display": "白细胞计数", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
+            { "code": "6690-2", "display": "Leukocytes [#/volume] in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" }
+          ],
+          "value": 14.2, "unit": "10*9/L", "unitDisplay": "×10⁹/L", "interpretation": "H",
+          "referenceRange": { "low": 3.5, "high": 9.5, "text": "3.5–9.5" }
+        },
+        {
+          "id": "cbc-neut-pct", "catalogItem": "cbc",
+          "codings": [ { "code": "770-8", "display": "Neutrophils/100 leukocytes in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" } ],
+          "value": 86.1, "unit": "%", "interpretation": "H",
+          "referenceRange": { "low": 40, "high": 75, "text": "40–75" }
+        },
+        {
+          "id": "cbc-lym-pct", "catalogItem": "cbc",
+          "codings": [ { "code": "736-9", "display": "Lymphocytes/100 leukocytes in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" } ],
+          "value": 9.2, "unit": "%", "interpretation": "L",
+          "referenceRange": { "low": 20, "high": 50, "text": "20–50" }
+        },
+        {
+          "id": "cbc-rbc", "catalogItem": "cbc",
+          "codings": [
+            { "code": "0100201A", "display": "红细胞计数", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
+            { "code": "789-8", "display": "Erythrocytes [#/volume] in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" }
+          ],
+          "value": 4.82, "unit": "10*12/L", "unitDisplay": "×10¹²/L", "interpretation": "N",
+          "referenceRange": { "low": 4.3, "high": 5.8, "text": "4.3–5.8" }
+        },
+        {
+          "id": "cbc-hgb", "catalogItem": "cbc",
+          "codings": [
+            { "code": "0100401A", "display": "血红蛋白测定", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
+            { "code": "718-7", "display": "Hemoglobin [Mass/volume] in Blood", "system": "http://loinc.org", "version": "2.83" }
+          ],
+          "value": 142, "unit": "g/L", "interpretation": "N",
+          "referenceRange": { "low": 130, "high": 175, "text": "130–175" }
+        },
+        {
+          "id": "cbc-plt", "catalogItem": "cbc",
+          "codings": [
+            { "code": "0100301A", "display": "血小板计数", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
+            { "code": "777-3", "display": "Platelets [#/volume] in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" }
+          ],
+          "value": 236, "unit": "10*9/L", "unitDisplay": "×10⁹/L", "interpretation": "N",
+          "referenceRange": { "low": 125, "high": 350, "text": "125–350" }
+        },
+        {
+          "id": "crp", "catalogItem": "crp",
+          "codings": [ { "code": "1988-5", "display": "C reactive protein [Mass/volume] in Serum or Plasma", "system": "http://loinc.org", "version": "2.83" } ],
+          "value": 86, "unit": "mg/L", "interpretation": "H",
+          "referenceRange": { "low": 0, "high": 8, "text": "0–8" }
+        },
+        {
+          "id": "pct", "catalogItem": "pct",
+          "codings": [ { "code": "33959-8", "display": "Procalcitonin [Mass/volume] in Serum or Plasma", "system": "http://loinc.org", "version": "2.83" } ],
+          "value": 0.82, "unit": "ng/mL", "interpretation": "H",
+          "referenceRange": { "low": 0, "high": 0.05, "text": "0–0.05" }
+        }
+      ],
+      "textResults": [
+        {
+          "id": "cxr", "catalogItem": "cxr",
+          "findings": "右肺下叶见斑片状实变影，边界模糊；左肺清晰；右肋膈角锐利，心影不大。",
+          "impression": "右下肺炎。"
+        },
+        {
+          "id": "chest-ct", "catalogItem": "chest-ct",
+          "findings": "右肺下叶后基底段大片状实变影，内见支气管充气征，周围少许磨玻璃影；纵隔淋巴结不大；双侧胸腔未见积液。",
+          "impression": "右肺下叶肺炎。"
+        }
+      ],
+      "reportAmendments": [
+        {
+          "catalogItem": "cbc",
+          "reason": "仪器复核后更正",
+          "laboratoryOverrides": [
+            { "id": "cbc-wbc", "value": 15.0 },
+            { "id": "cbc-neut-pct", "value": 87.4 },
+            { "id": "cbc-lym-pct", "value": 8.8 }
+          ]
+        },
+        {
+          "catalogItem": "crp",
+          "reason": "原标本溶血，复测更正",
+          "laboratoryOverrides": [ { "id": "crp", "value": 112 } ]
+        },
+        {
+          "catalogItem": "cxr",
+          "reason": "上级医师审核补充",
+          "textOverride": {
+            "findings": "右肺下叶实变影，内见少量支气管充气征；余同前。",
+            "impression": "右下肺炎（修订版）。"
+          }
+        }
+      ],
+      "debriefReference": {
+        "primaryDiagnosis": "J18.9 社区获得性肺炎（右下叶）",
+        "secondaryDiagnoses": "原发性高血压；青霉素过敏个人史",
+        "keyInvestigations": "血常规、CRP、胸部 X 线（PCT 可选）",
+        "keyExamination": "右下肺呼吸音减低伴湿啰音",
+        "medicationConclusion": "莫西沙星或多西环素；避开青霉素类",
+        "keyHistoryQuestions": "青霉素过敏性休克；吸烟 30 年",
+        "severityAssessment": "CURB-65 0 分，可门诊治疗",
+        "disposition": "门诊治疗，72 小时复诊"
+      }
+    }
+  ]
+}
