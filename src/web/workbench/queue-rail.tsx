@@ -5,15 +5,11 @@ import type { GoldenCaseQueueEntry, QueueStatus } from '../../shared/golden-case
 
 export const CLINIC_DEPARTMENT = '全科医学科门诊'
 
-const QUEUE_GROUPS: ReadonlyArray<{ status: QueueStatus; label: string }> = [
-  { status: 'in-consultation', label: '在诊' },
-  { status: 'waiting', label: '待诊' },
-  { status: 'completed', label: '完诊' },
-]
+const QUEUE_GROUPS: readonly QueueStatus[] = ['in-consultation', 'waiting', 'completed']
+const STATUS_LABEL: Record<QueueStatus, string> = { 'in-consultation': '在诊', waiting: '待诊', completed: '完诊' }
 
 const SEX_LABEL = { male: '男', female: '女' } as const
 const VISIT_KIND_LABEL = { first: '初诊', return: '复诊' } as const
-const STATUS_LABEL = Object.fromEntries(QUEUE_GROUPS.map((g) => [g.status, g.label])) as Record<QueueStatus, string>
 
 const registrationClock = new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
@@ -23,6 +19,11 @@ const registrationClock = new Intl.DateTimeFormat('zh-CN', {
 })
 
 export function QueueRail({ queue }: { queue: GoldenCaseQueueEntry[] }) {
+  const groups = QUEUE_GROUPS.map((status) => ({
+    status,
+    label: STATUS_LABEL[status],
+    entries: queue.filter((e) => e.queueStatus === status),
+  }))
   const initialGroup = queue.some((e) => e.queueStatus === 'in-consultation') ? 'in-consultation' : 'waiting'
   return (
     <nav aria-label="候诊队列" className="flex w-[52px] flex-none flex-col items-center gap-2 pr-2">
@@ -34,33 +35,28 @@ export function QueueRail({ queue }: { queue: GoldenCaseQueueEntry[] }) {
           <UsersIcon aria-hidden="true" size={16} />
         </PopoverTrigger>
         <PopoverContent side="right" align="start" className="w-[300px] p-2">
-          <div className="flex items-center justify-between px-1 pb-1.5">
-            <PopoverTitle className="m-0 text-xs font-semibold">候诊队列 · {CLINIC_DEPARTMENT}</PopoverTitle>
-          </div>
+          <PopoverTitle className="m-0 px-1 pb-1.5 text-xs font-semibold">候诊队列 · {CLINIC_DEPARTMENT}</PopoverTitle>
           <Tabs defaultValue={initialGroup}>
             <TabsList aria-label="候诊分组" className="grid w-full grid-cols-3">
-              {QUEUE_GROUPS.map((group) => (
+              {groups.map((group) => (
                 <TabsTab key={group.status} value={group.status}>
-                  {group.label} {queue.filter((e) => e.queueStatus === group.status).length}
+                  {group.label} {group.entries.length}
                 </TabsTab>
               ))}
             </TabsList>
-            {QUEUE_GROUPS.map((group) => {
-              const entries = queue.filter((e) => e.queueStatus === group.status)
-              return (
-                <TabsPanel key={group.status} value={group.status} className="pt-1">
-                  {entries.length === 0 ? (
-                    <p className="m-0 p-3 text-center text-xs text-muted-foreground">暂无</p>
-                  ) : (
-                    <ol aria-label={`${group.label}患者`} className="m-0 flex list-none flex-col gap-1 p-0">
-                      {entries.map((entry) => (
-                        <QueueEntryRow key={entry.caseId} entry={entry} />
-                      ))}
-                    </ol>
-                  )}
-                </TabsPanel>
-              )
-            })}
+            {groups.map((group) => (
+              <TabsPanel key={group.status} value={group.status} className="pt-1">
+                {group.entries.length === 0 ? (
+                  <p className="m-0 p-3 text-center text-xs text-muted-foreground">暂无</p>
+                ) : (
+                  <ol aria-label={`${group.label}患者`} className="m-0 flex list-none flex-col gap-1 p-0">
+                    {group.entries.map((entry) => (
+                      <QueueEntryRow key={entry.caseId} entry={entry} />
+                    ))}
+                  </ol>
+                )}
+              </TabsPanel>
+            ))}
           </Tabs>
           <p className="m-0 border-t px-1 pt-2 text-[11px] text-muted-foreground">
             叫号、过号与转诊不在 Phase 1 范围内；一次只能有一个进行中的就诊。

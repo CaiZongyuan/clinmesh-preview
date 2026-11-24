@@ -10,7 +10,6 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts"

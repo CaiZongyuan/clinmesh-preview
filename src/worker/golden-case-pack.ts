@@ -3,7 +3,6 @@ import type { Sex, VisitKind } from '../shared/golden-case-queue'
 
 export interface GoldenCaseRegistration {
   caseId: string
-  casePackVersion: string
   queueNumber: number
   patientName: string
   sex: Sex
@@ -17,7 +16,6 @@ export interface GoldenCaseRegistration {
 export function goldenCaseRegistrations(): GoldenCaseRegistration[] {
   return casePack.cases.map((goldenCase) => ({
     caseId: goldenCase.id,
-    casePackVersion: casePack.version,
     queueNumber: goldenCase.registration.queueNumber,
     patientName: goldenCase.patient.name,
     sex: goldenCase.patient.gender as Sex,

@@ -19,7 +19,6 @@ export class GoldenCaseRepository {
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS golden_case (
         case_id TEXT PRIMARY KEY,
-        case_pack_version TEXT NOT NULL,
         queue_number INTEGER NOT NULL UNIQUE,
         patient_name TEXT NOT NULL,
         sex TEXT NOT NULL CHECK (sex IN ('male', 'female')),
@@ -34,10 +33,10 @@ export class GoldenCaseRepository {
   seed(registrations: readonly GoldenCaseRegistration[]): void {
     for (const r of registrations) {
       this.sql.exec(
-        `INSERT INTO golden_case (case_id, case_pack_version, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO golden_case (case_id, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (case_id) DO NOTHING`,
-        r.caseId, r.casePackVersion, r.queueNumber, r.patientName, r.sex, r.birthDate, r.chiefComplaint, r.registeredAt, r.visitKind,
+        r.caseId, r.queueNumber, r.patientName, r.sex, r.birthDate, r.chiefComplaint, r.registeredAt, r.visitKind,
       )
     }
   }
