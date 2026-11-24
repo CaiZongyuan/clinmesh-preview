@@ -7,7 +7,7 @@ import {
   type ErrorComponentProps,
   type RouterHistory,
 } from '@tanstack/react-router'
-import { fetchActiveEncounter, fetchEncounter, fetchGoldenCaseQueue } from './api'
+import { fetchActiveEncounter, fetchEncounter, fetchGoldenCaseQueue, fetchPhysicalExaminations } from './api'
 import { Workbench } from './workbench/workbench'
 
 const rootRoute = createRootRoute({ component: Outlet })
@@ -37,12 +37,16 @@ const encounterRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/encounters/$encounterId',
   loader: async ({ params }) => {
-    const [queue, encounter] = await Promise.all([fetchGoldenCaseQueue(), fetchEncounter(params.encounterId)])
-    return { queue, encounter }
+    const [queue, encounter, examinations] = await Promise.all([
+      fetchGoldenCaseQueue(),
+      fetchEncounter(params.encounterId),
+      fetchPhysicalExaminations(params.encounterId),
+    ])
+    return { queue, encounter, examinations }
   },
   component: function EncounterRoute() {
-    const { queue, encounter } = encounterRoute.useLoaderData()
-    return <Workbench queue={queue} focus={{ kind: 'encounter', encounter }} />
+    const { queue, encounter, examinations } = encounterRoute.useLoaderData()
+    return <Workbench queue={queue} focus={{ kind: 'encounter', encounter, examinations }} />
   },
   errorComponent: WorkbenchLoadError,
 })

@@ -1,6 +1,7 @@
 import { exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import type { AuditEventsResponse, EncounterResponse, ErrorResponse } from '../../src/shared/encounter'
+import type { PhysicalExaminationsResponse } from '../../src/shared/physical-examination'
 import { app } from '../../src/worker/app'
 
 const api = (path: string, init?: RequestInit) => exports.default.fetch(`http://clinmesh.test${path}`, init)
@@ -15,6 +16,8 @@ const send = (method: string, path: string, body?: unknown) =>
 // A new write route under /api/encounters/:encounterId fails the first test until it is listed here.
 const writeProbes: Record<string, (encounterId: string) => Promise<Response>> = {
   'POST /api/encounters/:encounterId/abandonment': (id) => send('POST', `/api/encounters/${id}/abandonment`),
+  'POST /api/encounters/:encounterId/physical-examinations': (id) =>
+    send('POST', `/api/encounters/${id}/physical-examinations`, { system: 'vitals' }),
 }
 
 const isEncounterWrite = (route: { method: string; path: string }) =>
@@ -34,6 +37,8 @@ describe('frozen Encounters', () => {
     const read = async () => ({
       encounter: ((await (await api(`/api/encounters/${encounterId}`)).json()) as EncounterResponse).encounter,
       audit: ((await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents,
+      examinations: ((await (await api(`/api/encounters/${encounterId}/physical-examinations`)).json()) as PhysicalExaminationsResponse)
+        .examinations,
     })
     const frozen = await read()
     expect(frozen.encounter.status).toBe('abandoned')

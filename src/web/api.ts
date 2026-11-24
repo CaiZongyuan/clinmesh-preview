@@ -1,5 +1,11 @@
 import type { ActiveEncounterResponse, EncounterResponse, EncounterView, ErrorResponse } from '../shared/encounter'
 import type { GoldenCaseQueueEntry, GoldenCaseQueueResponse } from '../shared/golden-case-queue'
+import type {
+  BodySystem,
+  PhysicalExaminationResponse,
+  PhysicalExaminationsResponse,
+  PhysicalExaminationView,
+} from '../shared/physical-examination'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
@@ -35,4 +41,14 @@ export async function startEncounter(caseId: string): Promise<EncounterView> {
 export async function abandonEncounter(encounterId: string): Promise<EncounterView> {
   const path = `/api/encounters/${encodeURIComponent(encounterId)}/abandonment`
   return (await request<EncounterResponse>(path, post())).encounter
+}
+
+const physicalExaminationsPath = (encounterId: string) => `/api/encounters/${encodeURIComponent(encounterId)}/physical-examinations`
+
+export async function fetchPhysicalExaminations(encounterId: string): Promise<PhysicalExaminationView[]> {
+  return (await request<PhysicalExaminationsResponse>(physicalExaminationsPath(encounterId))).examinations
+}
+
+export async function performPhysicalExamination(encounterId: string, system: BodySystem): Promise<PhysicalExaminationView> {
+  return (await request<PhysicalExaminationResponse>(physicalExaminationsPath(encounterId), post({ system }))).examination
 }

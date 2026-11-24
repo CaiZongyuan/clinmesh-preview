@@ -3,6 +3,7 @@ import { Button } from '@ui-sdk/react/button'
 import { useState, type ReactNode } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
+import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { startEncounter } from '../api'
 import { AbandonEncounter } from './abandon-encounter'
 import { formatClock, SEX_LABEL, VISIT_KIND_LABEL } from './format'
@@ -11,7 +12,7 @@ import { PatientBanner } from './patient-banner'
 import type { CaseFocus } from './workbench'
 
 export function CaseWorkspace({ focus }: { focus: CaseFocus }) {
-  if (focus.kind === 'encounter') return <EncounterWorkspace encounter={focus.encounter} />
+  if (focus.kind === 'encounter') return <EncounterWorkspace encounter={focus.encounter} examinations={focus.examinations} />
   return (
     <main aria-label="病例工作区" className={pane}>
       <div className={paneHeader}>
@@ -59,10 +60,10 @@ function Registration({ entry }: { entry: GoldenCaseQueueEntry }) {
   )
 }
 
-function EncounterWorkspace({ encounter }: { encounter: EncounterView }) {
+function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterView; examinations: PhysicalExaminationView[] }) {
   return (
     <main aria-label="病例工作区" className={pane}>
-      <PatientBanner encounter={encounter} />
+      <PatientBanner encounter={encounter} examinedVitals={examinations.find((e) => e.system === 'vitals')} />
       {encounter.status === 'abandoned' && <AbandonedNotice caseId={encounter.caseId} />}
       <div className={`${paneBody} grid place-items-center`}>
         <p className="m-0 p-6 text-center text-[13px] text-muted-foreground">

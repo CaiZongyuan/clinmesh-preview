@@ -34,6 +34,16 @@ const MIGRATIONS: readonly string[] = [
      occurred_at TEXT NOT NULL
    );
    CREATE INDEX audit_event_by_encounter ON audit_event (encounter_id, audit_event_id);`,
+  // The primary key makes "each body system once per Encounter" a storage invariant. The finding is kept as revealed.
+  `CREATE TABLE physical_examination (
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     body_system TEXT NOT NULL CHECK (body_system IN ('vitals', 'general', 'pharynx', 'lungs', 'heart', 'abdomen')),
+     finding TEXT NOT NULL,
+     vitals TEXT,
+     practitioner_id TEXT NOT NULL,
+     examined_at TEXT NOT NULL,
+     PRIMARY KEY (encounter_id, body_system)
+   );`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

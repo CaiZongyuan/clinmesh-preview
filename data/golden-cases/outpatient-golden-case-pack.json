@@ -2,7 +2,7 @@
   "id": "clinmesh-preview-outpatient-golden-cases",
   "name": "ClinMesh Preview 门诊 Golden Case",
   "nameEn": "ClinMesh Preview outpatient Golden Cases",
-  "version": "2026-11-24.3",
+  "version": "2026-11-24.4",
   "cases": [
     {
       "id": "golden-case-01",
@@ -109,7 +109,15 @@
         { "id": "penicillin-allergy", "system": "http://hl7.org/fhir/sid/icd-10", "code": "Z88.0", "display": "青霉素过敏个人史" }
       ],
       "physicalExamination": {
-        "vitals": "T 38.6℃，P 102 次/分，R 22 次/分，BP 138/84 mmHg，SpO₂ 94%（未吸氧）",
+        "vitals": {
+          "temperatureCelsius": 38.6,
+          "pulseBpm": 102,
+          "respiratoryRatePerMin": 22,
+          "systolicMmHg": 138,
+          "diastolicMmHg": 84,
+          "spo2Percent": 94,
+          "spo2Condition": "未吸氧"
+        },
         "general": "神志清，急性病容，对答切题",
         "pharynx": "咽部轻度充血，扁桃体无肿大",
         "lungs": "右下肺呼吸音减低，可闻及湿性啰音；左肺呼吸音清",

@@ -147,7 +147,7 @@ describe('patient banner', () => {
     }
     const labels = components.map((entry) => entry.label)
     expect(new Set(labels).size, `duplicate names in ${labels.join(', ')}`).toBe(labels.length)
-    for (const label of ['7 号 李建国 · 在诊', '复制门诊号', '健康档案', '放弃就诊']) {
+    for (const label of ['7 号 李建国 · 在诊', '复制门诊号', '健康档案', '放弃就诊', '查体：生命体征', '查体：腹部']) {
       expect(labels, `${label} is missing from the snapshot`).toContain(label)
     }
   })

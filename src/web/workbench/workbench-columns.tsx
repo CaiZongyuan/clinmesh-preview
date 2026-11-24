@@ -6,7 +6,7 @@ import {
   type ResizableStorage,
 } from '@ui-sdk/react/resizable'
 import { useState, type MouseEvent, type ReactNode } from 'react'
-import { ConsultationColumn, ConsultationStrip } from './consultation-column'
+import { ConsultationColumn, ConsultationStrip, type EncounterContext } from './consultation-column'
 import { CopilotPanel } from './copilot-panel'
 
 const WORKBENCH_LAYOUT_KEY = 'clinmesh.workbench.columns'
@@ -30,7 +30,7 @@ const browserLayoutStorage: ResizableStorage = {
   },
 }
 
-export function WorkbenchColumns({ caseWorkspace }: { caseWorkspace: ReactNode }) {
+export function WorkbenchColumns({ caseWorkspace, encounter }: { caseWorkspace: ReactNode; encounter?: EncounterContext }) {
   const [columns] = useState(createResizableController)
 
   const resetConsultation = (event: MouseEvent) => {
@@ -63,7 +63,7 @@ export function WorkbenchColumns({ caseWorkspace }: { caseWorkspace: ReactNode }
           collapsed ? (
             <ConsultationStrip onExpand={() => columns.expand(CONSULTATION.id)} />
           ) : (
-            <ConsultationColumn onCollapse={() => columns.collapse(CONSULTATION.id)} />
+            <ConsultationColumn encounter={encounter} onCollapse={() => columns.collapse(CONSULTATION.id)} />
           )
         }
       </ResizablePanel>

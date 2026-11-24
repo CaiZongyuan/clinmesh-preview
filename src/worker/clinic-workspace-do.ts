@@ -1,9 +1,11 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { EncounterView } from '../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
+import type { BodySystem } from '../shared/physical-examination'
 import { EncounterRepository, type EncounterResult } from './encounter-repository'
 import { encounterChart, goldenCaseRegistrations } from './golden-case-pack'
 import { GoldenCaseRepository } from './golden-case-repository'
+import { PhysicalExaminationRepository, type PhysicalExaminationResult } from './physical-examination-repository'
 import { migrateWorkspaceSchema } from './workspace-schema'
 
 // Phase 1 has no login: every formal write and audit event is attributed to the single demo practitioner.
@@ -12,11 +14,13 @@ const DEMO_PRACTITIONER_ID = 'demo-practitioner'
 export class ClinicWorkspaceDO extends DurableObject<Env> {
   private readonly goldenCases: GoldenCaseRepository
   private readonly encounters: EncounterRepository
+  private readonly examinations: PhysicalExaminationRepository
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.goldenCases = new GoldenCaseRepository(ctx.storage.sql)
     this.encounters = new EncounterRepository(ctx.storage.sql)
+    this.examinations = new PhysicalExaminationRepository(ctx.storage.sql, this.encounters)
     ctx.blockConcurrencyWhile(async () => {
       ctx.storage.transactionSync(() => {
         migrateWorkspaceSchema(ctx.storage.sql)
@@ -55,5 +59,15 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
 
   listAuditEvents(encounterId: string) {
     return this.encounters.auditEvents(encounterId)
+  }
+
+  performPhysicalExamination(encounterId: string, system: BodySystem): PhysicalExaminationResult {
+    return this.ctx.storage.transactionSync(() =>
+      this.examinations.perform(encounterId, system, DEMO_PRACTITIONER_ID, new Date().toISOString()),
+    )
+  }
+
+  listPhysicalExaminations(encounterId: string) {
+    return this.examinations.list(encounterId)
   }
 }
