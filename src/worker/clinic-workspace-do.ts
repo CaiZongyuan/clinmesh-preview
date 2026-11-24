@@ -218,7 +218,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
         await this.env.SIMULATED_PATIENT.getByName(encounterId).beginReply(request)
       } catch (error) {
         console.error('Simulated Patient unavailable', error)
-        this.ctx.storage.transactionSync(() => this.consultation.failPending(encounterId, 'patient-unavailable', new Date()))
+        this.ctx.storage.transactionSync(() => this.consultation.failIfPending(request.patientTurnId, 'patient-unavailable', new Date()))
       }
     }
     return { ok: true, doctorTurn: exchange.doctorTurn, patientTurn: this.consultation.find(exchange.patientTurn.turnId)! }

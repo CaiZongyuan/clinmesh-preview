@@ -117,10 +117,16 @@ export class ConsultationRepository {
     return true
   }
 
-  // The workspace fails a waiting reply itself: the Encounter ended, or the Simulated Patient could not be reached.
+  // The workspace fails a waiting reply itself because the Encounter ended.
   failPending(encounterId: string, failure: PatientTurnFailure, now: Date): void {
     const turn = this.pending(encounterId)
     if (turn) this.fail(turn.turnId, failure, now, 'workspace')
+  }
+
+  // The workspace fails one reply itself (the Simulated Patient could not be reached), only while it still waits:
+  // by the time a dispatch error surfaces, that reply may have settled and another may be pending.
+  failIfPending(patientTurnId: string, failure: PatientTurnFailure, now: Date): void {
+    if (this.find(patientTurnId)?.status === 'pending') this.fail(patientTurnId, failure, now, 'workspace')
   }
 
   find(turnId: string): ConsultationTurn | undefined {

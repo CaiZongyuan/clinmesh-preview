@@ -530,6 +530,42 @@ describe('settling patient turns', () => {
     }
   })
 
+  it('fails only the reply it dispatched when that dispatch errors late, never another pending reply', async () => {
+    const original = SimulatedPatientDO.prototype.beginReply
+    let release!: () => void
+    const lateError = new Promise<void>((resolve) => (release = resolve))
+    let calls = 0
+    // The first reply is queued, but the answer to the workspace is lost and the error surfaces only later.
+    SimulatedPatientDO.prototype.beginReply = async function (this: SimulatedPatientDO, request) {
+      await original.call(this, request)
+      if (++calls === 1) {
+        await lateError
+        throw new Error('response lost')
+      }
+    }
+    try {
+      const llm = installScripted('patient').reply(R1)
+      const gate = llm.gate('青霉素', '过敏。')
+      const encounterId = await startEncounter()
+      const first = ask(encounterId, Q1)
+      await vi.waitFor(async () => expect((await transcript(encounterId))[1]?.status).toBe('final'), { timeout: 3000, interval: 20 })
+
+      // Another browser tab asks the next question while the first request is still open.
+      const { patientTurn: second } = await asked(encounterId, Q2)
+      await gate.reached
+      release()
+      expect((await first).status).toBe(201)
+      expect((await transcript(encounterId))[3]).toMatchObject({ turnId: second.turnId, status: 'pending' })
+
+      gate.release()
+      expect(await settled(encounterId, second.turnId)).toMatchObject({ status: 'final', text: '青霉素过敏。' })
+      expect((await transcript(encounterId))[1]).toMatchObject({ status: 'final', text: R1 })
+      expect(await assistantStates(encounterId)).toEqual(['active', 'active'])
+    } finally {
+      SimulatedPatientDO.prototype.beginReply = original
+    }
+  })
+
   it('holds at most one pending patient turn per Encounter in storage, even if a command skipped the check', async () => {
     installScripted('patient').gate('我', '发烧。')
     const encounterId = await startEncounter()
