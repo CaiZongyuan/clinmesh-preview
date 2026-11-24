@@ -1,3 +1,9 @@
+import type {
+  AskPatientResponse,
+  ConsultationResponse,
+  ConsultationTurn,
+  RetryPatientTurnResponse,
+} from '../shared/consultation'
 import type { ActiveEncounterResponse, EncounterResponse, EncounterView, ErrorResponse } from '../shared/encounter'
 import type { GoldenCaseQueueEntry, GoldenCaseQueueResponse } from '../shared/golden-case-queue'
 import type {
@@ -81,4 +87,24 @@ export async function releaseInvestigationNow(encounterId: string, investigation
 export async function acknowledgeReports(encounterId: string, reportIds: string[]): Promise<InvestigationView[]> {
   const path = `/api/encounters/${encodeURIComponent(encounterId)}/report-acknowledgements`
   return (await request<InvestigationsResponse>(path, post({ reportIds }))).investigations
+}
+
+const encounterPath = (encounterId: string) => `/api/encounters/${encodeURIComponent(encounterId)}`
+
+export async function fetchConsultation(encounterId: string): Promise<ConsultationTurn[]> {
+  return (await request<ConsultationResponse>(`${encounterPath(encounterId)}/consultation`)).turns
+}
+
+export async function askPatient(encounterId: string, clientTurnId: string, text: string): Promise<AskPatientResponse> {
+  return request<AskPatientResponse>(`${encounterPath(encounterId)}/consultation/doctor-turns`, post({ clientTurnId, text }))
+}
+
+export async function retryPatientTurn(encounterId: string, turnId: string): Promise<ConsultationTurn> {
+  const path = `${encounterPath(encounterId)}/consultation/patient-turns/${encodeURIComponent(turnId)}/retry`
+  return (await request<RetryPatientTurnResponse>(path, post())).patientTurn
+}
+
+export function openPatientSocket(encounterId: string): WebSocket {
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/patient/socket`)
 }

@@ -19,3 +19,13 @@ export function formatDuration(ms: number): string {
   const mmss = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   return h > 0 ? `${h}:${mmss}` : mmss
 }
+
+const clinicClockSeconds = new Intl.DateTimeFormat('zh-CN', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'Asia/Shanghai',
+})
+
+export const formatClockSeconds = (iso: string) => clinicClockSeconds.format(new Date(iso))

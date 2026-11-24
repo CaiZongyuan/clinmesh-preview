@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
+import { SilentWebSocket } from './fake-clinic-api'
 
 declare global {
   var __UI_SDK_STRICT__: boolean | undefined
@@ -36,6 +37,11 @@ document.head.append(
     textContent: '[popover] { display: block !important }',
   }),
 )
+
+// Tests that exercise the Simulated Patient's stream stub WebSocket with the fake clinic API's socket instead.
+beforeEach(() => {
+  vi.stubGlobal('WebSocket', SilentWebSocket)
+})
 
 afterEach(() => {
   cleanup()

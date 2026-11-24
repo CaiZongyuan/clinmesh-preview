@@ -9,10 +9,22 @@
   },
   "durable_objects": {
     "bindings": [
-      { "name": "CLINIC_WORKSPACE", "class_name": "ClinicWorkspaceDO" }
+      { "name": "CLINIC_WORKSPACE", "class_name": "ClinicWorkspaceDO" },
+      { "name": "SIMULATED_PATIENT", "class_name": "SimulatedPatientDO" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["ClinicWorkspaceDO"] }
-  ]
+    { "tag": "v1", "new_sqlite_classes": ["ClinicWorkspaceDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["SimulatedPatientDO"] }
+  ],
+  // LLM_API_KEY is a secret: put it in .dev.vars locally (see README), never here.
+  "vars": {
+    "LLM_PROVIDER": "openai-compatible",
+    "LLM_BASE_URL": "https://open.bigmodel.cn/api/paas/v4",
+    "LLM_MODEL": "glm-5.3-flash",
+    "LLM_REASONING_EFFORT": "low",
+    "LLM_EFFORT_STYLE": "zhipu",
+    "PATIENT_TURN_TIMEOUT_MS": "30000",
+    "PATIENT_TURN_EXPIRY_GRACE_MS": "5000"
+  }
 }

@@ -6,6 +6,8 @@ import type { InvestigationsResponse } from '../../src/shared/investigation'
 import { app } from '../../src/worker/app'
 import { goldenCase1Chart } from '../fixtures/golden-case-1'
 import { expectNoCaseTruth, goldenCaseDenylists } from './case-truth'
+import { asked, openPatientSocket, settled } from './support/clinic'
+import { installScripted } from './support/scripted-llm'
 
 interface ProbeContext {
   caseId: string
@@ -14,6 +16,14 @@ interface ProbeContext {
   revealed: unknown[]
   releasedInvestigationId: string
   releasedReportId: string
+  failedPatientTurnId: string
+}
+
+// The frames a viewer receives on connecting, as one body to check.
+async function patientSocketFrames(encounterId: string): Promise<Response> {
+  const socket = await openPatientSocket(encounterId)
+  socket.close()
+  return new Response(socket.raw.join('\n'))
 }
 
 // The Case Truth results a released Report v1 legitimately shows for these catalog items of Golden Case 1.
@@ -59,6 +69,12 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     request('POST', `/api/encounters/${encounterId}/investigations/${releasedInvestigationId}/instant-release`),
   'POST /api/encounters/:encounterId/report-acknowledgements': ({ encounterId, releasedReportId }) =>
     request('POST', `/api/encounters/${encounterId}/report-acknowledgements`, { reportIds: [releasedReportId] }),
+  'GET /api/encounters/:encounterId/consultation': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/consultation`),
+  'GET /api/encounters/:encounterId/patient/socket': ({ encounterId }) => patientSocketFrames(encounterId),
+  'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry': ({ encounterId, failedPatientTurnId }) =>
+    request('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/retry`),
+  'POST /api/encounters/:encounterId/consultation/doctor-turns': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/consultation/doctor-turns`, { clientTurnId: 'probe', text: '晚上睡得好吗？' }),
   'POST /api/encounters/:encounterId/abandonment': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/abandonment`),
 }
@@ -158,12 +174,20 @@ describe('Case Truth isolation over HTTP', () => {
   // Golden Case 1 overrides CBC, CRP, PCT, chest X-ray and chest CT. The Encounter issues CBC, CRP and chest X-ray,
   // releases CBC and chest X-ray, leaves CRP pending and never orders PCT or chest CT.
   it('exposes only uncovered Case Truth on any route while the Encounter is active, and nothing more after Encounter Abandonment', async () => {
+    installScripted('patient')
+      .reply('医生，我这三天一直发烧，咳嗽得厉害。', { thinking: '我要按自己的感受说。' })
+      .fail(500)
+      .reply('有黄痰，挺黏的。')
+      .reply('睡不好，晚上老咳。')
     const caseId = casePack.cases[0].id
     const started = await request('POST', '/api/encounters', { caseId })
     expect(started.status).toBe(201)
     const startedBody = await started.text()
     expectNoCaseTruth('start', startedBody)
     const { encounterId } = (JSON.parse(startedBody) as EncounterResponse).encounter
+    await settled(encounterId, (await asked(encounterId, '您哪里不舒服？')).patientTurn.turnId)
+    const failed = await settled(encounterId, (await asked(encounterId, '咳嗽有痰吗？')).patientTurn.turnId)
+    expect(failed.status).toBe('failed')
 
     const issued = await request('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['cbc', 'crp', 'cxr'] })
     const issuedBody = await issued.text()
@@ -187,6 +211,7 @@ describe('Case Truth isolation over HTTP', () => {
       revealed,
       releasedInvestigationId: cbc.investigationId,
       releasedReportId: list[0].reports[0].reportId,
+      failedPatientTurnId: failed.turnId,
     }
     await probeEveryRoute(ctx, 'active Encounter')
     expect(ctx.revealed, 'the Physical Examination probe examined the vitals').toHaveLength(3)
