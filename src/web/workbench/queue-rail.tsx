@@ -5,8 +5,8 @@ import type { GoldenCaseQueueEntry, QueueStatus } from '../../shared/golden-case
 
 export const CLINIC_DEPARTMENT = '全科医学科门诊'
 
-const QUEUE_GROUPS: readonly QueueStatus[] = ['in-consultation', 'waiting', 'completed']
-const STATUS_LABEL: Record<QueueStatus, string> = { 'in-consultation': '在诊', waiting: '待诊', completed: '完诊' }
+const QUEUE_GROUPS: readonly QueueStatus[] = ['in-encounter', 'waiting', 'completed']
+const STATUS_LABEL: Record<QueueStatus, string> = { 'in-encounter': '在诊', waiting: '待诊', completed: '完诊' }
 
 const SEX_LABEL = { male: '男', female: '女' } as const
 const VISIT_KIND_LABEL = { first: '初诊', return: '复诊' } as const
@@ -24,7 +24,7 @@ export function QueueRail({ queue }: { queue: GoldenCaseQueueEntry[] }) {
     label: STATUS_LABEL[status],
     entries: queue.filter((e) => e.queueStatus === status),
   }))
-  const initialGroup = queue.some((e) => e.queueStatus === 'in-consultation') ? 'in-consultation' : 'waiting'
+  const initialGroup = queue.some((e) => e.queueStatus === 'in-encounter') ? 'in-encounter' : 'waiting'
   return (
     <nav aria-label="候诊队列" className="flex w-[52px] flex-none flex-col items-center gap-2 pr-2">
       <Popover>

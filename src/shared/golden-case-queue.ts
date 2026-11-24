@@ -1,4 +1,4 @@
-export type QueueStatus = 'in-consultation' | 'waiting' | 'completed'
+export type QueueStatus = 'in-encounter' | 'waiting' | 'completed'
 
 export type VisitKind = 'first' | 'return'
 

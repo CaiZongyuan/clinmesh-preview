@@ -2,11 +2,6 @@ allowBuilds:
   esbuild: true
   workerd: true
 minimumReleaseAgeExclude:
-  - '@cloudflare/workers-utils@0.57.0'
+  # ui-sdk 0.1.0-beta.16 is the version AGENTS.md and the spec target; it is younger than the 24h release-age window.
   - '@ui-sdk/core@0.1.0-beta.16'
   - '@ui-sdk/react@0.1.0-beta.16'
-  - hono@4.13.21
-  - miniflare@5.20261123.0-beta
-  - wrangler@4.167.0
-  - '@cloudflare/vitest-plugin@1.9.1'
-  - lucide-react@1.79.0

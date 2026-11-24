@@ -9,7 +9,7 @@ import { createAppRouter } from '../../src/web/router'
 const queueResponse: GoldenCaseQueueResponse = {
   goldenCases: [
     {
-      caseId: 'outpatient-cap-penicillin-anaphylaxis-v1',
+      caseId: 'golden-case-01',
       queueNumber: 7,
       patientName: '李建国',
       sex: 'male',
@@ -69,49 +69,89 @@ describe('outpatient workbench', () => {
     expect(screen.getByRole('tabpanel', { name: '在诊 0' })).toHaveTextContent('暂无')
   })
 
-  it('names every control so the ui-sdk agent bridge can find it', async () => {
+  it('names every control uniquely and lets the ui-sdk agent bridge collapse and expand the Consultation column', async () => {
     renderWorkbench()
     await screen.findByRole('navigation', { name: '候诊队列' })
+    expect(screen.getByRole('separator', { name: '调整问诊记录宽度' })).toBeInTheDocument()
+    expect(screen.getByRole('separator', { name: '调整临床助手宽度' })).toBeInTheDocument()
 
     const components = agent.snapshot().filter((entry) => !entry.offPage && entry.component !== 'more')
     for (const entry of components) {
       expect(entry.label, `${entry.component} ${entry.ref} has no name`).toBeTruthy()
     }
     const labels = components.map((entry) => entry.label)
+    expect(new Set(labels).size, `duplicate names in ${labels.join(', ')}`).toBe(labels.length)
     for (const label of ['打开候诊队列', '收起问诊记录', '工作台分栏']) {
       expect(labels, `${label} is missing from the snapshot`).toContain(label)
     }
+
+    const collapse = await agent.act({ steps: [{ ref: '收起问诊记录', action: 'press' }] })
+    expect(collapse.ok, collapse.error?.message).toBe(true)
+    expect(await screen.findByRole('region', { name: '问诊记录（已收起）' })).toBeInTheDocument()
+
+    const expand = await agent.act({ steps: [{ ref: '展开问诊记录', action: 'press' }] })
+    expect(expand.ok, expand.error?.message).toBe(true)
+    expect(await screen.findByRole('region', { name: '问诊记录' })).toBeInTheDocument()
   })
 
-  it('resizes columns from keyboard-operable separators and remembers a collapsed Consultation column', async () => {
+  it('resizes the Consultation column from its separator: arrow keys, End, double-click reset, Home collapses', async () => {
     const user = userEvent.setup()
-    const first = renderWorkbench()
+    renderWorkbench()
+    const handle = await screen.findByRole('separator', { name: '调整问诊记录宽度' })
+    expect(handle).toHaveAttribute('aria-valuemin')
+    expect(handle).toHaveAttribute('aria-valuemax')
 
-    const consultationHandle = await screen.findByRole('separator', { name: '调整问诊记录宽度' })
-    const copilotHandle = screen.getByRole('separator', { name: '调整临床助手宽度' })
-    for (const handle of [consultationHandle, copilotHandle]) {
-      expect(handle).toHaveAttribute('aria-valuenow')
-      expect(handle).toHaveAttribute('aria-valuemin')
-      expect(handle).toHaveAttribute('aria-valuemax')
-    }
-
-    const start = Number(consultationHandle.getAttribute('aria-valuenow'))
-    consultationHandle.focus()
+    const start = valueOf(handle)
+    handle.focus()
     await user.keyboard('{ArrowRight}{ArrowRight}')
-    expect(Number(consultationHandle.getAttribute('aria-valuenow'))).toBeGreaterThan(start)
+    expect(valueOf(handle)).toBeGreaterThan(start)
     await user.keyboard('{End}')
-    expect(consultationHandle.getAttribute('aria-valuenow')).toBe(consultationHandle.getAttribute('aria-valuemax'))
-    await user.dblClick(consultationHandle)
-    expect(Number(consultationHandle.getAttribute('aria-valuenow'))).toBe(start)
+    expect(handle.getAttribute('aria-valuenow')).toBe(handle.getAttribute('aria-valuemax'))
+    await user.dblClick(handle)
+    expect(valueOf(handle)).toBe(start)
 
-    await user.click(screen.getByRole('button', { name: '收起问诊记录' }))
+    handle.focus()
+    await user.keyboard('{Home}')
     expect(screen.getByRole('region', { name: '问诊记录（已收起）' })).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '问诊记录' })).not.toBeInTheDocument()
+  })
+
+  it('resizes the Clinical Copilot panel from its separator: arrow keys and double-click reset', async () => {
+    const user = userEvent.setup()
+    renderWorkbench()
+    const handle = await screen.findByRole('separator', { name: '调整临床助手宽度' })
+    expect(handle).toHaveAttribute('aria-valuemin')
+    expect(handle).toHaveAttribute('aria-valuemax')
+
+    const start = valueOf(handle)
+    handle.focus()
+    await user.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(valueOf(handle)).toBeLessThan(start)
+    await user.dblClick(handle)
+    expect(valueOf(handle)).toBe(start)
+  })
+
+  it('remembers keyboard-set widths and a collapsed Consultation column across reloads', async () => {
+    const user = userEvent.setup()
+    const first = renderWorkbench()
+    const handle = await screen.findByRole('separator', { name: '调整问诊记录宽度' })
+    const start = valueOf(handle)
+    handle.focus()
+    await user.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}')
+    const widened = valueOf(handle)
+    expect(widened).toBeGreaterThan(start)
 
     first.unmount()
+    const second = renderWorkbench()
+    expect(valueOf(await screen.findByRole('separator', { name: '调整问诊记录宽度' }))).toBe(widened)
+
+    await user.click(screen.getByRole('button', { name: '收起问诊记录' }))
+    second.unmount()
     renderWorkbench()
     const strip = await screen.findByRole('region', { name: '问诊记录（已收起）' })
     await user.click(within(strip).getByRole('button', { name: '展开问诊记录' }))
     expect(screen.getByRole('region', { name: '问诊记录' })).toBeInTheDocument()
   })
 })
+
+const valueOf = (separator: HTMLElement) => Number(separator.getAttribute('aria-valuenow'))

@@ -15,27 +15,22 @@ type GoldenCaseRow = {
 export class GoldenCaseRepository {
   constructor(private readonly sql: SqlStorage) {}
 
-  ensureSchema(): void {
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS golden_case (
-        case_id TEXT PRIMARY KEY,
-        queue_number INTEGER NOT NULL UNIQUE,
-        patient_name TEXT NOT NULL,
-        sex TEXT NOT NULL CHECK (sex IN ('male', 'female')),
-        birth_date TEXT NOT NULL,
-        chief_complaint TEXT NOT NULL,
-        registered_at TEXT NOT NULL,
-        visit_kind TEXT NOT NULL CHECK (visit_kind IN ('first', 'return'))
-      )
-    `)
-  }
-
-  seed(registrations: readonly GoldenCaseRegistration[]): void {
+  // Makes the table match the pinned case pack exactly. Callers run it inside one storage transaction.
+  reconcile(registrations: readonly GoldenCaseRegistration[]): void {
+    const ids = registrations.map((r) => r.caseId)
+    this.sql.exec(`DELETE FROM golden_case WHERE case_id NOT IN (${ids.map(() => '?').join(', ')})`, ...ids)
     for (const r of registrations) {
       this.sql.exec(
         `INSERT INTO golden_case (case_id, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (case_id) DO NOTHING`,
+         ON CONFLICT (case_id) DO UPDATE SET
+           queue_number = excluded.queue_number,
+           patient_name = excluded.patient_name,
+           sex = excluded.sex,
+           birth_date = excluded.birth_date,
+           chief_complaint = excluded.chief_complaint,
+           registered_at = excluded.registered_at,
+           visit_kind = excluded.visit_kind`,
         r.caseId, r.queueNumber, r.patientName, r.sex, r.birthDate, r.chiefComplaint, r.registeredAt, r.visitKind,
       )
     }

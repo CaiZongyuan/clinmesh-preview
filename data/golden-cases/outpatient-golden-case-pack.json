@@ -5,14 +5,14 @@
   "version": "2026-11-24.1",
   "cases": [
     {
-      "id": "outpatient-cap-penicillin-anaphylaxis-v1",
+      "id": "golden-case-01",
       "title": "病例① 社区获得性肺炎伴青霉素过敏性休克史",
       "titleEn": "Case 1: Community-acquired pneumonia with penicillin anaphylaxis history",
       "recommendedEntry": "outpatient",
       "indexDateTime": "2026-11-24T08:31:00+08:00",
       "chiefComplaint": "发热、咳嗽 3 天",
       "patient": {
-        "id": "golden-outpatient-cap-01",
+        "id": "golden-patient-01",
         "name": "李建国",
         "birthDate": "1968-05-16",
         "gender": "male"
@@ -81,7 +81,7 @@
         }
       ],
       "persona": {
-        "version": "outpatient-cap-penicillin-persona-v1",
+        "version": "golden-case-01-persona-v1",
         "content": {
           "chiefComplaint": "这三天一直发烧、咳嗽，晚上咳得睡不好。",
           "openingStatement": "医生，我这三天一直发烧，咳嗽得厉害，晚上都睡不好。",
