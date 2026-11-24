@@ -96,7 +96,13 @@ export interface ActiveEncounterResponse {
   encounter: EncounterView | null
 }
 
-export type AuditEventType = 'encounter-started' | 'encounter-abandoned' | 'physical-examination-performed'
+export type AuditEventType =
+  | 'encounter-started'
+  | 'encounter-abandoned'
+  | 'physical-examination-performed'
+  | 'investigation-issued'
+  | 'investigation-released-instantly'
+  | 'report-acknowledged'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -116,6 +122,12 @@ export type EncounterErrorCode =
   | 'encounter-not-active'
   | 'body-system-already-examined'
   | 'case-version-retired'
+  | 'catalog-item-not-found'
+  | 'investigation-already-issued'
+  | 'investigation-not-found'
+  | 'report-not-found'
+  | 'report-superseded'
+  | 'report-already-acknowledged'
 
 export interface EncounterError {
   code: EncounterErrorCode

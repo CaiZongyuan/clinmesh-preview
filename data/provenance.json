@@ -51,6 +51,40 @@
         "Light and dark values are folded into light-dark() pairs; the dsw design-system variable indirection is dropped and its fallback values kept.",
         "Sidebar, chart and font-scale tokens are not copied yet."
       ]
+    },
+    {
+      "target": "data/clinic-catalog/investigation-catalog.json",
+      "snapshotAt": "2026-11-24",
+      "kind": "authored-from-reference-ranges",
+      "sources": [
+        {
+          "path": "apps/server/reference-data/loinc-ucum-mappings.json",
+          "used": "Reference ranges for WBC (3.5–9.5), platelets (125–350), random glucose (3.9–11.1) and HbA1c (4.0–6.0); hemoglobin, RBC and hematocrit ranges, which it marks as sex-dependent, are split by sex here."
+        },
+        {
+          "path": "apps/server/src/application/scenario-data/hospital-baseline.ts",
+          "used": "CRP 0–8 mg/L, urine glucose 阴性, serum creatinine sex dependence and catalog turnaround minutes (CBC 20, CRP 30, HbA1c 120)."
+        },
+        {
+          "path": "apps/server/src/application/scenario-data/cardiorenal-authored-case-pack.ts",
+          "used": "Healthy baseline values with their sex split (baselineLabs: wbc 6.4, hemoglobin 146/128, rbc 4.85/4.35, platelets 225, creatinine 82/68, urea 5.4, uric acid 350/290, ALT 24, AST 22, potassium 4.1, sodium 141, glucose 5.6, hs-cTnI 0.008, NT-proBNP 80, D-dimer 0.22)."
+        },
+        {
+          "path": "apps/server/src/application/laboratory-adult-reference.ts",
+          "used": "Rule shape: a reference rule selected by sex with an 'all' fallback, and fixed normal values for qualitative results. The reference repo's seeded uniform generation is not used: baseline values are authored, never generated."
+        },
+        {
+          "path": "prototypes/copilot-workbench/workbench-prototype.html",
+          "repository": "this repository",
+          "used": "Catalog items, names, pinyin initials, specimens, departments, expected turnaround text, category stages and reporting staff names for 检验科 and 放射科."
+        }
+      ],
+      "notes": [
+        "Every item carries age/sex-banded baseline rules; src/worker/investigation-catalog.ts admits only items whose bands cover both sexes from age 0 with normal baseline values.",
+        "Age bands for urea and creatinine (60+) and the sex-specific ranges for urea, creatinine, uric acid, ALT and AST follow WS/T 404 adult reference intervals; NT-proBNP age band (75+) and hs-cTnI sex-specific 99th percentiles, lipid targets, electrolytes, TBIL, ALB, urinalysis and influenza antigen ranges are authored here, not copied.",
+        "Imaging and ECG/echo baseline narratives are authored here.",
+        "simulatedTurnaroundSeconds is the simulation's shortened turnaround; expectedTurnaround is the clinic-facing text."
+      ]
     }
   ]
 }

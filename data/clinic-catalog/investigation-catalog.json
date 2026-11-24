@@ -1,0 +1,442 @@
+{
+  "version": "2026-11-24.1",
+  "reportingStaff": {
+    "检验科": { "reporter": "王丽（检验师）", "reviewer": "陈刚（主管检验师）" },
+    "放射科": { "reporter": "刘洋（放射科医师）", "reviewer": "赵敏（副主任医师）" },
+    "心电图室": { "reporter": "孙婷（心电图医师）", "reviewer": "郑凯（主治医师）" },
+    "心功能室": { "reporter": "周宁（超声医师）", "reviewer": "吴静（主治医师）" }
+  },
+  "items": [
+    {
+      "id": "cbc",
+      "name": "血常规（五分类）",
+      "category": "lab",
+      "pinyinInitials": ["xcg", "cbc"],
+      "specimenOrSite": "静脉血 · EDTA 紫帽",
+      "department": "检验科",
+      "expectedTurnaround": "30 分钟",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "cbc-wbc", "name": "白细胞计数 WBC", "unit": "×10⁹/L", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 3.5, "high": 9.5, "text": "3.5–9.5" }, "value": 6.4 }]
+        },
+        {
+          "id": "cbc-neut-pct", "name": "中性粒细胞百分比 NEUT%", "unit": "%", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 40, "high": 75, "text": "40–75" }, "value": 58.6 }]
+        },
+        {
+          "id": "cbc-lym-pct", "name": "淋巴细胞百分比 LYM%", "unit": "%", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 20, "high": 50, "text": "20–50" }, "value": 31.4 }]
+        },
+        {
+          "id": "cbc-rbc", "name": "红细胞计数 RBC", "unit": "×10¹²/L", "decimals": 2,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "low": 4.3, "high": 5.8, "text": "4.3–5.8" }, "value": 4.85 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "low": 3.8, "high": 5.1, "text": "3.8–5.1" }, "value": 4.35 }
+          ]
+        },
+        {
+          "id": "cbc-hgb", "name": "血红蛋白 HGB", "unit": "g/L", "decimals": 0,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "low": 130, "high": 175, "text": "130–175" }, "value": 146 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "low": 115, "high": 150, "text": "115–150" }, "value": 128 }
+          ]
+        },
+        {
+          "id": "cbc-plt", "name": "血小板计数 PLT", "unit": "×10⁹/L", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 125, "high": 350, "text": "125–350" }, "value": 225 }]
+        }
+      ]
+    },
+    {
+      "id": "crp",
+      "name": "C 反应蛋白",
+      "category": "lab",
+      "pinyinInitials": ["crp", "cfydb"],
+      "specimenOrSite": "静脉血 · EDTA 紫帽",
+      "department": "检验科",
+      "expectedTurnaround": "30 分钟",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "crp", "name": "C 反应蛋白 CRP", "unit": "mg/L", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 0, "high": 8, "text": "0–8" }, "value": 3 }]
+        }
+      ]
+    },
+    {
+      "id": "pct",
+      "name": "降钙素原",
+      "category": "lab",
+      "pinyinInitials": ["pct", "jgsy"],
+      "specimenOrSite": "静脉血 · 黄帽",
+      "department": "检验科",
+      "expectedTurnaround": "60 分钟",
+      "simulatedTurnaroundSeconds": 120,
+      "analytes": [
+        {
+          "id": "pct", "name": "降钙素原 PCT", "unit": "ng/mL", "decimals": 2,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 0, "high": 0.05, "text": "0–0.05" }, "value": 0.03 }]
+        }
+      ]
+    },
+    {
+      "id": "glu",
+      "name": "随机血糖",
+      "category": "lab",
+      "pinyinInitials": ["sjxt", "xt", "glu"],
+      "specimenOrSite": "指尖血",
+      "department": "检验科",
+      "expectedTurnaround": "10 分钟",
+      "simulatedTurnaroundSeconds": 45,
+      "analytes": [
+        {
+          "id": "glu", "name": "随机血糖 GLU", "unit": "mmol/L", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 3.9, "high": 11.1, "text": "3.9–11.1" }, "value": 5.6 }]
+        }
+      ]
+    },
+    {
+      "id": "hba1c",
+      "name": "糖化血红蛋白",
+      "category": "lab",
+      "pinyinInitials": ["thxhdb", "hba1c"],
+      "specimenOrSite": "静脉血 · EDTA 紫帽",
+      "department": "检验科",
+      "expectedTurnaround": "2 小时",
+      "simulatedTurnaroundSeconds": 150,
+      "analytes": [
+        {
+          "id": "hba1c", "name": "糖化血红蛋白 HbA1c", "unit": "%", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 4, "high": 6, "text": "4.0–6.0" }, "value": 5.4 }]
+        }
+      ]
+    },
+    {
+      "id": "urinalysis",
+      "name": "尿常规",
+      "category": "lab",
+      "pinyinInitials": ["ncg", "ua"],
+      "specimenOrSite": "中段尿",
+      "department": "检验科",
+      "expectedTurnaround": "30 分钟",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "ua-leu", "name": "白细胞酯酶 LEU", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        },
+        {
+          "id": "ua-nit", "name": "亚硝酸盐 NIT", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        },
+        {
+          "id": "ua-pro", "name": "尿蛋白 PRO", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        },
+        {
+          "id": "ua-glu", "name": "尿糖 GLU", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        },
+        {
+          "id": "ua-ket", "name": "酮体 KET", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        },
+        {
+          "id": "ua-bld", "name": "隐血 BLD", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        },
+        {
+          "id": "ua-sg", "name": "尿比重 SG", "unit": "", "decimals": 3,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 1.003, "high": 1.03, "text": "1.003–1.030" }, "value": 1.018 }]
+        },
+        {
+          "id": "ua-ph", "name": "酸碱度 pH", "unit": "", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 4.5, "high": 8, "text": "4.5–8.0" }, "value": 6 }]
+        }
+      ]
+    },
+    {
+      "id": "renal",
+      "name": "肾功能",
+      "category": "lab",
+      "pinyinInitials": ["sgn"],
+      "specimenOrSite": "静脉血 · 黄帽",
+      "department": "检验科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 120,
+      "analytes": [
+        {
+          "id": "renal-urea", "name": "尿素 UREA", "unit": "mmol/L", "decimals": 1,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "low": 3.1, "high": 8, "text": "3.1–8.0" }, "value": 5.4 },
+            { "sex": "male", "ageFrom": 60, "referenceRange": { "low": 3.6, "high": 9.5, "text": "3.6–9.5" }, "value": 5.8 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "low": 2.6, "high": 7.5, "text": "2.6–7.5" }, "value": 4.6 },
+            { "sex": "female", "ageFrom": 60, "referenceRange": { "low": 3.1, "high": 8.8, "text": "3.1–8.8" }, "value": 5.2 }
+          ]
+        },
+        {
+          "id": "renal-crea", "name": "肌酐 CREA", "unit": "μmol/L", "decimals": 0,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "low": 57, "high": 97, "text": "57–97" }, "value": 82 },
+            { "sex": "male", "ageFrom": 60, "referenceRange": { "low": 57, "high": 111, "text": "57–111" }, "value": 84 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "low": 41, "high": 73, "text": "41–73" }, "value": 68 },
+            { "sex": "female", "ageFrom": 60, "referenceRange": { "low": 41, "high": 81, "text": "41–81" }, "value": 66 }
+          ]
+        },
+        {
+          "id": "renal-urate", "name": "尿酸 UA", "unit": "μmol/L", "decimals": 0,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "low": 208, "high": 428, "text": "208–428" }, "value": 350 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "low": 155, "high": 357, "text": "155–357" }, "value": 290 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "liver",
+      "name": "肝功能",
+      "category": "lab",
+      "pinyinInitials": ["ggn"],
+      "specimenOrSite": "静脉血 · 黄帽",
+      "department": "检验科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 120,
+      "analytes": [
+        {
+          "id": "liver-alt", "name": "丙氨酸氨基转移酶 ALT", "unit": "U/L", "decimals": 0,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "low": 9, "high": 50, "text": "9–50" }, "value": 24 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "low": 7, "high": 40, "text": "7–40" }, "value": 19 }
+          ]
+        },
+        {
+          "id": "liver-ast", "name": "天冬氨酸氨基转移酶 AST", "unit": "U/L", "decimals": 0,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "low": 15, "high": 40, "text": "15–40" }, "value": 22 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "low": 13, "high": 35, "text": "13–35" }, "value": 21 }
+          ]
+        },
+        {
+          "id": "liver-tbil", "name": "总胆红素 TBIL", "unit": "μmol/L", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "high": 26, "text": "≤26" }, "value": 11.6 }]
+        },
+        {
+          "id": "liver-alb", "name": "白蛋白 ALB", "unit": "g/L", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 40, "high": 55, "text": "40–55" }, "value": 44.5 }]
+        }
+      ]
+    },
+    {
+      "id": "electrolytes",
+      "name": "电解质",
+      "category": "lab",
+      "pinyinInitials": ["djz"],
+      "specimenOrSite": "静脉血 · 黄帽",
+      "department": "检验科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "lytes-k", "name": "钾 K", "unit": "mmol/L", "decimals": 1,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 3.5, "high": 5.3, "text": "3.5–5.3" }, "value": 4.1 }]
+        },
+        {
+          "id": "lytes-na", "name": "钠 Na", "unit": "mmol/L", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 137, "high": 147, "text": "137–147" }, "value": 141 }]
+        },
+        {
+          "id": "lytes-cl", "name": "氯 Cl", "unit": "mmol/L", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 99, "high": 110, "text": "99–110" }, "value": 104 }]
+        }
+      ]
+    },
+    {
+      "id": "lipids",
+      "name": "血脂四项",
+      "category": "lab",
+      "pinyinInitials": ["xzsx", "xz"],
+      "specimenOrSite": "静脉血 · 黄帽（空腹）",
+      "department": "检验科",
+      "expectedTurnaround": "2 小时",
+      "simulatedTurnaroundSeconds": 150,
+      "analytes": [
+        {
+          "id": "lipid-tc", "name": "总胆固醇 TC", "unit": "mmol/L", "decimals": 2,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "high": 5.2, "text": "<5.20" }, "value": 4.62 }]
+        },
+        {
+          "id": "lipid-tg", "name": "甘油三酯 TG", "unit": "mmol/L", "decimals": 2,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "high": 1.7, "text": "<1.70" }, "value": 1.26 }]
+        },
+        {
+          "id": "lipid-hdl", "name": "高密度脂蛋白胆固醇 HDL-C", "unit": "mmol/L", "decimals": 2,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 1.04, "text": "≥1.04" }, "value": 1.21 }]
+        },
+        {
+          "id": "lipid-ldl", "name": "低密度脂蛋白胆固醇 LDL-C", "unit": "mmol/L", "decimals": 2,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "high": 3.4, "text": "<3.40" }, "value": 2.64 }]
+        }
+      ]
+    },
+    {
+      "id": "hs-ctni",
+      "name": "高敏心肌肌钙蛋白 I",
+      "category": "lab",
+      "pinyinInitials": ["gmjgdb", "jgdb", "ctni", "tni"],
+      "specimenOrSite": "静脉血 · 绿帽",
+      "department": "检验科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "hs-ctni", "name": "高敏心肌肌钙蛋白 I hs-cTnI", "unit": "ng/mL", "decimals": 3,
+          "baseline": [
+            { "sex": "male", "ageFrom": 0, "referenceRange": { "high": 0.034, "text": "≤0.034" }, "value": 0.008 },
+            { "sex": "female", "ageFrom": 0, "referenceRange": { "high": 0.016, "text": "≤0.016" }, "value": 0.006 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ck-mb",
+      "name": "肌酸激酶同工酶",
+      "category": "lab",
+      "pinyinInitials": ["jsjmtgm", "ckmb"],
+      "specimenOrSite": "静脉血 · 黄帽",
+      "department": "检验科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "ck-mb", "name": "肌酸激酶同工酶 CK-MB", "unit": "U/L", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "low": 0, "high": 24, "text": "0–24" }, "value": 12 }]
+        }
+      ]
+    },
+    {
+      "id": "nt-probnp",
+      "name": "N 末端脑钠肽前体",
+      "category": "lab",
+      "pinyinInitials": ["ndlt", "ntprobnp", "bnp"],
+      "specimenOrSite": "静脉血 · 绿帽",
+      "department": "检验科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "nt-probnp", "name": "N 末端脑钠肽前体 NT-proBNP", "unit": "ng/L", "decimals": 0,
+          "baseline": [
+            { "sex": "any", "ageFrom": 0, "referenceRange": { "high": 125, "text": "<125" }, "value": 80 },
+            { "sex": "any", "ageFrom": 75, "referenceRange": { "high": 450, "text": "<450" }, "value": 160 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "d-dimer",
+      "name": "D-二聚体",
+      "category": "lab",
+      "pinyinInitials": ["d2jt", "ejt", "ddimer"],
+      "specimenOrSite": "静脉血 · 蓝帽",
+      "department": "检验科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 90,
+      "analytes": [
+        {
+          "id": "d-dimer", "name": "D-二聚体 D-D", "unit": "mg/L FEU", "decimals": 2,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "high": 0.5, "text": "<0.50" }, "value": 0.22 }]
+        }
+      ]
+    },
+    {
+      "id": "influenza-antigen",
+      "name": "甲乙型流感病毒抗原",
+      "category": "lab",
+      "pinyinInitials": ["lgky", "jylg", "lg"],
+      "specimenOrSite": "鼻咽拭子",
+      "department": "检验科",
+      "expectedTurnaround": "30 分钟",
+      "simulatedTurnaroundSeconds": 60,
+      "analytes": [
+        {
+          "id": "flu-a", "name": "甲型流感病毒抗原", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        },
+        {
+          "id": "flu-b", "name": "乙型流感病毒抗原", "unit": "", "decimals": 0,
+          "baseline": [{ "sex": "any", "ageFrom": 0, "referenceRange": { "text": "阴性" }, "value": "阴性" }]
+        }
+      ]
+    },
+    {
+      "id": "cxr",
+      "name": "胸部正侧位 X 线",
+      "category": "radiology",
+      "pinyinInitials": ["xp", "xbzcw", "xbxp", "dr"],
+      "specimenOrSite": "胸部 · 正侧位",
+      "department": "放射科",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 150,
+      "narrative": [
+        {
+          "sex": "any", "ageFrom": 0,
+          "findings": "两肺纹理清晰，肺野内未见异常密度影；两侧肋膈角锐利；心影大小、形态未见异常。",
+          "impression": "心、肺、膈未见明显异常。"
+        }
+      ]
+    },
+    {
+      "id": "chest-ct",
+      "name": "胸部 CT 平扫",
+      "category": "radiology",
+      "pinyinInitials": ["xbct", "ct"],
+      "specimenOrSite": "胸部 · 平扫",
+      "department": "放射科",
+      "expectedTurnaround": "2 小时",
+      "simulatedTurnaroundSeconds": 180,
+      "narrative": [
+        {
+          "sex": "any", "ageFrom": 0,
+          "findings": "两肺野清晰，未见异常密度影；气管及主支气管通畅；纵隔内未见肿大淋巴结；两侧胸腔无积液。",
+          "impression": "胸部 CT 平扫未见明显异常。"
+        }
+      ]
+    },
+    {
+      "id": "ecg",
+      "name": "12 导联心电图",
+      "category": "function",
+      "pinyinInitials": ["xdt", "ecg"],
+      "specimenOrSite": "床旁 · 12 导联",
+      "department": "心电图室",
+      "expectedTurnaround": "20 分钟",
+      "simulatedTurnaroundSeconds": 60,
+      "narrative": [
+        {
+          "sex": "any", "ageFrom": 0,
+          "findings": "窦性心律，心室率 72 次/分；PR 间期 0.16 s，QRS 时限 0.09 s，QTc 0.41 s；各导联 ST 段未见偏移，T 波未见异常。",
+          "impression": "窦性心律，正常心电图。"
+        }
+      ]
+    },
+    {
+      "id": "echo",
+      "name": "经胸超声心动图",
+      "category": "function",
+      "pinyinInitials": ["xzcs", "csxdt", "ucg"],
+      "specimenOrSite": "心脏 · 经胸",
+      "department": "心功能室",
+      "expectedTurnaround": "1 小时",
+      "simulatedTurnaroundSeconds": 120,
+      "narrative": [
+        {
+          "sex": "any", "ageFrom": 0,
+          "findings": "各房室腔大小正常，室壁厚度及运动未见异常；各瓣膜形态及启闭未见异常；左室射血分数 63%；心包腔未见积液。",
+          "impression": "心脏结构及功能未见明显异常。"
+        }
+      ]
+    }
+  ]
+}

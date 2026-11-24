@@ -1,5 +1,6 @@
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@ui-sdk/react/button'
+import { Tabs, TabsList, TabsPanel, TabsTab } from '@ui-sdk/react/tabs'
 import { useState, type ReactNode } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
@@ -7,6 +8,8 @@ import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { startEncounter } from '../api'
 import { AbandonEncounter } from './abandon-encounter'
 import { formatClock, SEX_LABEL, VISIT_KIND_LABEL } from './format'
+import { InvestigationsTab } from './investigations/investigations-tab'
+import { useInvestigations } from './investigations/use-investigations'
 import { badge, pane, paneBody, paneFooter, paneHeader } from './pane-styles'
 import { PatientBanner } from './patient-banner'
 import type { CaseFocus } from './workbench'
@@ -60,20 +63,67 @@ function Registration({ entry }: { entry: GoldenCaseQueueEntry }) {
   )
 }
 
+const tab =
+  'h-9 gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 text-[13px] data-[selected]:border-foreground data-[selected]:font-semibold'
+
 function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterView; examinations: PhysicalExaminationView[] }) {
+  const investigations = useInvestigations(encounter)
   return (
     <main aria-label="病例工作区" className={pane}>
       <PatientBanner encounter={encounter} examinedVitals={examinations.find((e) => e.system === 'vitals')} />
       {encounter.status === 'abandoned' && <AbandonedNotice caseId={encounter.caseId} />}
-      <div className={`${paneBody} grid place-items-center`}>
-        <p className="m-0 p-6 text-center text-[13px] text-muted-foreground">
-          病历记录、检验检查、诊断与处方将在这里展开。病例真值在完诊前不可见。
-        </p>
-      </div>
+      <Tabs defaultValue="note" className="flex min-h-0 flex-1 flex-col">
+        <TabsList aria-label="病例页签" className="flex flex-none gap-1 border-b px-2">
+          <TabsTab value="note" className={tab}>
+            病历记录
+          </TabsTab>
+          <TabsTab value="investigations" className={tab}>
+            检验检查
+            <PendingCount count={investigations.pendingCount} />
+          </TabsTab>
+          <TabsTab value="diagnosis" className={tab}>
+            诊断
+          </TabsTab>
+          <TabsTab value="prescription" className={tab}>
+            处方
+          </TabsTab>
+        </TabsList>
+        <TabsPanel value="note" className={paneBody}>
+          <UpcomingTab>病历记录</UpcomingTab>
+        </TabsPanel>
+        <TabsPanel value="investigations" className={paneBody}>
+          <InvestigationsTab state={investigations} writable={encounter.status === 'active'} />
+        </TabsPanel>
+        <TabsPanel value="diagnosis" className={paneBody}>
+          <UpcomingTab>诊断</UpcomingTab>
+        </TabsPanel>
+        <TabsPanel value="prescription" className={paneBody}>
+          <UpcomingTab>处方</UpcomingTab>
+        </TabsPanel>
+      </Tabs>
       <CompletionFooter>
         <AbandonEncounter encounter={encounter} />
       </CompletionFooter>
     </main>
+  )
+}
+
+// Yellow count of what waits on the doctor in a tab: pending items to issue and Reports not yet acknowledged.
+function PendingCount({ count }: { count: number }) {
+  if (count === 0) return null
+  return (
+    <span className={`${badge} bg-warning/15 text-warning`}>
+      <span className="sr-only">待处理 </span>
+      {count}
+    </span>
+  )
+}
+
+function UpcomingTab({ children }: { children: string }) {
+  return (
+    <p className="m-0 p-6 text-center text-[13px] text-muted-foreground">
+      {children}将在后续版本提供。病例真值在完诊前不可见。
+    </p>
   )
 }
 
