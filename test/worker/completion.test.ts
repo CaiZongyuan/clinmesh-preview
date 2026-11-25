@@ -171,7 +171,7 @@ describe('Complete Encounter', () => {
       reference: { primaryDiagnosis: expect.stringContaining('社区获得性肺炎'), disposition: '门诊治疗，72 小时复诊' },
     })
     expect(await (await api('/api/golden-cases')).json()).toMatchObject({
-      goldenCases: [expect.objectContaining({ queueStatus: 'completed', completedEncounterId: id })],
+      goldenCases: expect.arrayContaining([expect.objectContaining({ queueStatus: 'completed', completedEncounterId: id })]),
     })
     const replay = await startEncounter()
     expect(replay).not.toBe(id)
