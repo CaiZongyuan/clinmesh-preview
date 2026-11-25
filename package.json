@@ -11,7 +11,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "typecheck": "tsc -b",
-    "test": "vitest run",
+    "test": "node scripts/test.mjs",
     "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts"
   },
   "dependencies": {

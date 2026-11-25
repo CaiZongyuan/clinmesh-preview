@@ -592,7 +592,9 @@ describe('settling patient turns', () => {
     const response = await api(`/api/encounters/${encounterId}/patient/socket`, { headers: { upgrade: 'websocket' } })
     const ws = response.webSocket!
     const frames: string[] = []
-    ws.addEventListener('message', (event) => frames.push(String(event.data)))
+    ws.addEventListener('message', (event) => {
+      frames.push(String(event.data))
+    })
     ws.accept()
     for (const junk of ['null', '42', '"hello"', '{"type":"hello"}', 'not json']) ws.send(junk)
     ws.send(JSON.stringify({ type: 'hello', afterSeq: 0 }))
