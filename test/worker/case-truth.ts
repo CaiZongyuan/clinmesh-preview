@@ -20,6 +20,10 @@ export const CASE_TRUTH_FIELDS = [
 // Short words that give a diagnosis away even when no longer Case Truth sentence is quoted.
 const DIAGNOSIS_TOKENS: Record<string, readonly string[]> = {
   'golden-case-01': ['肺炎', 'pneumonia', '实变', '啰音', 'CURB', 'J18'],
+  // Words that name or imply the viral, self-limiting diagnosis. "J06"/"上呼吸道感染" are excluded: the
+  // ICD catalog and Case 1's visible history already carry them to the browser, and plain "病毒" appears
+  // in the investigation catalog's influenza-antigen narrative, which is clinic reference data.
+  'golden-case-04': ['病毒性', '自限'],
 }
 
 // Which catalog item a result belongs to is not Case Truth; the result is.
@@ -65,14 +69,21 @@ export interface CaseTruthDenylist {
   tokens: string[]
 }
 
-// The snapshot's Case Truth, minus anything the snapshot also shows the doctor and anything in `revealed`:
-// Case Truth the doctor has legitimately uncovered, such as one body system's Physical Examination finding.
+// The snapshot's Case Truth, minus anything the clinic already shows the doctor anywhere (every Golden
+// Case's visible fields, so one case's ordinary chart wording or triage value cannot make another case's
+// denylist) and anything in `revealed`: Case Truth the doctor has legitimately uncovered.
 export function caseTruthDenylist(goldenCase: GoldenCase, revealed: unknown = []): CaseTruthDenylist {
   const truth = leaves(CASE_TRUTH_FIELDS.map((field) => goldenCase[field]), CATALOG_IDENTITY_KEYS)
   const truthStrings = truth.filter((v): v is string => typeof v === 'string')
 
-  const visibleFields = Object.keys(goldenCase).filter((field) => !(CASE_TRUTH_FIELDS as readonly string[]).includes(field))
-  const visible = leaves([visibleFields.map((field) => goldenCase[field as keyof GoldenCase]), revealed])
+  const visible = leaves([
+    casePack.cases.flatMap((otherCase) =>
+      Object.keys(otherCase)
+        .filter((field) => !(CASE_TRUTH_FIELDS as readonly string[]).includes(field))
+        .map((field) => otherCase[field as keyof GoldenCase]),
+    ),
+    revealed,
+  ])
   const visibleStrings = visible.filter((v): v is string => typeof v === 'string')
   const visibleNumbers = new Set([...visible.filter((v) => typeof v === 'number'), ...visibleStrings.flatMap(numbersIn).map(Number)])
   const revealedText = leaves(revealed).filter((v): v is string => typeof v === 'string').join('\n').toLowerCase()

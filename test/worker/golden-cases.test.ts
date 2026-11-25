@@ -3,8 +3,9 @@ import { env, exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import type { GoldenCaseQueueResponse } from '../../src/shared/golden-case-queue'
 import { goldenCase1QueueEntry } from '../fixtures/golden-case-1'
+import { goldenCase4QueueEntry } from '../fixtures/golden-case-4'
 
-const goldenCase1Queue: GoldenCaseQueueResponse = { goldenCases: [goldenCase1QueueEntry] }
+const goldenCaseQueue: GoldenCaseQueueResponse = { goldenCases: [goldenCase1QueueEntry, goldenCase4QueueEntry] }
 
 const getGoldenCases = () => exports.default.fetch('http://clinmesh.test/api/golden-cases')
 const workspace = () => env.CLINIC_WORKSPACE.getByName('default')
@@ -26,13 +27,13 @@ describe('GET /api/golden-cases', () => {
   it('serves Golden Case 1 from the workspace Durable Object SQLite store, loading the case pack idempotently', async () => {
     const first = await getGoldenCases()
     expect(first.status).toBe(200)
-    expect(await first.json()).toEqual(goldenCase1Queue)
+    expect(await first.json()).toEqual(goldenCaseQueue)
 
     await reloadWorkspace()
     const again = await getGoldenCases()
     expect(again.status).toBe(200)
-    expect(await again.json()).toEqual(goldenCase1Queue)
-    expect(await storedCaseIds()).toEqual(['golden-case-01'])
+    expect(await again.json()).toEqual(goldenCaseQueue)
+    expect(await storedCaseIds()).toEqual(['golden-case-01', 'golden-case-04'])
   })
 
   it('reconciles a workspace holding stale Golden Case rows back to the pinned case pack', async () => {
@@ -42,15 +43,15 @@ describe('GET /api/golden-cases', () => {
       sql.exec("UPDATE golden_case SET queue_number = 9, patient_name = '旧患者' WHERE case_id = 'golden-case-01'")
       const insert = `INSERT INTO golden_case (case_id, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind)
                       VALUES (?, ?, ?, 'female', '1960-01-01', '旧主诉', '2026-11-24T08:46:00+08:00', 'return')`
-      sql.exec(insert, 'outpatient-cap-penicillin-anaphylaxis-v1', 7, '改名前的病例')
-      sql.exec(insert, 'retired-case', 8, '已移除患者')
+      sql.exec(insert, 'outpatient-cap-penicillin-anaphylaxis-v1', 11, '改名前的病例')
+      sql.exec(insert, 'retired-case', 12, '已移除患者')
     })
 
     await reloadWorkspace()
     const response = await getGoldenCases()
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual(goldenCase1Queue)
-    expect(await storedCaseIds()).toEqual(['golden-case-01'])
+    expect(await response.json()).toEqual(goldenCaseQueue)
+    expect(await storedCaseIds()).toEqual(['golden-case-01', 'golden-case-04'])
   })
 
   it('upgrades a workspace created before schema migrations were tracked', async () => {
@@ -72,6 +73,6 @@ describe('GET /api/golden-cases', () => {
     await reloadWorkspace()
     const response = await getGoldenCases()
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual(goldenCase1Queue)
+    expect(await response.json()).toEqual(goldenCaseQueue)
   })
 })

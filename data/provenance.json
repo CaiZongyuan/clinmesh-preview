@@ -35,7 +35,8 @@
         "Pack version 2026-11-25.1 adds reportAmendments[].releaseAfterSeconds, the scripted delay after Report version 1 at which each amendment publishes as the next version (CBC 120 s, CRP 150 s, chest X-ray 180 s); the prototype published amendments from a demo button, so the delays are authored here.",
         "Reference fields omitted as inpatient/PCI-specific: plannedStentCount, angiography, ttes, ecgs.",
         "LOINC codings for neutrophil %, lymphocyte %, CRP and procalcitonin are authored here, not copied.",
-        "Case, patient and persona ids are diagnosis-neutral (golden-case-01, golden-patient-01) because they reach the browser; the reference repo's descriptive id style would leak Case Truth (ADR-0002)."
+        "Case, patient and persona ids are diagnosis-neutral (golden-case-01, golden-patient-01) because they reach the browser; the reference repo's descriptive id style would leak Case Truth (ADR-0002).",
+        "Golden Case 4 (pack addition, 2026-11-25) is authored here as a synthetic, self-limiting viral URI case following the same schema; it exists only in this repository and validates the explicit No Medication conclusion. Its visibleHistory's prior J06.9 visit is authored chart noise (prior URI episodes are ordinary in outpatient records), not a leak of the hidden index condition."
       ]
     },
     {
