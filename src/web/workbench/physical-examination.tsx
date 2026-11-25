@@ -6,6 +6,7 @@ import { useState } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import { BODY_SYSTEM_NAME, BODY_SYSTEMS, type BodySystem, type PhysicalExaminationView } from '../../shared/physical-examination'
 import { performPhysicalExamination } from '../api'
+import { QuoteMenu } from './clinical-note/quote-menu'
 import { formatClock } from './format'
 import { badge } from './pane-styles'
 
@@ -26,6 +27,10 @@ export function PhysicalExaminationRow({ examination }: { examination: PhysicalE
       <time dateTime={examination.examinedAt} className="flex-none font-mono text-[11px] text-muted-foreground">
         {formatClock(examination.examinedAt)}
       </time>
+      <QuoteMenu
+        label={`引用查体：${BODY_SYSTEM_NAME[examination.system]}到病历`}
+        text={`查体·${BODY_SYSTEM_NAME[examination.system]}：${examination.finding}`}
+      />
     </li>
   )
 }

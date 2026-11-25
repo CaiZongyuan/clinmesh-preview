@@ -101,6 +101,17 @@ export class EncounterRepository {
     return row && toView(row)
   }
 
+  // The next number in the Encounter's clinical revision sequence, shared by signed Clinical Note revisions and
+  // Diagnosis revisions, so whichever was recorded later has the higher number.
+  nextRevisionSeq(encounterId: string): number {
+    return this.sql
+      .exec<{ revision_seq: number }>(
+        'UPDATE encounter SET revision_seq = revision_seq + 1 WHERE encounter_id = ? RETURNING revision_seq',
+        encounterId,
+      )
+      .one().revision_seq
+  }
+
   audit(encounterId: string, eventType: AuditEventType, practitionerId: string, occurredAt: string, subject?: string) {
     this.sql.exec(
       'INSERT INTO audit_event (encounter_id, event_type, practitioner_id, occurred_at, subject) VALUES (?, ?, ?, ?, ?)',

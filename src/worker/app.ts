@@ -18,6 +18,14 @@ import {
 } from '../shared/physical-examination'
 import type { InvestigationCatalogResponse, InvestigationsResponse } from '../shared/investigation'
 import type { InvestigationsResult } from './investigation-repository'
+import {
+  isNoteSection,
+  MAX_NOTE_SECTION_LENGTH,
+  NOTE_SECTIONS,
+  type ClinicalNoteResponse,
+  type NoteSections,
+} from '../shared/clinical-note'
+import type { ClinicalNoteResult } from './clinical-note-repository'
 
 import { WORKSPACE_NAME } from './workspace-name'
 
@@ -40,6 +48,7 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'consultation-turn-not-found': 404,
   'patient-turn-pending': 409,
   'patient-turn-not-retryable': 409,
+  'clinical-note-incomplete': 422,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -56,6 +65,25 @@ async function idList(c: AppContext, key: string): Promise<string[] | null> {
   const valid = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === 'string') && new Set(ids).size === ids.length
   return valid ? (ids as string[]) : null
 }
+
+const noteOr = (c: AppContext, result: ClinicalNoteResult, status: ContentfulStatusCode = 200) =>
+  result.ok ? c.json<ClinicalNoteResponse>({ note: result.note }, status) : refuse(c, result.error)
+
+// Section texts under `sections`: every section when `all`, otherwise at least one; null when malformed.
+async function noteSections(c: AppContext, all: boolean): Promise<Partial<NoteSections> | null> {
+  const body: unknown = await c.req.json().catch(() => null)
+  const sections = (body as Record<string, unknown> | null)?.sections
+  if (sections === null || typeof sections !== 'object' || Array.isArray(sections)) return null
+  const entries = Object.entries(sections)
+  const valid =
+    entries.length > 0 &&
+    (!all || entries.length === NOTE_SECTIONS.length) &&
+    entries.every(([section, text]) => isNoteSection(section) && typeof text === 'string' && text.length <= MAX_NOTE_SECTION_LENGTH)
+  return valid ? (sections as Partial<NoteSections>) : null
+}
+
+const noteShape = (which: string) =>
+  `请求体须为 { "sections": { [section]: string } }，含${which}段落（${NOTE_SECTIONS.join('、')}），每段不超过 ${MAX_NOTE_SECTION_LENGTH} 字`
 
 export const app = new Hono<{ Bindings: Env }>().basePath('/api')
 
@@ -141,6 +169,20 @@ app.post('/encounters/:encounterId/report-acknowledgements', async (c) => {
     return refuse(c, { code: 'invalid-request', message: '请求体须为 { "reportIds": string[] }，且不重复、不为空' })
   }
   return investigationsOr(c, await workspace(c).acknowledgeReports(c.req.param('encounterId'), reportIds))
+})
+
+app.get('/encounters/:encounterId/clinical-note', async (c) => noteOr(c, await workspace(c).getClinicalNote(c.req.param('encounterId'))))
+
+app.patch('/encounters/:encounterId/clinical-note/draft', async (c) => {
+  const sections = await noteSections(c, false)
+  if (!sections) return refuse(c, { code: 'invalid-request', message: noteShape('至少一个') })
+  return noteOr(c, await workspace(c).saveClinicalNoteDraft(c.req.param('encounterId'), sections))
+})
+
+app.post('/encounters/:encounterId/clinical-note/revisions', async (c) => {
+  const sections = await noteSections(c, true)
+  if (!sections) return refuse(c, { code: 'invalid-request', message: noteShape('全部六个') })
+  return noteOr(c, await workspace(c).signClinicalNote(c.req.param('encounterId'), sections as NoteSections), 201)
 })
 
 app.get('/encounters/:encounterId/consultation', async (c) => {

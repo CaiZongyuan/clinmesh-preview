@@ -19,6 +19,8 @@ import type {
   InvestigationView,
 } from '../shared/investigation'
 
+import type { ClinicalNoteResponse, ClinicalNoteView, NoteSections } from '../shared/clinical-note'
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
   const body: unknown = await response.json().catch(() => null)
@@ -107,6 +109,22 @@ export async function askPatient(encounterId: string, clientTurnId: string, text
 export async function retryPatientTurn(encounterId: string, turnId: string): Promise<ConsultationTurn> {
   const path = `${encounterPath(encounterId)}/consultation/patient-turns/${encodeURIComponent(turnId)}/retry`
   return (await request<RetryPatientTurnResponse>(path, post())).patientTurn
+}
+
+const clinicalNotePath = (encounterId: string) => `${encounterPath(encounterId)}/clinical-note`
+
+export async function fetchClinicalNote(encounterId: string): Promise<ClinicalNoteView> {
+  return (await request<ClinicalNoteResponse>(clinicalNotePath(encounterId))).note
+}
+
+// keepalive lets the last autosave finish while the page unloads.
+export async function saveClinicalNoteDraft(encounterId: string, sections: Partial<NoteSections>): Promise<ClinicalNoteView> {
+  const init: RequestInit = { ...post({ sections }), method: 'PATCH', keepalive: true }
+  return (await request<ClinicalNoteResponse>(`${clinicalNotePath(encounterId)}/draft`, init)).note
+}
+
+export async function signClinicalNote(encounterId: string, sections: NoteSections): Promise<ClinicalNoteView> {
+  return (await request<ClinicalNoteResponse>(`${clinicalNotePath(encounterId)}/revisions`, post({ sections }))).note
 }
 
 export function openPatientSocket(encounterId: string): WebSocket {

@@ -105,6 +105,34 @@ const MIGRATIONS: readonly string[] = [
      practitioner_id TEXT NOT NULL,
      cancelled_at TEXT NOT NULL
    );`,
+  // The Clinical Note: one Draft row per section once written, with who last wrote it (the doctor, or later the
+  // Clinical Copilot), and signed revisions as immutable rows. Each revision takes the next number of the
+  // Encounter's clinical revision sequence, which Diagnosis revisions share, so the two can be ordered.
+  `ALTER TABLE encounter ADD COLUMN revision_seq INTEGER NOT NULL DEFAULT 0;
+   CREATE TABLE clinical_note_section (
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     section TEXT NOT NULL
+       CHECK (section IN ('chief-complaint', 'present-illness', 'past-history', 'findings', 'assessment', 'plan')),
+     content TEXT NOT NULL,
+     last_edited_by TEXT NOT NULL CHECK (last_edited_by IN ('doctor', 'assistant')),
+     updated_at TEXT NOT NULL,
+     PRIMARY KEY (encounter_id, section)
+   );
+   CREATE TABLE clinical_note_revision (
+     revision_id TEXT PRIMARY KEY,
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     version INTEGER NOT NULL,
+     seq INTEGER NOT NULL,
+     content TEXT NOT NULL,
+     practitioner_id TEXT NOT NULL,
+     signed_at TEXT NOT NULL,
+     UNIQUE (encounter_id, version),
+     UNIQUE (encounter_id, seq)
+   );
+   CREATE TRIGGER clinical_note_revision_no_update BEFORE UPDATE ON clinical_note_revision
+   BEGIN SELECT RAISE(ABORT, 'signed Clinical Note revisions are immutable'); END;
+   CREATE TRIGGER clinical_note_revision_no_delete BEFORE DELETE ON clinical_note_revision
+   BEGIN SELECT RAISE(ABORT, 'signed Clinical Note revisions are immutable'); END;`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

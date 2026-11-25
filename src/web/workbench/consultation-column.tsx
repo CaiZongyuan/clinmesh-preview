@@ -15,6 +15,7 @@ import { MAX_QUESTION_LENGTH, type ConsultationTurn, type PatientTurnFailure } f
 import type { EncounterView } from '../../shared/encounter'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import type { Consultation } from '../consultation/use-consultation'
+import { QuoteMenu, quotedTurn } from './clinical-note/quote-menu'
 import { formatClockSeconds } from './format'
 import { badge, iconButton, pane, paneHeader } from './pane-styles'
 import { PhysicalExaminationPanel, PhysicalExaminationRow } from './physical-examination'
@@ -228,7 +229,12 @@ function TurnRow({ turn, patientName, streamed, retry }: TurnRowProps) {
           <p className="m-0 text-sm leading-relaxed [overflow-wrap:anywhere]">{turn.text}</p>
         )}
       </div>
-      {turn.status === 'final' && <CopyTurn turn={turn} />}
+      {turn.status === 'final' && (
+        <div className="absolute top-0 right-0 flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-open]]:opacity-100">
+          <CopyTurn turn={turn} />
+          <QuoteMenu label={`引用第 ${turn.seq} 条到病历`} text={quotedTurn(turn.speaker, turn.text)} />
+        </div>
+      )}
     </li>
   )
 }
@@ -272,14 +278,14 @@ function CopyTurn({ turn }: { turn: ConsultationTurn }) {
     setTimeout(() => setState('idle'), 1500)
   }
   return (
-    <div className="absolute top-0 right-0 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+    <>
       <Button aria-label={`复制第 ${turn.seq} 条`} title="复制" className={`${iconButton} size-6 bg-card`} onClick={copy}>
         {state === 'copied' ? <CheckIcon aria-hidden="true" size={12} /> : <CopyIcon aria-hidden="true" size={12} />}
       </Button>
       <span role="status" aria-label={`第 ${turn.seq} 条复制状态`} className="sr-only">
         {state === 'copied' ? '已复制' : state === 'failed' ? '无法访问剪贴板，请手动选择文本' : ''}
       </span>
-    </div>
+    </>
   )
 }
 

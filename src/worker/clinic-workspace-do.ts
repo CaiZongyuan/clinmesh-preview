@@ -3,6 +3,8 @@ import { MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } fr
 import type { EncounterError, EncounterView } from '../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
 import type { BodySystem } from '../shared/physical-examination'
+import type { NoteSections } from '../shared/clinical-note'
+import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
 import { ConsultationRepository, type Exchange } from './consultation-repository'
 import { EncounterRepository, type EncounterResult } from './encounter-repository'
 import { encounterChart, goldenCaseRegistrations, personaFor } from './golden-case-pack'
@@ -35,6 +37,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   private readonly examinations: PhysicalExaminationRepository
   private readonly investigations: InvestigationRepository
   private readonly consultation: ConsultationRepository
+  private readonly clinicalNote: ClinicalNoteRepository
   // How long the Simulated Patient has to answer, and how much longer the workspace waits for it to say so.
   private readonly turnTimeoutMs: number
   private readonly expiryGraceMs: number
@@ -46,6 +49,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     this.examinations = new PhysicalExaminationRepository(ctx.storage.sql, this.encounters)
     this.investigations = new InvestigationRepository(ctx.storage.sql, this.encounters)
     this.consultation = new ConsultationRepository(ctx.storage.sql)
+    this.clinicalNote = new ClinicalNoteRepository(ctx.storage.sql, this.encounters)
     this.turnTimeoutMs = millis(env.PATIENT_TURN_TIMEOUT_MS, 30_000)
     this.expiryGraceMs = millis(env.PATIENT_TURN_EXPIRY_GRACE_MS, 5_000)
     ctx.blockConcurrencyWhile(async () => {
@@ -135,6 +139,22 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   acknowledgeReports(encounterId: string, reportIds: string[]): InvestigationsResult {
     return this.ctx.storage.transactionSync(() =>
       this.investigations.acknowledge(encounterId, reportIds, DEMO_PRACTITIONER_ID, Date.now()),
+    )
+  }
+
+  getClinicalNote(encounterId: string): ClinicalNoteResult {
+    return this.clinicalNote.view(encounterId)
+  }
+
+  saveClinicalNoteDraft(encounterId: string, sections: Partial<NoteSections>): ClinicalNoteResult {
+    return this.ctx.storage.transactionSync(() =>
+      this.clinicalNote.saveDraft(encounterId, sections, 'doctor', new Date().toISOString()),
+    )
+  }
+
+  signClinicalNote(encounterId: string, sections: NoteSections): ClinicalNoteResult {
+    return this.ctx.storage.transactionSync(() =>
+      this.clinicalNote.sign(encounterId, sections, DEMO_PRACTITIONER_ID, new Date().toISOString()),
     )
   }
 
