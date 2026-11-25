@@ -187,7 +187,7 @@ const MIGRATIONS: readonly string[] = [
      encounter_id TEXT PRIMARY KEY REFERENCES encounter (encounter_id),
      practitioner_id TEXT NOT NULL,
      recorded_at TEXT NOT NULL
-   );`,,
+   );`,
   // Spoken doctor turns keep how they were recognized: the recognizer, how long the doctor spoke and the
   // recognizer's confidence (NULL when it reports none). Typed and patient turns leave all three NULL.
   `ALTER TABLE consultation_turn ADD COLUMN voice_recognizer TEXT CHECK (voice_recognizer IN ('paraformer-realtime-v2', 'web-speech'));
