@@ -119,6 +119,7 @@ export function createFakeClinicApi({
   notes = {} as Record<string, ClinicalNoteView>,
   diagnoses = {} as Record<string, DiagnosisView>,
   recognizer = 'web-speech' as 'web-speech' | 'paraformer-realtime-v2',
+  patientSpeech = false,
   debriefReference = undefined as CaseDebriefReference | undefined,
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
@@ -311,6 +312,7 @@ export function createFakeClinicApi({
     const speech = action?.match(/^consultation\/patient-turns\/([^/]+)\/speech$/)
     if (method === 'POST' && speech) {
       if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，不再合成语音。')
+      if (!patientSpeech) return refuse('invalid-request', '未配置语音合成（BAILIAN_TOKEN）。')
       const requested = body as { text?: string }
       if (typeof requested?.text !== 'string' || !requested.text.trim()) return refuse('invalid-request', '请求体须为 { "text": string }')
       speechRequests.push({ encounterId: encounter.encounterId, turnId: speech[1], text: requested.text })
@@ -545,11 +547,13 @@ export function createFakeClinicApi({
     }
   }
 
-  // One constructor for both sockets: it dispatches on the path and forwards to the real fake.
+  // One constructor dispatches to the transport selected by the browser.
   class FakeSocket {
-    private readonly inner: FakePatientSocket | FakeCopilotSocket
+    private readonly inner: FakePatientSocket | FakeCopilotSocket | FakeVoiceSocket
     constructor(url: string) {
-      this.inner = url.endsWith('/copilot/socket') ? new FakeCopilotSocket(url) : new FakePatientSocket(url)
+      if (url.endsWith('/voice')) this.inner = new FakeVoiceSocket(url)
+      else if (url.endsWith('/copilot/socket')) this.inner = new FakeCopilotSocket(url)
+      else this.inner = new FakePatientSocket(url)
     }
     get onopen() { return this.inner.onopen }
     set onopen(value) { this.inner.onopen = value }

@@ -1,137 +1,95 @@
 import type { TTSProvider } from 'agents/voice'
-import { connectDashScope } from './paraformer-transcriber'
+import { connectDashScope, type ConnectUpstream } from './paraformer-transcriber'
 
-export const SAMBERT_MODEL = 'sambert'
-export const SAMBERT_VOICE = 'zhitian'
+export const SAMBERT_MODEL = 'sambert-zhida-v1'
+const TASK_TIMEOUT_MS = 25_000
 
-// The `agents/voice` TTSProvider for Bailian Sambert (ADR-0003). One DashScope task per reply chunk: the whole
-// text goes out in a single `run-task` with `streaming: "out"`, binary frames stream back, and the task ends by
-// itself with `task-finished` — Sambert rejects `continue-task`/`finish-task`, so none is ever sent.
-// DashScope streams the WAV with sentinel lengths in the header (RIFF 0x7fffffbf, data 0x7fffff9b); after
-// `task-finished` they are rewritten to the real total lengths, otherwise players cannot read the file.
 export class SambertTTSProvider implements TTSProvider {
-  constructor(
-    private readonly options: { token: string; connect?: typeof connectDashScope; sampleRate?: number },
-  ) {}
+  constructor(private readonly options: { token: string; connect?: ConnectUpstream }) {}
 
   synthesize(text: string, signal?: AbortSignal): Promise<ArrayBuffer | null> {
-    return new SambertTask(this.options, text, signal).run()
+    if (signal?.aborted) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      let socket: WebSocket | undefined
+      let finished = false
+      const chunks: ArrayBuffer[] = []
+      const taskId = crypto.randomUUID().replaceAll('-', '')
+      const timeout = setTimeout(() => finish(null), TASK_TIMEOUT_MS)
+      const abort = () => finish(null)
+      const finish = (wav: ArrayBuffer | null) => {
+        if (finished) return
+        finished = true
+        clearTimeout(timeout)
+        signal?.removeEventListener('abort', abort)
+        socket?.close()
+        resolve(wav)
+      }
+      signal?.addEventListener('abort', abort, { once: true })
+
+      const connect = this.options.connect ?? connectDashScope
+      void connect(this.options.token).then((connected) => {
+        if (finished) {
+          connected.close()
+          return
+        }
+        socket = connected
+        connected.binaryType = 'arraybuffer'
+        connected.addEventListener('close', abort)
+        connected.addEventListener('error', abort)
+        connected.addEventListener('message', (event) => {
+          if (finished) return
+          if (event.data instanceof ArrayBuffer) {
+            chunks.push(event.data)
+            return
+          }
+          if (typeof event.data !== 'string') return
+          let header: { event?: string; task_id?: string } | undefined
+          try {
+            header = (JSON.parse(event.data) as { header?: typeof header }).header
+          } catch {
+            return
+          }
+          if (header?.task_id !== taskId) return
+          if (header.event === 'task-finished') finish(repairFinishedWav(concat(chunks)))
+          else if (header.event === 'task-failed') finish(null)
+        })
+        // Sambert accepts one run-task with the complete text. It rejects finish-task.
+        connected.send(JSON.stringify({
+          header: { action: 'run-task', task_id: taskId, streaming: 'out' },
+          payload: {
+            task_group: 'audio',
+            task: 'tts',
+            function: 'SpeechSynthesizer',
+            model: SAMBERT_MODEL,
+            parameters: { text_type: 'PlainText', format: 'wav', sample_rate: 16_000, volume: 50, rate: 1, pitch: 1 },
+            input: { text },
+          },
+        }))
+      }).catch(abort)
+    })
   }
 }
 
-type TaskState = 'connecting' | 'started' | 'finished' | 'failed'
-
-const START_TIMEOUT_MS = 10_000
-
-// Rewrites the WAV header's RIFF and `data` chunk sizes from the streamed sentinels to the real total length.
-export function repairFinishedWav(buffer: ArrayBuffer): ArrayBuffer {
+// DashScope's streamed RIFF and data sizes are placeholders until task-finished.
+export function repairFinishedWav(buffer: ArrayBuffer): ArrayBuffer | null {
+  if (buffer.byteLength <= 44) return null
+  const tag = (offset: number) => String.fromCharCode(...new Uint8Array(buffer, offset, 4))
+  if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') return null
   const view = new DataView(buffer)
-  view.setUint32(4, buffer.byteLength - 8, true)
-  let offset = 12
-  while (offset + 8 <= buffer.byteLength) {
-    const id = String.fromCharCode(...new Uint8Array(buffer, offset, 4))
-    const size = view.getUint32(offset + 4, true)
-    if (id === 'data') {
+  for (let offset = 12; offset + 8 <= buffer.byteLength;) {
+    if (tag(offset) === 'data') {
+      view.setUint32(4, buffer.byteLength - 8, true)
       view.setUint32(offset + 4, buffer.byteLength - offset - 8, true)
       return buffer
     }
+    const size = view.getUint32(offset + 4, true)
     offset += 8 + size + (size % 2)
   }
-  return buffer
-}
-
-class SambertTask {
-  private socket: WebSocket | null = null
-  private state: TaskState = 'connecting'
-  private readonly chunks: ArrayBuffer[] = []
-  private readonly taskId = crypto.randomUUID().replaceAll('-', '')
-  private timer: ReturnType<typeof setTimeout> | null = null
-  private settle: ((wav: ArrayBuffer | null) => void) | null = null
-
-  constructor(
-    private readonly options: { token: string; connect?: typeof connectDashScope; sampleRate?: number },
-    private readonly text: string,
-    private readonly signal?: AbortSignal,
-  ) {}
-
-  async run(): Promise<ArrayBuffer | null> {
-    const done = new Promise<ArrayBuffer | null>((resolve) => (this.settle = resolve))
-    this.signal?.addEventListener('abort', () => this.finish(null), { once: true })
-    try {
-      this.socket = await (this.options.connect ?? connectDashScope)(this.options.token)
-    } catch {
-      this.finish(null)
-      return done
-    }
-    this.timer = setTimeout(() => this.finish(null), START_TIMEOUT_MS)
-    this.socket.addEventListener('message', (event: MessageEvent) => this.receive(event))
-    this.socket.addEventListener('close', () => this.finish(null))
-    this.socket.send(
-      JSON.stringify({
-        header: { action: 'run-task', task_id: this.taskId, streaming: 'out' },
-        payload: {
-          task_group: 'audio',
-          task: 'tts',
-          function: 'SpeechSynthesizer',
-          model: SAMBERT_MODEL,
-          parameters: {
-            text_type: 'PlainText',
-            format: 'wav',
-            sample_rate: this.options.sampleRate ?? 16_000,
-            voice: SAMBERT_VOICE,
-            volume: 50,
-            rate: 1,
-            pitch: 1,
-          },
-          input: { text: this.text },
-        },
-      }),
-    )
-    return done
-  }
-
-  private async receive(event: MessageEvent): Promise<void> {
-    if (this.state === 'finished' || this.state === 'failed') return
-    if (typeof event.data !== 'string') {
-      // Over a WebSocketPair inside one isolate, binary frames arrive as Blobs.
-      const bytes = event.data instanceof ArrayBuffer ? event.data : await (event.data as Blob).arrayBuffer()
-      this.chunks.push(bytes)
-      return
-    }
-    let header: { header?: { event?: string; error_message?: string } }
-    try {
-      header = JSON.parse(event.data) as typeof header
-    } catch {
-      return
-    }
-    if (header.header?.event === 'task-started') {
-      this.state = 'started'
-    } else if (header.header?.event === 'task-finished') {
-      const wav = repairFinishedWav(concat(this.chunks))
-      this.state = 'finished'
-      this.finish(wav.byteLength > 44 ? wav : null)
-    } else if (header.header?.event === 'task-failed') {
-      this.state = 'failed'
-      this.finish(null)
-    }
-  }
-
-  private finish(wav: ArrayBuffer | null): void {
-    if (this.timer) clearTimeout(this.timer)
-    if (this.socket && this.state !== 'finished') {
-      // Aborted or failed mid-task: just drop the socket; Sambert ends unfinished tasks itself.
-      try {
-        this.socket.close()
-      } catch {}
-    }
-    this.socket = null
-    this.settle?.(wav)
-  }
+  return null
 }
 
 function concat(chunks: ArrayBuffer[]): ArrayBuffer {
-  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
-  const out = new Uint8Array(total)
+  const out = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0))
   let offset = 0
   for (const chunk of chunks) {
     out.set(new Uint8Array(chunk), offset)

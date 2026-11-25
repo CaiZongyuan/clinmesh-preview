@@ -77,9 +77,9 @@ interface ColumnProps {
 export function ConsultationColumn({ encounter: context, consultation, onCollapse }: ColumnProps) {
   const [filter, setFilter] = useState<TranscriptFilter>('all')
   const encounter = context?.encounter
-  const voice = useVoiceCapture(encounter?.encounterId ?? null, consultation.accept)
-  // The patient's spoken replies; the doctor starting to capture — 持续收音 toggle-on or a hold press — barge-ins.
-  const speech = usePatientSpeech(encounter ?? null, consultation, voice.capturing)
+  const liveEncounterId = encounter?.status === 'active' ? encounter.encounterId : null
+  const speech = usePatientSpeech(liveEncounterId, consultation)
+  const voice = useVoiceCapture(liveEncounterId, consultation.accept, speech.interrupt)
   const visible = transcriptOf(consultation.turns, context?.examinations ?? []).filter(
     (entry) => filter === 'all' || entry.channel === filter,
   )
@@ -117,17 +117,19 @@ export function ConsultationColumn({ encounter: context, consultation, onCollaps
                 </SegmentedControlItem>
               ))}
             </SegmentedControl>
-            <StreamStatus consultation={consultation} />
-          </div>
-          <div className="flex flex-none justify-end border-b px-3.5 py-1">
-            <Button
-              aria-label={speech.muted ? '取消患者语音静音' : '静音患者语音'}
-              title={speech.muted ? '取消静音' : '静音'}
-              className={iconButton}
-              onClick={speech.toggleMute}
-            >
-              {speech.muted ? <VolumeXIcon aria-hidden="true" size={15} /> : <Volume2Icon aria-hidden="true" size={15} />}
-            </Button>
+            <div className="flex items-center gap-1">
+              <StreamStatus consultation={consultation} />
+              {liveEncounterId && (
+                <Button
+                  aria-label={speech.muted ? '取消患者语音静音' : '静音患者语音'}
+                  title={speech.muted ? '取消静音' : '静音'}
+                  className={iconButton}
+                  onClick={speech.toggleMute}
+                >
+                  {speech.muted ? <VolumeXIcon aria-hidden="true" size={15} /> : <Volume2Icon aria-hidden="true" size={15} />}
+                </Button>
+              )}
+            </div>
           </div>
           <ScrollArea stickToEnd className="relative min-h-0 flex-1">
             <ScrollAreaViewport role="log" aria-label="问诊实时记录" className="h-full">
@@ -149,10 +151,9 @@ export function ConsultationColumn({ encounter: context, consultation, onCollaps
                             entry.turn.speaker === 'patient'
                               ? {
                                   interrupted: speech.interrupted.has(entry.turn.turnId),
-                                  playing: speech.playingTurnId === entry.turn.turnId,
                                   progress: speech.playingTurnId === entry.turn.turnId ? speech.progress : null,
                                   replay:
-                                    entry.turn.status === 'final' && entry.turn.text.trim()
+                                    liveEncounterId && entry.turn.status === 'final' && entry.turn.text.trim()
                                       ? () => speech.replay(entry.turn)
                                       : undefined,
                                 }
@@ -208,7 +209,6 @@ function StreamStatus({ consultation }: { consultation: Consultation }) {
 
 interface TurnSpeech {
   interrupted: boolean
-  playing: boolean
   progress: number | null
   replay?: () => void
 }
@@ -283,18 +283,18 @@ function TurnRow({ turn, patientName, streamed, speech, retry }: TurnRowProps) {
         ) : (
           <div>
             <p className="m-0 text-sm leading-relaxed [overflow-wrap:anywhere]">{turn.text}</p>
-            {speech?.playing && speech.progress !== null && (
-              <div
-                role="progressbar"
-                aria-label={`第 ${turn.seq} 条语音播放进度`}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(speech.progress * 100)}
-                className="mt-1 h-1 w-40 overflow-hidden rounded-full bg-muted"
-              >
-                <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${speech.progress * 100}%` }} />
-              </div>
-            )}
+          </div>
+        )}
+        {speech && speech.progress !== null && (
+          <div
+            role="progressbar"
+            aria-label={`第 ${turn.seq} 条语音播放进度`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(speech.progress * 100)}
+            className="mt-1 h-1 w-40 overflow-hidden rounded-full bg-muted"
+          >
+            <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${speech.progress * 100}%` }} />
           </div>
         )}
       </div>

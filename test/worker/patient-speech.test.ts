@@ -1,7 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
-import { api } from './support/clinic'
+import { describe, expect, it } from 'vitest'
 import { installScripted } from './support/scripted-llm'
-import { asked, settled, startEncounter } from './support/clinic'
+import { api, asked, openPatientSocket, settled, startEncounter } from './support/clinic'
 import { installScriptedSambert } from '../../src/worker/voice/voice-config'
 
 // The DashScope end of one Sambert task for route tests: reacts to the run-task the provider sends, streams a
@@ -73,6 +72,30 @@ describe('patient speech (Sambert through the workbench route)', () => {
     expect(view.getUint32(4, true)).toBe(44)
     expect(view.getUint32(40, true)).toBe(8)
     expect(fake.tasks).toEqual([{ taskId: expect.any(String), text: turn.text, finishTasks: 0 }])
+  })
+
+  it('synthesizes only text already streamed by the patient while its reply is pending', async () => {
+    const fake = installFakeSambert()
+    const gate = installScripted('patient').gate('我前几天发烧。', '还有些咳嗽。')
+    const encounterId = await startEncounter()
+    const socket = await openPatientSocket(encounterId)
+    const { patientTurn } = await asked(encounterId, '您哪里不舒服？')
+    try {
+      await socket.waitFor((messages) => messages.some((message) => message.type === 'event' && message.event.type === 'text.delta'))
+      const fabricated = await speech(encounterId, patientTurn.turnId, { text: '我没有发烧。' })
+      expect(fabricated.status).toBe(400)
+      const streamed = await speech(encounterId, patientTurn.turnId, { text: '我前几天发烧。' })
+      expect(streamed.status).toBe(200)
+      expect(fake.tasks.map((task) => task.text)).toEqual(['我前几天发烧。'])
+    } finally {
+      socket.close()
+      gate.release()
+      await settled(encounterId, patientTurn.turnId)
+    }
+
+    const fabricated = await speech(encounterId, patientTurn.turnId, { text: '我没有发烧。' })
+    expect(fabricated.status).toBe(400)
+    expect(fake.tasks).toHaveLength(1)
   })
 
   it('refuses a pending or unknown turn, and an oversized text', async () => {

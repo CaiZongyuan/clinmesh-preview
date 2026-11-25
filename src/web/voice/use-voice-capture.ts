@@ -15,6 +15,7 @@ export const CANCEL_SLIDE_PX = 48
 // browser's own Web Speech API recognizes speech and each final result goes over HTTP.
 const TARGET_RATE = 16_000
 const METER_POINTS = 256
+const SPEECH_LEVEL = 0.025
 
 export type AsrState = 'off' | 'connecting' | 'ready' | 'error'
 
@@ -69,6 +70,7 @@ type VoiceTurnMessage = Extract<VoiceServerMessage, { type: 'clinmesh.voice-turn
 export function useVoiceCapture(
   encounterId: string | null,
   onTurn: (doctorTurn: ConsultationTurn, patientTurn: ConsultationTurn) => void,
+  onSpeechStart?: () => void,
 ): VoiceCaptureController {
   const [recognizer, setRecognizer] = useState<Recognizer | null>(null)
   const [asr, setAsr] = useState<AsrState>('off')
@@ -196,10 +198,10 @@ export function useVoiceCapture(
 
   // The microphone streams while a capture is open (continuous keeps it between sentences).
   useEffect(() => {
-    if (recognizer !== 'paraformer-realtime-v2' || !captureMode || paused) return
+    if (recognizer !== 'paraformer-realtime-v2' || !encounterId || !captureMode || paused) return
     const mic = new MicStream((frame) => {
       if (socketRef.current?.readyState === WebSocket.OPEN && !pausedRef.current) socketRef.current.send(frame)
-    }, deviceId, { onReady: setDeviceLabel, onDevices: setDevices, onLevel: setLevel })
+    }, deviceId, { onReady: setDeviceLabel, onDevices: setDevices, onLevel: setLevel, onSpeechStart })
     micRef.current = mic
     void mic.start((message) => {
       setError(message)
@@ -208,7 +210,7 @@ export function useVoiceCapture(
     return () => {
       stopMic()
     }
-  }, [recognizer, captureMode, paused, deviceId, endSession, stopMic])
+  }, [recognizer, encounterId, captureMode, paused, deviceId, endSession, stopMic, onSpeechStart])
 
   const beginSession = useCallback((mode: CaptureMode) => {
     setError(null)
@@ -289,6 +291,7 @@ export function useVoiceCapture(
         )
       },
       onInterim: setInterim,
+      onSpeechStart,
       onError: (message) => {
         setError(message)
         endSession()
@@ -303,7 +306,7 @@ export function useVoiceCapture(
       webSpeechRef.current = null
       setAsr('off')
     }
-  }, [recognizer, encounterId, captureMode, paused, onTurn, endSession])
+  }, [recognizer, encounterId, captureMode, paused, onTurn, endSession, onSpeechStart])
 
   return {
     recognizer,
@@ -346,6 +349,7 @@ class MicStream {
       onReady(label: string | null): void
       onDevices(devices: MediaDeviceInfo[]): void
       onLevel(level: number): void
+      onSpeechStart?: () => void
     },
   ) {}
 
@@ -383,10 +387,13 @@ class MicStream {
       const input = event.inputBuffer.getChannelData(0)
       const ratio = Math.max(1, ctx.sampleRate / TARGET_RATE)
       const out = new Int16Array(Math.floor(input.length / ratio))
+      let energy = 0
       for (let i = 0; i < out.length; i++) {
         const v = input[Math.floor(i * ratio)] ?? 0
+        energy += v * v
         out[i] = Math.max(-1, Math.min(1, v)) * 0x7fff
       }
+      if (energy > SPEECH_LEVEL ** 2 * out.length) this.hooks.onSpeechStart?.()
       if (out.length > 0) this.onFrame(out.buffer)
     }
     source.connect(processor)
@@ -418,6 +425,7 @@ class WebSpeechSession {
     private readonly hooks: {
       onFinal(text: string, durationMs: number, confidence: number | null): void
       onInterim(text: string | null): void
+      onSpeechStart?: () => void
       onError(message: string): void
       onEmpty(): void
       onEnd(): void
@@ -436,6 +444,9 @@ class WebSpeechSession {
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = 'zh-CN'
+    recognition.onspeechstart = () => {
+      if (this.recognition === recognition) this.hooks.onSpeechStart?.()
+    }
     recognition.onresult = (event) => {
       if (this.recognition !== recognition) return
       let interim: string | null = null
@@ -505,6 +516,7 @@ interface SpeechRecognitionLike {
   continuous: boolean
   interimResults: boolean
   lang: string
+  onspeechstart: (() => void) | null
   onresult: ((event: { resultIndex: number; results: SpeechResultListLike }) => void) | null
   onerror: ((event: { error: string }) => void) | null
   onend: (() => void) | null

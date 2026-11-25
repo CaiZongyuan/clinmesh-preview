@@ -27,8 +27,8 @@ const sentinelWav = (payloadBytes = 8): ArrayBuffer => {
 
 interface FakeService {
   client: WebSocket
-  actions: RunTask[]
-  audio: number[]
+  actions(): RunTask[]
+  audio(): number[]
   finished: boolean
   clientClosed: boolean
   taskId(): string
@@ -43,7 +43,7 @@ function fakeService(): FakeService {
   const received: (RunTask | number)[] = []
   let finished = false
   let clientClosed = false
-  client.addEventListener('close', () => (clientClosed = true))
+  client.addEventListener('close', () => { clientClosed = true })
   service.accept()
   service.addEventListener('message', (event) => {
     if (typeof event.data !== 'string') {
@@ -103,12 +103,11 @@ describe('SambertTTSProvider (sambert over the DashScope one-way streaming WebSo
         task_group: 'audio',
         task: 'tts',
         function: 'SpeechSynthesizer',
-        model: 'sambert',
+        model: 'sambert-zhida-v1',
         parameters: {
           text_type: 'PlainText',
           format: 'wav',
           sample_rate: 16_000,
-          voice: 'zhitian',
           volume: 50,
           rate: 1,
           pitch: 1,
@@ -136,9 +135,9 @@ describe('SambertTTSProvider (sambert over the DashScope one-way streaming WebSo
 
   it('repairs the streamed sentinels in repairFinishedWav', () => {
     const wav = repairFinishedWav(sentinelWav(12))
-    const view = new DataView(wav)
-    expect(view.getUint32(4, true)).toBe(wav.byteLength - 8)
-    expect(view.getUint32(40, true)).toBe(wav.byteLength - 44)
+    const view = new DataView(wav!)
+    expect(view.getUint32(4, true)).toBe(wav!.byteLength - 8)
+    expect(view.getUint32(40, true)).toBe(wav!.byteLength - 44)
   })
 
   it('resolves null on task-failed and closes the socket', async () => {
@@ -149,6 +148,28 @@ describe('SambertTTSProvider (sambert over the DashScope one-way streaming WebSo
     service.fail('InvalidApiKey', 'bad token')
     await expect(pending).resolves.toBeNull()
     await until(() => expect(service.clientClosed).toBe(true))
+  })
+
+  it('returns on cancellation while the handshake is pending and discards any late socket', async () => {
+    const service = fakeService()
+    let connected!: (socket: WebSocket) => void
+    const provider = new SambertTTSProvider({
+      token: 'test-bailian-token',
+      connect: () => new Promise<WebSocket>((resolve) => { connected = resolve }),
+    })
+    const controller = new AbortController()
+    const task = provider.synthesize('您最近有发烧吗？', controller.signal)
+    controller.abort()
+
+    try {
+      const state = await Promise.race([task, Promise.resolve().then(() => Promise.resolve('pending'))])
+      expect(state).toBeNull()
+    } finally {
+      connected(service.client)
+      if (!service.clientClosed) service.client.close()
+    }
+    await expect(task).resolves.toBeNull()
+    expect(service.actions()).toHaveLength(0)
   })
 
   it('supports AbortSignal cancellation: aborting drops the task, sends nothing further and resolves null', async () => {

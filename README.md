@@ -40,10 +40,12 @@ The doctor can speak instead of type (持续收音 hands-free with recognizer VA
 
 ```
 # .dev.vars
-BAILIAN_TOKEN=...   # secret; enables the Worker-side Paraformer recognizer
+BAILIAN_TOKEN=...   # secret; enables Paraformer recognition and Sambert playback
 ```
 
 A Paraformer-recognized turn carries `voice: { recognizer, durationMs, confidence: null }` (Paraformer reports no confidence score). The voice socket `/api/encounters/:encounterId/voice` speaks the Cloudflare `agents/voice` protocol plus ClinMesh messages (`src/shared/voice.ts`); it is refused once the Encounter is frozen.
+
+The workbench can play the Simulated Patient's reply through Sambert as its text arrives. The Consultation shows playback progress, mute and per-reply replay. Speaking into either capture mode interrupts current playback. Automatic playback is subject to the browser's media policy.
 
 ### HTTP API
 
@@ -65,6 +67,7 @@ Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "
 | `GET /api/encounters/:encounterId/prescriptions` | Issued prescription lines and the No Medication conclusion, if any |
 | `POST /api/encounters/:encounterId/prescriptions` `{ lines }` | Issues the whole prescription atomically after a confirmed Diagnosis (201). A penicillin-class line for a penicillin-allergic patient: `409 MEDICATION_ALLERGY_CONFLICT`, nothing issued, no override. A cephalosporin needs `override { reason, note ≥4 chars }` per line (`422 medication-override-required`). `409 no-medication-conflict` against a recorded 无需用药 |
 | `POST /api/encounters/:encounterId/no-medication` | Records 无需用药 (201); requires a confirmed Diagnosis and refuses while prescriptions exist (`409 no-medication-conflict`) |
+| `POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/speech` `{ text }` | Repairs Sambert WAV for text already streamed by the Simulated Patient. Request cancellation drops synthesis. Frozen Encounters refuse playback. |
 | `GET /api/encounters/:encounterId/patient/socket` | WebSocket: the Simulated Patient's reply stream (`src/shared/agent-wire.ts`). Send `{ "type": "hello", "afterSeq": n }`; the server replays events after `n`, sends `replay.done`, then live events; `run.settled` follows once the workspace has the reply. `426` without an upgrade |
 | `GET /api/voice` | Which recognizer turns speech into questions: `paraformer-realtime-v2` with a `BAILIAN_TOKEN`, else the browser's Web Speech API |
 | `GET /api/encounters/:encounterId/voice` | WebSocket: the doctor's voice capture for an active Encounter (`src/shared/voice.ts`, the `agents/voice` protocol); `426` without an upgrade, `409 encounter-not-active` once frozen |

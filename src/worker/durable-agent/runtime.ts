@@ -730,6 +730,23 @@ export class DurableAgentRuntime {
     this.publish(published)
   }
 
+  replyText(externalRef: string): string {
+    const run = this.sql.exec<{ run_id: string; status: string }>(
+      'SELECT run_id, status FROM agent_run WHERE external_ref = ?', externalRef,
+    ).toArray()[0]
+    if (run?.status === 'done') {
+      return this.sql.exec<{ text: string }>(
+        `SELECT json_extract(content_json, '$.content') AS text FROM agent_message
+         WHERE run_id = ? AND role = 'assistant' AND state IN ('unsettled', 'active') ORDER BY seq DESC LIMIT 1`, run.run_id,
+      ).toArray()[0]?.text ?? ''
+    }
+    if (run?.status !== 'running') return ''
+    return this.sql.exec<{ text: string }>(
+      `SELECT json_extract(payload_json, '$.text') AS text FROM agent_event
+       WHERE run_id = ? AND type = 'text.delta' ORDER BY seq`, run.run_id,
+    ).toArray().map(({ text }) => text).join('')
+  }
+
   // Closes a run inside the caller's transaction and returns the events to publish once it commits.
   private close(run: AgentRun, outcome: RunOutcome, usage: RunUsage | null): LoggedEvent[] {
     const now = Date.now()
