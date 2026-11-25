@@ -203,6 +203,22 @@ const MIGRATIONS: readonly string[] = [
      encounter_id TEXT PRIMARY KEY REFERENCES encounter (encounter_id),
      reference TEXT NOT NULL
    );`,
+  `CREATE TABLE copilot_draft_proposal (
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     id TEXT NOT NULL,
+     run_id TEXT,
+     action_json TEXT NOT NULL,
+     label TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'accepted', 'dismissed')),
+     undo_json TEXT,
+     PRIMARY KEY (encounter_id, id)
+   );
+   CREATE INDEX copilot_draft_proposal_by_run ON copilot_draft_proposal (encounter_id, run_id, status);
+   CREATE TABLE doctor_draft_touch (
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     module TEXT NOT NULL,
+     PRIMARY KEY (encounter_id, module)
+   );`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

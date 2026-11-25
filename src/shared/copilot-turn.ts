@@ -74,6 +74,7 @@ export interface CopilotTurn {
   status: CopilotTurnStatus
   failure: CopilotFailure | null
   stopReason: CopilotStopReason | null
+  keptDrafts?: number
   steps: CopilotStep[]
   steers: CopilotSteer[]
   reply: string

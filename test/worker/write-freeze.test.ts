@@ -37,6 +37,10 @@ interface FrozenEncounter {
 // Every command that writes to one Encounter, each with a request that would succeed on an active Encounter.
 // A new write route under /api/encounters/:encounterId fails the first test until it is listed here.
 const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>> = {
+  'POST /api/encounters/:encounterId/draft-assistance': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/draft-assistance`, {
+      command: 'propose', id: 'probe', runId: null, protect: true, action: { module: 'investigations', itemId: 'pct' },
+    }),
   'POST /api/encounters/:encounterId/completion': ({ encounterId }) => send('POST', `/api/encounters/${encounterId}/completion`),
   'PUT /api/encounters/:encounterId/investigations/draft': ({ encounterId }) =>
     send('PUT', `/api/encounters/${encounterId}/investigations/draft`, { entries: ['pct'] }),

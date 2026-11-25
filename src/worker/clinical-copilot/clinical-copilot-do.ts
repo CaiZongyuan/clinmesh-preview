@@ -256,11 +256,19 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
 
   async snapshot(encounterId: string): Promise<CopilotSnapshot> {
     this.bind(encounterId)
+    const session = readSession(this.ctx.storage.sql)
+    const kept = session.turns.some((turn) => turn.status === 'stopped')
+      ? await this.env.CLINIC_WORKSPACE.getByName(WORKSPACE_NAME).getDraftAppliedCounts(encounterId)
+      : {}
     return {
       seq: this.runtime.events.latestSeq(),
       model: this.modelSetting(),
       countdown: this.countdown(),
-      ...readSession(this.ctx.storage.sql),
+      ...session,
+      turns: session.turns.map((turn) => {
+        const keptDrafts = kept[turn.turnId]
+        return keptDrafts && turn.status === 'stopped' ? { ...turn, keptDrafts } : turn
+      }),
     }
   }
 

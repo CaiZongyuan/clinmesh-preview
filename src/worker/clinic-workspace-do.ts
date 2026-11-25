@@ -1,3 +1,5 @@
+import type { DraftAssistance, DraftAssistanceCommand } from '../shared/draft-assistance'
+import { DraftAssistanceRepository, type DraftAssistanceResult } from './draft-assistance-repository'
 import { DurableObject } from 'cloudflare:workers'
 import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
 import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
@@ -44,6 +46,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   private readonly goldenCases: GoldenCaseRepository
   private readonly encounters: EncounterRepository
   private readonly completion: EncounterCompletionRepository
+  private readonly draftAssistance: DraftAssistanceRepository
   private readonly examinations: PhysicalExaminationRepository
   private readonly investigations: InvestigationRepository
   private readonly consultation: ConsultationRepository
@@ -66,6 +69,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     this.clinicalNote = new ClinicalNoteRepository(ctx.storage.sql, this.encounters)
     this.diagnosis = new DiagnosisRepository(ctx.storage.sql, this.encounters)
     this.prescriptions = new PrescriptionRepository(ctx.storage.sql, this.encounters)
+    this.draftAssistance = new DraftAssistanceRepository(ctx.storage.sql, this.completion, this.diagnosis, this.clinicalNote, this.prescriptions)
     this.copilotReads = new CopilotReadModel(this.encounters, this.examinations, this.investigations, this.consultation)
     this.turnTimeoutMs = millis(env.PATIENT_TURN_TIMEOUT_MS, 30_000)
     this.expiryGraceMs = millis(env.PATIENT_TURN_EXPIRY_GRACE_MS, 5_000)
@@ -126,7 +130,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       const investigations = this.investigations.list(active.encounter, now.getTime())
       const failedGates = completionGates(
         diagnosis.diagnosis, investigations, prescriptions.prescriptions,
-        note.note.revisions.at(-1), this.completion.drafts(encounterId),
+        note.note.revisions.at(-1), this.completion.drafts(encounterId), this.draftAssistance.pendingCount(encounterId),
       ).filter((gate) => !gate.met).map((gate) => gate.id)
       if (failedGates.length) {
         return { ok: false, error: {
@@ -195,6 +199,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       if (entries.some((id) => !catalogItem(id))) {
         return { ok: false, error: { code: 'catalog-item-not-found', message: '检查目录中未找到草稿项目。' } }
       }
+      this.draftAssistance.touch(encounterId, 'investigations')
       this.completion.saveDraft(encounterId, 'investigations', entries)
       return { ok: true, drafts: this.completion.drafts(encounterId) }
     })
@@ -208,9 +213,26 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       if (entries.some((entry) => !catalog.some((item) => item.id === entry.drugId))) {
         return { ok: false, error: { code: 'catalog-item-not-found', message: '药品目录中未找到处方草稿项目。' } }
       }
+      this.draftAssistance.touch(encounterId, 'prescriptions')
       this.completion.saveDraft(encounterId, 'prescriptions', entries)
       return { ok: true, drafts: this.completion.drafts(encounterId) }
     })
+  }
+
+  getDraftAssistance(encounterId: string): { ok: true; assistance: DraftAssistance } | Refusal {
+    const found = this.encounters.get(encounterId)
+    return found.ok ? { ok: true, assistance: this.draftAssistance.view(encounterId) } : found
+  }
+
+  updateDraftAssistance(encounterId: string, command: DraftAssistanceCommand): DraftAssistanceResult {
+    return this.ctx.storage.transactionSync(() => {
+      const active = this.encounters.requireActive(encounterId)
+      return active.ok ? this.draftAssistance.command(active.encounter, command) : active
+    })
+  }
+
+  getDraftAppliedCounts(encounterId: string): Record<string, number> {
+    return this.draftAssistance.appliedCounts(encounterId)
   }
 
   getEncounter(encounterId: string): EncounterResult {
@@ -294,9 +316,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   saveDiagnosisDraft(encounterId: string, entries: DiagnosisDraftEntry[]): DiagnosisResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.diagnosis.saveDraft(encounterId, entries, new Date().toISOString()),
-    )
+    return this.ctx.storage.transactionSync(() => {
+      const result = this.diagnosis.saveDraft(encounterId, entries, new Date().toISOString())
+      if (result.ok) this.draftAssistance.touch(encounterId, 'diagnosis')
+      return result
+    })
   }
 
   confirmDiagnosis(encounterId: string, entries: DiagnosisDraftEntry[]): DiagnosisResult {
@@ -306,7 +330,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   reopenDiagnosis(encounterId: string): DiagnosisResult {
-    return this.ctx.storage.transactionSync(() => this.diagnosis.reopen(encounterId, new Date().toISOString()))
+    return this.ctx.storage.transactionSync(() => {
+      const result = this.diagnosis.reopen(encounterId, new Date().toISOString())
+      if (result.ok) this.draftAssistance.touch(encounterId, 'diagnosis')
+      return result
+    })
   }
 
   getPrescriptions(encounterId: string): PrescriptionsResult {

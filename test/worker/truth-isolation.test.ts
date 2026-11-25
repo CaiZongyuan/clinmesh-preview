@@ -84,6 +84,12 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     request('PUT', `/api/encounters/${encounterId}/prescriptions/draft`, {
       entries: [{ drugId: 'doxycycline', dose: 1, route: '口服', frequency: 'BID', days: 7 }],
     }),
+  'GET /api/encounters/:encounterId/draft-assistance': ({ encounterId }) =>
+    request('GET', `/api/encounters/${encounterId}/draft-assistance`),
+  'POST /api/encounters/:encounterId/draft-assistance': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/draft-assistance`, {
+      command: 'propose', id: 'probe', runId: null, protect: true, action: { module: 'investigations', itemId: 'pct' },
+    }),
   'POST /api/encounters/:encounterId/completion': ({ encounterId }) => request('POST', `/api/encounters/${encounterId}/completion`),
   'GET /api/encounters/:encounterId/debrief': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/debrief`),
   'GET /api/encounters/:encounterId/clinical-drafts': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/clinical-drafts`),

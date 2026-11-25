@@ -1,3 +1,4 @@
+import { parseDraftAssistanceCommand } from '../shared/draft-assistance'
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import {
@@ -188,6 +189,18 @@ app.post('/encounters/:encounterId/completion', async (c) => {
 app.get('/encounters/:encounterId/debrief', async (c) => {
   const result = await workspace(c).getCaseDebrief(c.req.param('encounterId'))
   return result.ok ? c.json({ debrief: result.debrief }) : refuse(c, result.error)
+})
+
+app.get('/encounters/:encounterId/draft-assistance', async (c) => {
+  const result = await workspace(c).getDraftAssistance(c.req.param('encounterId'))
+  return result.ok ? c.json({ assistance: result.assistance }) : refuse(c, result.error)
+})
+
+app.post('/encounters/:encounterId/draft-assistance', async (c) => {
+  const command = parseDraftAssistanceCommand(await c.req.json().catch(() => null))
+  if (!command) return refuse(c, { code: 'invalid-request', message: '草稿建议操作参数无效。' })
+  const result = await workspace(c).updateDraftAssistance(c.req.param('encounterId'), command)
+  return result.ok ? c.json(result.result) : refuse(c, result.error)
 })
 
 app.get('/encounters/:encounterId/clinical-drafts', async (c) => {

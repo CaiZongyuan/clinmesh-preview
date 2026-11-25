@@ -1,3 +1,4 @@
+import type { DraftAssistance, DraftAssistanceCommand, DraftAssistanceResponse } from '../shared/draft-assistance'
 import type { CaseDebrief, ClinicalDrafts } from '../shared/completion'
 import type {
   AskPatientResponse,
@@ -115,6 +116,14 @@ export async function completeEncounter(encounterId: string): Promise<EncounterV
 
 export async function fetchCaseDebrief(encounterId: string): Promise<CaseDebrief> {
   return (await request<{ debrief: CaseDebrief }>(`${encounterPath(encounterId)}/debrief`)).debrief
+}
+
+export async function fetchDraftAssistance(encounterId: string): Promise<DraftAssistance> {
+  return (await request<{ assistance: DraftAssistance }>(`${encounterPath(encounterId)}/draft-assistance`)).assistance
+}
+
+export function updateDraftAssistance(encounterId: string, command: DraftAssistanceCommand, signal?: AbortSignal) {
+  return request<DraftAssistanceResponse>(`${encounterPath(encounterId)}/draft-assistance`, { ...post(command), signal })
 }
 
 export async function fetchClinicalDrafts(encounterId: string): Promise<ClinicalDrafts> {
