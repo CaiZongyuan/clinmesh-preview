@@ -1,0 +1,124 @@
+{
+  "version": "2026-11-25.1",
+  "items": [
+    {
+      "id": "moxifloxacin",
+      "name": "盐酸莫西沙星片",
+      "spec": "0.4 g×3 片/盒",
+      "pack": 1,
+      "unit": "片",
+      "doseUnit": "片",
+      "drugClass": "quinolone",
+      "drugClassName": "喹诺酮类",
+      "pinyinInitials": ["mxsx"],
+      "defaults": { "dose": 1, "route": "口服", "frequency": "QD", "days": 7 },
+      "insert": {
+        "indications": "敏感菌所致成人社区获得性肺炎、急性细菌性鼻窦炎等。",
+        "contraindications": "对莫西沙星或其他喹诺酮类过敏者禁用；QT 间期延长、低钾血症者慎用。",
+        "notes": "与氨氯地平无已知临床相关相互作用；避免与含铝镁抗酸剂同服。"
+      }
+    },
+    {
+      "id": "doxycycline",
+      "name": "盐酸多西环素片",
+      "spec": "0.1 g×10 片/盒",
+      "pack": 1,
+      "unit": "片",
+      "doseUnit": "片",
+      "drugClass": "tetracycline",
+      "drugClassName": "四环素类",
+      "pinyinInitials": ["dxhs"],
+      "defaults": { "dose": 1, "route": "口服", "frequency": "BID", "days": 7 },
+      "insert": {
+        "indications": "社区获得性肺炎（非典型病原体）等。",
+        "contraindications": "对四环素类过敏者禁用；8 岁以下儿童、孕妇禁用。",
+        "notes": "服药时多饮水，服后半小时内不宜平卧。"
+      }
+    },
+    {
+      "id": "amoxicillin",
+      "name": "阿莫西林胶囊",
+      "spec": "0.25 g×24 粒/盒",
+      "pack": 1,
+      "unit": "粒",
+      "doseUnit": "粒",
+      "drugClass": "penicillin",
+      "drugClassName": "青霉素类",
+      "pinyinInitials": ["amxl"],
+      "defaults": { "dose": 2, "route": "口服", "frequency": "TID", "days": 7 },
+      "insert": {
+        "indications": "敏感菌所致呼吸道、泌尿道感染等。",
+        "contraindications": "青霉素类药物过敏史或青霉素皮肤试验阳性患者禁用。",
+        "notes": "用药前须询问过敏史并按规定做皮试。"
+      }
+    },
+    {
+      "id": "amoxiclav",
+      "name": "阿莫西林克拉维酸钾片",
+      "spec": "0.625 g×12 片/盒",
+      "pack": 1,
+      "unit": "片",
+      "doseUnit": "片",
+      "drugClass": "penicillin",
+      "drugClassName": "青霉素类",
+      "pinyinInitials": ["amxlklws"],
+      "defaults": { "dose": 1, "route": "口服", "frequency": "TID", "days": 7 },
+      "insert": {
+        "indications": "产酶菌所致下呼吸道感染等。",
+        "contraindications": "青霉素类过敏者禁用；既往使用本品出现胆汁淤积性黄疸者禁用。",
+        "notes": "餐前服用可减少胃肠道反应。"
+      }
+    },
+    {
+      "id": "cefuroxime",
+      "name": "头孢呋辛酯片",
+      "spec": "0.25 g×12 片/盒",
+      "pack": 1,
+      "unit": "片",
+      "doseUnit": "片",
+      "drugClass": "cephalosporin",
+      "drugClassName": "头孢菌素类",
+      "pinyinInitials": ["tbfx"],
+      "defaults": { "dose": 1, "route": "口服", "frequency": "BID", "days": 7 },
+      "insert": {
+        "indications": "敏感菌所致下呼吸道感染等。",
+        "contraindications": "对头孢菌素类过敏者禁用；青霉素过敏者慎用（交叉过敏）。",
+        "notes": "餐后服用吸收更好。"
+      }
+    },
+    {
+      "id": "acetaminophen",
+      "name": "对乙酰氨基酚片",
+      "spec": "0.5 g×12 片/盒",
+      "pack": 1,
+      "unit": "片",
+      "doseUnit": "片",
+      "drugClass": "analgesic",
+      "drugClassName": "解热镇痛",
+      "pinyinInitials": ["dyxajf"],
+      "defaults": { "dose": 1, "route": "口服", "frequency": "PRN", "days": 3 },
+      "insert": {
+        "indications": "发热、轻中度疼痛。",
+        "contraindications": "严重肝功能不全者禁用。",
+        "notes": "T>38.5℃ 时服用，间隔不少于 4 小时，每日不超过 4 次。"
+      }
+    },
+    {
+      "id": "ambroxol",
+      "name": "盐酸氨溴索口服溶液",
+      "spec": "100 mL:0.6 g/瓶",
+      "pack": 100,
+      "unit": "瓶",
+      "doseUnit": "mL",
+      "drugClass": "mucolytic",
+      "drugClassName": "祛痰",
+      "pinyinInitials": ["axs"],
+      "defaults": { "dose": 10, "route": "口服", "frequency": "TID", "days": 5 },
+      "insert": {
+        "indications": "痰液黏稠不易咳出。",
+        "contraindications": "对本品过敏者禁用。",
+        "notes": "餐后服用。"
+      }
+    }
+  ]
+}

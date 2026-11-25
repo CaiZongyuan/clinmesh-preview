@@ -52,6 +52,9 @@ export interface PriorVisit {
 
 export interface RecordedAllergy {
   agent: string
+  // The drug class the recorded allergy is to, when the clinic recorded it; class-level allergy rules
+  // match on this, never on a drug code.
+  drugClass?: string
   reaction: string
   onset: string
   source: string
@@ -108,6 +111,8 @@ export type AuditEventType =
   | 'patient-reply-retried'
   | 'clinical-note-signed'
   | 'diagnosis-confirmed'
+  | 'prescription-issued'
+  | 'no-medication-recorded'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -143,6 +148,11 @@ export type EncounterErrorCode =
   | 'clinical-note-incomplete'
   | 'diagnosis-needs-primary'
   | 'diagnosis-not-confirmed'
+  // The hard allergy red line: the whole prescription is refused and there is no override path.
+  // The code is spelled exactly as the acceptance criterion pins it.
+  | 'MEDICATION_ALLERGY_CONFLICT'
+  | 'medication-override-required'
+  | 'no-medication-conflict'
 
 export interface EncounterError {
   code: EncounterErrorCode

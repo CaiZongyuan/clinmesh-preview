@@ -7,6 +7,8 @@ import type { NoteSections } from '../shared/clinical-note'
 import { DiagnosisRepository, type DiagnosisResult } from './diagnosis-repository'
 import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
 import type { DiagnosisDraftEntry } from '../shared/diagnosis'
+import { PrescriptionRepository, type PrescriptionsResult } from './prescription-repository'
+import type { PrescriptionLineRequest } from '../shared/medication'
 import { ConsultationRepository, type Exchange } from './consultation-repository'
 import { EncounterRepository, type EncounterResult } from './encounter-repository'
 import { encounterChart, goldenCaseRegistrations, personaFor } from './golden-case-pack'
@@ -41,6 +43,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   private readonly consultation: ConsultationRepository
   private readonly clinicalNote: ClinicalNoteRepository
   private readonly diagnosis: DiagnosisRepository
+  private readonly prescriptions: PrescriptionRepository
   // How long the Simulated Patient has to answer, and how much longer the workspace waits for it to say so.
   private readonly turnTimeoutMs: number
   private readonly expiryGraceMs: number
@@ -54,6 +57,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     this.consultation = new ConsultationRepository(ctx.storage.sql)
     this.clinicalNote = new ClinicalNoteRepository(ctx.storage.sql, this.encounters)
     this.diagnosis = new DiagnosisRepository(ctx.storage.sql, this.encounters)
+    this.prescriptions = new PrescriptionRepository(ctx.storage.sql, this.encounters)
     this.turnTimeoutMs = millis(env.PATIENT_TURN_TIMEOUT_MS, 30_000)
     this.expiryGraceMs = millis(env.PATIENT_TURN_EXPIRY_GRACE_MS, 5_000)
     ctx.blockConcurrencyWhile(async () => {
@@ -180,6 +184,22 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
 
   reopenDiagnosis(encounterId: string): DiagnosisResult {
     return this.ctx.storage.transactionSync(() => this.diagnosis.reopen(encounterId, new Date().toISOString()))
+  }
+
+  getPrescriptions(encounterId: string): PrescriptionsResult {
+    return this.prescriptions.view(encounterId)
+  }
+
+  issuePrescription(encounterId: string, lines: PrescriptionLineRequest[]): PrescriptionsResult {
+    return this.ctx.storage.transactionSync(() =>
+      this.prescriptions.issue(encounterId, lines, DEMO_PRACTITIONER_ID, new Date().toISOString()),
+    )
+  }
+
+  recordNoMedication(encounterId: string): PrescriptionsResult {
+    return this.ctx.storage.transactionSync(() =>
+      this.prescriptions.recordNoMedication(encounterId, DEMO_PRACTITIONER_ID, new Date().toISOString()),
+    )
   }
 
   getConsultation(encounterId: string): ConsultationResult {

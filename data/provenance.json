@@ -86,6 +86,22 @@
         "Imaging and ECG/echo baseline narratives are authored here.",
         "simulatedTurnaroundSeconds is the simulation's shortened turnaround; expectedTurnaround is the clinic-facing text."
       ]
+    },
+    {
+      "target": "data/clinic-catalog/medication-catalog.json",
+      "snapshotAt": "2026-11-25",
+      "kind": "copied-from-prototype",
+      "sources": [
+        {
+          "path": "prototypes/copilot-workbench/workbench-prototype.html",
+          "repository": "this repository",
+          "used": "Formulary rows (name, spec, package, units, class, pinyin initials, default dose/route/frequency/days) and the per-drug package-insert summaries (ind, contra, note), carried verbatim from the DRUGS block; the fixed cross-allergen reason list (OVERRIDE_REASONS)."
+        }
+      ],
+      "notes": [
+        "Insert summaries are synthetic prototype content pinned as-is; the provenance line 药品说明书摘要（合成） is shown with every summary.",
+        "Allergy rules live in code (src/shared/medication.ts): a recorded allergy to a drug class refuses every drug of that class; cephalosporin cross-reacts with penicillin allergy. Matching uses the recorded allergy's drugClass, never a drug code."
+      ]
     }
   ]
 }

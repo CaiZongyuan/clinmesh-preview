@@ -67,7 +67,7 @@ export const goldenCase1Chart = {
         medications: [],
       },
     ],
-    allergies: [{ agent: '青霉素', reaction: '过敏性休克', onset: '2015-06', source: '急诊抢救记录' }],
+    allergies: [{ agent: '青霉素', drugClass: 'penicillin', reaction: '过敏性休克', onset: '2015-06', source: '急诊抢救记录' }],
     chronicConditions: [{ code: 'I10', display: '原发性高血压', onset: '2014', status: '规律服药，控制可' }],
     priorMedications: [{ display: '苯磺酸氨氯地平片', dosageText: '5 mg 每日一次 口服' }],
   },

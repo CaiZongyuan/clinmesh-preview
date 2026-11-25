@@ -9,6 +9,7 @@ import type { DiagnosisView } from '../../src/shared/diagnosis'
 import { createFakeClinicalNotes } from './fake-clinical-note'
 import { createFakeDiagnoses } from './fake-diagnosis'
 import { createFakeInvestigations, fakeCatalog } from './fake-investigations'
+import { createFakePrescriptions, fakeMedicationCatalog } from './fake-prescriptions'
 
 const STATUS: Record<EncounterError['code'], number> = {
   'catalog-item-not-found': 404,
@@ -32,6 +33,9 @@ const STATUS: Record<EncounterError['code'], number> = {
   'clinical-note-incomplete': 422,
   'diagnosis-needs-primary': 422,
   'diagnosis-not-confirmed': 409,
+  MEDICATION_ALLERGY_CONFLICT: 409,
+  'medication-override-required': 422,
+  'no-medication-conflict': 409,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })
@@ -98,6 +102,7 @@ export function createFakeClinicApi({
   const investigations = createFakeInvestigations(refuse)
   const clinicalNotes = createFakeClinicalNotes(refuse, notes)
   const fakeDiagnoses = createFakeDiagnoses(refuse, diagnoses)
+  const fakePrescriptions = createFakePrescriptions(refuse, (encounterId) => fakeDiagnoses.diagnosis(encounterId).revisions.length > 0)
   const turnsOf = (encounterId: string) => turns.get(encounterId) ?? turns.set(encounterId, []).get(encounterId)!
   const pendingOf = (encounterId: string) => turnsOf(encounterId).find((t) => t.status === 'pending')
 
@@ -167,6 +172,9 @@ export function createFakeClinicApi({
     if (method === 'GET' && path === '/api/investigation-catalog') {
       return Response.json({ catalogVersion: 'fake', items: fakeCatalog })
     }
+    if (method === 'GET' && path === '/api/medication-catalog') {
+      return Response.json({ catalogVersion: 'fake', items: fakeMedicationCatalog })
+    }
 
     const [, encounterId, action] = path.match(/^\/api\/encounters\/([^/]+)(?:\/(.+))?$/) ?? []
     const encounter = state.encounters.find((e) => e.encounterId === encounterId)
@@ -197,7 +205,8 @@ export function createFakeClinicApi({
       action &&
       (investigations.handle(method, encounter, action, body) ??
         clinicalNotes.handle(method, encounter, action, body) ??
-        fakeDiagnoses.handle(method, encounter, action, body))
+        fakeDiagnoses.handle(method, encounter, action, body) ??
+        fakePrescriptions.handle(method, encounter, action, body))
     if (answered) return answered
     if (method === 'GET' && action === 'consultation') return Response.json({ turns: turnsOf(encounter.encounterId) })
     if (method === 'POST' && action === 'consultation/doctor-turns') return askPatient(encounter, JSON.parse(String(init?.body)))
@@ -270,6 +279,7 @@ export function createFakeClinicApi({
     investigations: investigations.list,
     note: clinicalNotes.note,
     diagnosis: fakeDiagnoses.diagnosis,
+    prescriptions: fakePrescriptions.view,
     turns: (encounterId: string) => turnsOf(encounterId),
     amendReport: investigations.amend,
     // Another browser tab starting an Encounter behind this one's back.

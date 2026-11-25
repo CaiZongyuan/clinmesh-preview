@@ -13,6 +13,8 @@ import { useDiagnosis } from './diagnosis/use-diagnosis'
 import { formatClock, SEX_LABEL, VISIT_KIND_LABEL } from './format'
 import { InvestigationsTab } from './investigations/investigations-tab'
 import { useInvestigations } from './investigations/use-investigations'
+import { PrescriptionTab } from './prescription/prescription-tab'
+import { usePrescriptions } from './prescription/use-prescriptions'
 import { badge, pane, paneBody, paneFooter, paneHeader } from './pane-styles'
 import { PatientBanner } from './patient-banner'
 import type { CaseFocus } from './workbench'
@@ -72,6 +74,7 @@ const tab =
 function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterView; examinations: PhysicalExaminationView[] }) {
   const investigations = useInvestigations(encounter)
   const diagnosis = useDiagnosis(encounter)
+  const prescriptions = usePrescriptions(encounter)
   return (
     <main aria-label="病例工作区" className={pane}>
       <PatientBanner encounter={encounter} examinedVitals={examinations.find((e) => e.system === 'vitals')} />
@@ -102,7 +105,7 @@ function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterV
           <DiagnosisTab encounter={encounter} state={diagnosis} />
         </TabsPanel>
         <TabsPanel value="prescription" className={paneBody}>
-          <UpcomingTab>处方</UpcomingTab>
+          <PrescriptionTab encounter={encounter} state={prescriptions} />
         </TabsPanel>
       </Tabs>
       <CompletionFooter>
@@ -123,13 +126,6 @@ function PendingCount({ count }: { count: number }) {
   )
 }
 
-function UpcomingTab({ children }: { children: string }) {
-  return (
-    <p className="m-0 p-6 text-center text-[13px] text-muted-foreground">
-      {children}将在后续版本提供。病例真值在完诊前不可见。
-    </p>
-  )
-}
 
 function AbandonedNotice({ caseId }: { caseId: string }) {
   const { start, error } = useStartEncounter()
