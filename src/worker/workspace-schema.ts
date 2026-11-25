@@ -188,6 +188,11 @@ const MIGRATIONS: readonly string[] = [
      practitioner_id TEXT NOT NULL,
      recorded_at TEXT NOT NULL
    );`,
+  // Spoken doctor turns keep how they were recognized: the recognizer, how long the doctor spoke and the
+  // recognizer's confidence (NULL when it reports none). Typed and patient turns leave all three NULL.
+  `ALTER TABLE consultation_turn ADD COLUMN voice_recognizer TEXT CHECK (voice_recognizer IN ('paraformer-realtime-v2', 'web-speech'));
+   ALTER TABLE consultation_turn ADD COLUMN voice_duration_ms INTEGER;
+   ALTER TABLE consultation_turn ADD COLUMN voice_confidence REAL;`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

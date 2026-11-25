@@ -1,4 +1,4 @@
-import type { ConsultationTurn, PatientTurnFailure, SpeakerAttribution, TurnSource, TurnStatus } from '../shared/consultation'
+import type { ConsultationTurn, PatientTurnFailure, Recognizer, SpeakerAttribution, TurnSource, TurnStatus, VoiceCapture } from '../shared/consultation'
 import type { EncounterError } from '../shared/encounter'
 import type { PatientReplyOutcome } from './simulated-patient/simulated-patient-do'
 
@@ -17,6 +17,9 @@ type TurnRow = {
   deadline_at: string | null
   failure_reason: PatientTurnFailure | null
   settled_by: 'simulated-patient' | 'workspace' | null
+  voice_recognizer: Recognizer | null
+  voice_duration_ms: number | null
+  voice_confidence: number | null
 }
 
 export interface Exchange {
@@ -64,16 +67,20 @@ export class ConsultationRepository {
 
   ask(
     encounterId: string,
-    question: { clientTurnId: string; text: string; practitionerId: string },
+    question: { clientTurnId: string; text: string; practitionerId: string; voice?: VoiceCapture },
     now: Date,
     deadline: Date,
   ): Exchange {
     const doctorTurnId = crypto.randomUUID()
     const seq = this.nextSeq(encounterId)
+    const { voice } = question
     this.sql.exec(
-      `INSERT INTO consultation_turn (turn_id, encounter_id, seq, speaker, source, attribution, text, status, client_turn_id, practitioner_id, created_at, settled_at)
-       VALUES (?, ?, ?, 'doctor', 'typed', 'workbench-input', ?, 'final', ?, ?, ?, ?)`,
-      doctorTurnId, encounterId, seq, question.text, question.clientTurnId, question.practitionerId, now.toISOString(), now.toISOString(),
+      `INSERT INTO consultation_turn (turn_id, encounter_id, seq, speaker, source, attribution, text, status, client_turn_id, practitioner_id, created_at, settled_at,
+         voice_recognizer, voice_duration_ms, voice_confidence)
+       VALUES (?, ?, ?, 'doctor', ?, ?, ?, 'final', ?, ?, ?, ?, ?, ?, ?)`,
+      doctorTurnId, encounterId, seq, voice ? 'voice' : 'typed', voice ? 'workbench-microphone' : 'workbench-input',
+      question.text, question.clientTurnId, question.practitionerId, now.toISOString(), now.toISOString(),
+      voice?.recognizer ?? null, voice ? Math.round(voice.durationMs) : null, voice?.confidence ?? null,
     )
     const patientTurn = this.insertReplyAttempt(encounterId, doctorTurnId, 1, now, deadline)
     return { doctorTurn: this.find(doctorTurnId)!, patientTurn }
@@ -179,6 +186,9 @@ function toTurn(row: TurnRow): ConsultationTurn {
     source: row.source,
     attribution: row.attribution,
     text: row.text,
+    voice: row.voice_recognizer
+      ? { recognizer: row.voice_recognizer, durationMs: row.voice_duration_ms ?? 0, confidence: row.voice_confidence }
+      : null,
     status: row.status,
     replyTo: row.reply_to,
     attempt: row.attempt,

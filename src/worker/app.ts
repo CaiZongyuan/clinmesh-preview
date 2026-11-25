@@ -12,7 +12,7 @@ import {
   type CopilotResendRequest,
   type CopilotSnapshot,
 } from '../shared/copilot-turn'
-import type { AskPatientResponse, ConsultationResponse, RetryPatientTurnResponse } from '../shared/consultation'
+import { isVoiceCapture, type AskPatientResponse, type ConsultationResponse, type RetryPatientTurnResponse } from '../shared/consultation'
 import type {
   ActiveEncounterResponse,
   AuditEventsResponse,
@@ -47,6 +47,8 @@ import type {
 } from '../shared/medication'
 import { prescriptionLines, type PrescriptionsResult } from './prescription-repository'
 import { medicationCatalog } from './medication-catalog'
+import type { VoiceConfigResponse } from '../shared/voice'
+import { recognizerFor } from './voice/voice-config'
 
 import { WORKSPACE_NAME } from './workspace-name'
 
@@ -278,13 +280,19 @@ app.get('/encounters/:encounterId/consultation', async (c) => {
 })
 
 app.post('/encounters/:encounterId/consultation/doctor-turns', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { clientTurnId?: unknown; text?: unknown } | null
+  const body = (await c.req.json().catch(() => null)) as { clientTurnId?: unknown; text?: unknown; voice?: unknown } | null
   if (typeof body?.clientTurnId !== 'string' || typeof body.text !== 'string') {
     return refuse(c, { code: 'invalid-request', message: '请求体须为 { "clientTurnId": string, "text": string }' })
+  }
+  // Only the browser's own recognizer reports speech here; Paraformer turns come from the voice socket.
+  const voice = body.voice as { recognizer?: unknown } | undefined
+  if (voice !== undefined && (!isVoiceCapture(voice) || voice.recognizer !== 'web-speech')) {
+    return refuse(c, { code: 'invalid-request', message: '语音识别信息须为 { "recognizer": "web-speech", "durationMs": number, "confidence": number | null }' })
   }
   const result = await workspace(c).askPatient(c.req.param('encounterId'), {
     clientTurnId: body.clientTurnId,
     text: body.text,
+    ...(voice === undefined ? {} : { voice }),
   })
   if (!result.ok) return refuse(c, result.error)
   return c.json<AskPatientResponse>({ doctorTurn: result.doctorTurn, patientTurn: result.patientTurn }, 201)
@@ -416,11 +424,24 @@ app.post('/encounters/:encounterId/copilot/config', async (c) => {
 
 // Streams the Clinical Copilot's events for one Encounter.
 app.get('/encounters/:encounterId/copilot/socket', async (c) => {
+  const found = await workspace(c).getEncounter(c.req.param('encounterId'))
+  if (!found.ok) return refuse(c, found.error)
+  return copilot(c).fetch(c.req.raw)
+})
+
+// Which recognizer the workbench uses: Paraformer through the voice socket, or the browser's Web Speech API.
+app.get('/voice', (c) => c.json<VoiceConfigResponse>({ recognizer: recognizerFor(c.env as unknown as Record<string, unknown>) }))
+
+// The doctor's voice capture for one active Encounter: the `agents/voice` protocol (see src/shared/voice.ts).
+app.get('/encounters/:encounterId/voice', async (c) => {
   if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
     return c.json<ErrorResponse>({ error: { code: 'invalid-request', message: '需要 WebSocket 升级请求' } }, 426)
   }
   const encounterId = c.req.param('encounterId')
   const found = await workspace(c).getEncounter(encounterId)
   if (!found.ok) return refuse(c, found.error)
-  return copilot(c).fetch(c.req.raw)
+  if (found.encounter.status !== 'active') {
+    return refuse(c, { code: 'encounter-not-active', message: '该就诊已结束，不再收音。' })
+  }
+  return c.env.CONSULTATION_VOICE.getByName(encounterId).fetch(c.req.raw)
 })

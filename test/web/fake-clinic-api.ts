@@ -67,6 +67,7 @@ export function turnFor(overrides: Partial<ConsultationTurn> & Pick<Consultation
     source: doctor ? 'typed' : 'simulated',
     attribution: doctor ? 'workbench-input' : 'simulated-patient',
     text: '',
+    voice: null,
     status: 'final',
     replyTo: null,
     attempt: 1,
@@ -95,6 +96,7 @@ export function createFakeClinicApi({
   consultations = {} as Record<string, ConsultationTurn[]>,
   notes = {} as Record<string, ClinicalNoteView>,
   diagnoses = {} as Record<string, DiagnosisView>,
+  recognizer = 'web-speech' as 'web-speech' | 'paraformer-realtime-v2',
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
   // The Clinical Copilot's session per Encounter, with its own event log for its socket.
@@ -116,6 +118,7 @@ export function createFakeClinicApi({
   const log: { encounterId: string; seq: number; event: AgentEvent }[] = []
   const runOf = new Map<string, string>()
   const sockets = new Set<FakePatientSocket>()
+  const voiceSockets = new Set<FakeVoiceSocket>()
   const active = () => state.encounters.find((e) => e.status === 'active') ?? null
   const investigations = createFakeInvestigations(refuse)
   const clinicalNotes = createFakeClinicalNotes(refuse, notes)
@@ -162,11 +165,19 @@ export function createFakeClinicApi({
     return turn
   }
 
-  function askPatient(encounter: EncounterView, body: { clientTurnId: string; text: string }) {
+  function askPatient(encounter: EncounterView, body: { clientTurnId: string; text: string; voice?: ConsultationTurn['voice'] }) {
     if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
     if (pendingOf(encounter.encounterId)) return refuse('patient-turn-pending', '患者还在回答上一个问题，请稍候再问。')
     const list = turnsOf(encounter.encounterId)
-    const doctorTurn = turnFor({ seq: list.length + 1, speaker: 'doctor', text: body.text.trim(), createdAt: new Date().toISOString() })
+    const doctorTurn = turnFor({
+      seq: list.length + 1,
+      speaker: 'doctor',
+      text: body.text.trim(),
+      createdAt: new Date().toISOString(),
+      source: body.voice ? 'voice' : 'typed',
+      attribution: body.voice ? 'workbench-microphone' : 'workbench-input',
+      voice: body.voice ?? null,
+    })
     list.push(doctorTurn)
     const patientTurn = replyAttempt(encounter.encounterId, doctorTurn.turnId, 1)
     return Response.json({ doctorTurn, patientTurn }, { status: 201 })
@@ -187,6 +198,7 @@ export function createFakeClinicApi({
     if (method === 'GET' && path === '/api/golden-cases') return Response.json({ goldenCases: queue() })
     if (method === 'GET' && path === '/api/encounters/active') return Response.json({ encounter: active() })
     if (method === 'POST' && path === '/api/encounters') return startEncounter(JSON.parse(String(init?.body)).caseId)
+    if (method === 'GET' && path === '/api/voice') return Response.json({ recognizer })
     if (method === 'GET' && path === '/api/investigation-catalog') {
       return Response.json({ catalogVersion: 'fake', items: fakeCatalog })
     }
@@ -475,8 +487,86 @@ export function createFakeClinicApi({
     close() { this.inner.close() }
   }
 
+
+  // The voice socket (the agents/voice protocol subset the workbench uses), driven by the test like the Worker
+  // would be: the test calls interim()/voiceTurn(), the bar's messages land in `sent`/`frames`.
+  class FakeVoiceSocket {
+    onopen: (() => void) | null = null
+    onmessage: ((event: { data: string }) => void) | null = null
+    onclose: (() => void) | null = null
+    readonly encounterId: string
+    readonly sent: { type: string; mode?: string; clientTurnId?: string }[] = []
+    frames = 0
+    private closed = false
+
+    constructor(url: string) {
+      this.encounterId = decodeURIComponent(url.match(/\/api\/encounters\/([^/]+)\/voice$/)![1])
+      voiceSockets.add(this)
+      setTimeout(() => !this.closed && this.onopen?.(), 0)
+    }
+
+    close() {
+      if (this.closed) return
+      this.closed = true
+      voiceSockets.delete(this)
+      setTimeout(() => this.onclose?.(), 0)
+    }
+
+    send(data: string | ArrayBuffer) {
+      if (typeof data === 'string') {
+        const message = JSON.parse(data) as { type: string; mode?: string; clientTurnId?: string }
+        this.sent.push(message)
+        if (message.type === 'start_call') this.push({ type: 'status', status: 'listening' })
+        if (message.type === 'clinmesh.resubmit') this.resubmitIds.push(message.clientTurnId!)
+      } else {
+        this.frames++
+      }
+    }
+
+    readonly resubmitIds: string[] = []
+
+    private push(message: Record<string, unknown>) {
+      setTimeout(() => !this.closed && this.onmessage?.({ data: JSON.stringify(message) }), 0)
+    }
+
+    interim(text: string) {
+      this.push({ type: 'transcript_interim', text })
+    }
+
+    empty() {
+      this.push({ type: 'clinmesh.capture-empty' })
+    }
+
+    error(code: string, message: string) {
+      this.push({ type: 'error', code, message })
+    }
+
+    voiceTurn(doctorTurn: ConsultationTurn, patientTurn: ConsultationTurn, latencyMs = 120) {
+      this.push({ type: 'clinmesh.voice-turn', ok: true, doctorTurn, patientTurn, latencyMs })
+    }
+
+    refused(doctorText: string, code = 'patient-turn-pending') {
+      this.push({ type: 'clinmesh.voice-turn', ok: false, clientTurnId: 'refused-1', text: doctorText, error: { code, message: '患者还在回答上一个问题。' }, latencyMs: 90 })
+    }
+  }
+
+  // A spoken doctor turn for the socket's voice-turn messages; the workspace keeps the record.
+  function spokenTurn(seq: number, text: string): ConsultationTurn {
+    return turnFor({
+      seq,
+      speaker: 'doctor',
+      source: 'voice',
+      attribution: 'workbench-microphone',
+      text,
+      createdAt: new Date().toISOString(),
+      voice: { recognizer, durationMs: 1400, confidence: null },
+    })
+  }
   return {
     handle,
+    VoiceSocket: FakeVoiceSocket,
+    voiceSockets: () => [...voiceSockets],
+    spokenTurn,
     WebSocket: FakeSocket as unknown as typeof FakePatientSocket,
     encounters: () => state.encounters,
     investigations: investigations.list,

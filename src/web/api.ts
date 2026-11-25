@@ -18,6 +18,8 @@ import type {
   InvestigationsResponse,
   InvestigationView,
 } from '../shared/investigation'
+import type { VoiceConfigResponse } from '../shared/voice'
+import type { VoiceCapture } from '../shared/consultation'
 
 import type { ClinicalNoteResponse, ClinicalNoteView, NoteSections } from '../shared/clinical-note'
 import type { DiagnosisDraftEntry, DiagnosisResponse, DiagnosisView } from '../shared/diagnosis'
@@ -110,8 +112,26 @@ export async function fetchConsultation(encounterId: string): Promise<Consultati
   return (await request<ConsultationResponse>(`${encounterPath(encounterId)}/consultation`)).turns
 }
 
-export async function askPatient(encounterId: string, clientTurnId: string, text: string): Promise<AskPatientResponse> {
-  return request<AskPatientResponse>(`${encounterPath(encounterId)}/consultation/doctor-turns`, post({ clientTurnId, text }))
+export async function askPatient(
+  encounterId: string,
+  clientTurnId: string,
+  text: string,
+  voice?: VoiceCapture,
+): Promise<AskPatientResponse> {
+  return request<AskPatientResponse>(
+    `${encounterPath(encounterId)}/consultation/doctor-turns`,
+    post({ clientTurnId, text, ...(voice ? { voice } : {}) }),
+  )
+}
+
+// Which recognizer turns the doctor's speech into questions: the Worker's Paraformer or the browser's Web Speech.
+export async function fetchVoiceConfig(): Promise<VoiceConfigResponse> {
+  return request<VoiceConfigResponse>('/api/voice')
+}
+
+export function openVoiceSocket(encounterId: string): WebSocket {
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/voice`)
 }
 
 export async function retryPatientTurn(encounterId: string, turnId: string): Promise<ConsultationTurn> {
