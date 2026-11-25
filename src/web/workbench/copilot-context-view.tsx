@@ -20,8 +20,6 @@ const CATEGORY_COLOR: Record<ContextCategory, string> = {
   tool_results: 'bg-muted-foreground',
 }
 
-const compact = (n: number) => new Intl.NumberFormat('zh-CN', { notation: 'compact' }).format(n)
-
 function UsageRing({ view }: { view: CopilotContextView }) {
   const ratio = view.usable > 0 ? Math.min(1, view.estimatedInput / view.usable) : 0
   const radius = 15.9155 // circumference 100, so the dash array is the percentage directly
@@ -109,12 +107,59 @@ function RequestTimeline({ view }: { view: CopilotContextView }) {
       </thead>
       <tbody>
         {view.requests.map((request, i) => {
-          const previous = i > 0 ? view.requests[i - 1].providerInput : null
-          const delta = request.providerInput !== null && previous !== null ? request.providerInput - previous : null
+          const previous = view.requests[i - 1]
+          const delta = request.providerInput !== null && previous?.providerInput != null ? request.providerInput - previous.providerInput : null
+          // Reconciled categories scaled to the provider's reported input, with the per-category delta
+          // against the previous request; collapsed by default, like the itemized counts beneath them.
+          const reconciled = request.reconciled ?? []
+          const previousReconciled: Map<ContextCategory, number> =
+            previous === undefined
+              ? new Map()
+              : previous.reconciled
+                ? new Map(previous.reconciled.map((entry) => [entry.category, entry.tokens]))
+                : previous.items.reduce((map, item) => {
+                    map.set(item.category, (map.get(item.category) ?? 0) + item.tokens)
+                    return map
+                  }, new Map<ContextCategory, number>())
           return (
             <tr key={`${request.runId}-${request.step}`}>
               <td className="text-muted-foreground">{formatClockSeconds(request.at)}</td>
-              <td>#{i + 1}</td>
+              <td>
+                <details>
+                  <summary className="cursor-pointer list-none underline decoration-dotted">#{i + 1}</summary>
+                  <div className="mt-1 flex flex-col gap-1 pl-1">
+                    <span className="text-muted-foreground">分类对账（对齐到实测 {request.providerInput ?? '…'}）</span>
+                    <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+                      {reconciled.map((entry) => {
+                        const before = previousReconciled.get(entry.category)
+                        const categoryDelta = before === undefined ? null : entry.tokens - before
+                        return (
+                          <li key={entry.category} className="flex items-center gap-1.5">
+                            <span className={`inline-block h-2 w-2 rounded-full ${CATEGORY_COLOR[entry.category]}`} aria-hidden="true" />
+                            <span>{CONTEXT_CATEGORY_LABEL[entry.category]}</span>
+                            <span className="tabular-nums">{entry.tokens.toLocaleString()}</span>
+                            {categoryDelta !== null && (
+                              <span className="text-muted-foreground tabular-nums">
+                                Δ{categoryDelta >= 0 ? '+' : ''}{categoryDelta.toLocaleString()}
+                              </span>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                    <span className="text-muted-foreground">逐项计数</span>
+                    <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+                      {request.items.map((item) => (
+                        <li key={item.id} className="flex items-center gap-1.5">
+                          <span className={`inline-block h-2 w-2 rounded-full ${CATEGORY_COLOR[item.category]}`} aria-hidden="true" />
+                          <span>{item.label}</span>
+                          <span className="text-muted-foreground tabular-nums">{item.tokens.toLocaleString()}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </details>
+              </td>
               <td className="tabular-nums">{request.estimatedInput.toLocaleString()}</td>
               <td className="tabular-nums">{request.providerInput === null ? '…' : request.providerInput.toLocaleString()}</td>
               <td className="tabular-nums text-muted-foreground">
@@ -162,8 +207,8 @@ export function CopilotContextDialog({ encounterId, modelLabel }: { encounterId:
     setError(null)
     setCompacted(null)
     try {
-      const result = await compactCopilot(encounterId)
-      setCompacted(`已压缩 ${result.summarizedMessages} 条，${compact(Math.max(0, result.tokensBefore - result.tokensAfter))} tokens 转为摘要。`)
+      await compactCopilot(encounterId)
+      setCompacted('已加入压缩队列：排队与运行中的轮次完成后生成摘要，完成后可在会话与列表中看到压缩记录。')
       reload()
     } catch (e) {
       setError((e as Error).message)

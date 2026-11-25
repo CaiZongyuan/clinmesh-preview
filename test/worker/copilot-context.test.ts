@@ -1,5 +1,5 @@
-import { abortAllDurableObjects, env, runDurableObjectAlarm } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { abortAllDurableObjects, env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
+import { describe, expect, it, vi } from 'vitest'
 import type { CopilotContextView } from '../../src/shared/copilot-context'
 import { expectNoCaseTruth } from './case-truth'
 import { asked, copilotSettled, copilotSnapshot, promptAndSettle, promptCopilot, send, settled, startEncounter } from './support/clinic'
@@ -12,6 +12,27 @@ const contextOf = async (encounterId: string): Promise<CopilotContextView> => {
 }
 
 const compact = async (encounterId: string) => send('POST', `/api/encounters/${encounterId}/copilot/compact`)
+
+// Compaction is a serialized run: the route queues it, and the marker lands when it completes.
+// A compaction whose provider fails: the queued run closes failed and no marker ever lands.
+const compactAndSettleFail = async (encounterId: string): Promise<void> => {
+  const response = await compact(encounterId)
+  expect(response.status).toBe(202)
+  // Drive the alarm so the queued compaction claims and its provider call fails.
+  expect(await runDurableObjectAlarm(env.CLINICAL_COPILOT.getByName(encounterId))).toBe(true)
+  expect((await contextOf(encounterId)).compactions).toHaveLength(0)
+}
+
+const compactAndSettle = async (encounterId: string): Promise<void> => {
+  const before = (await contextOf(encounterId)).compactions.length
+  const response = await compact(encounterId)
+  if (response.status !== 202) console.log('COMPACT-BODY', await response.text())
+  expect(response.status).toBe(202)
+  await vi.waitFor(async () => {
+    expect((await contextOf(encounterId)).compactions.length).toBeGreaterThan(before)
+  })
+  await copilotSettled(encounterId)
+}
 
 describe('Copilot context accounting', () => {
   it('itemizes every outbound request by category and reconciles estimates with the provider usage', async () => {
@@ -41,6 +62,17 @@ describe('Copilot context accounting', () => {
     for (const request of view.requests) {
       expect(request.reconciled).not.toBeNull()
       expect(request.reconciled!.reduce((sum, entry) => sum + entry.tokens, 0)).toBe(request.providerInput!)
+    }
+
+    // The current context is assembled on the same path as an outbound request: the itemized system
+    // sections reconstruct the outbound system message exactly, and every required category is counted.
+    const outboundSystem = llm.requests.at(-1)!.messages[0]
+    expect(outboundSystem.role).toBe('system')
+    const systemItems = view.items.filter((item) => ['system', 'patient_visible', 'his_state_ui', 'consultation'].includes(item.category))
+    expect(systemItems.map((item) => item.text).join('\n\n')).toBe(outboundSystem.content)
+    const categories = new Set(view.items.map((item) => item.category))
+    for (const category of ['system', 'patient_visible', 'his_state_ui', 'consultation', 'replies_thinking', 'tools', 'tool_results']) {
+      expect(categories.has(category as (typeof view.items)[number]['category']), `missing category ${category}`).toBe(true)
     }
 
     // The window/reserve arithmetic is consistent, and the Case Truth row is always present and zero.
@@ -81,21 +113,20 @@ describe('Copilot context accounting', () => {
     await promptAndSettle(encounterId, 't1', '总结')
     await promptAndSettle(encounterId, 't2', '再来一次')
 
-    const response = await compact(encounterId)
-    expect(response.status).toBe(201)
-    const marker = (await response.json()) as { markerId: number; summarizedMessages: number; tokensBefore: number; tokensAfter: number }
-
+    await compactAndSettle(encounterId)
+    const view = await contextOf(encounterId)
+    const marker = view.compactions[0]
     expect(marker.summarizedMessages).toBeGreaterThanOrEqual(4)
     expect(marker.tokensAfter).toBeLessThan(marker.tokensBefore)
 
-    // The marker lives in the session and in the context view.
+    // The marker lives in the session too, and the compaction's own provider call is on the timeline.
     const snapshot = await copilotSnapshot(encounterId)
     expect(snapshot.compactions).toHaveLength(1)
-    const view = await contextOf(encounterId)
-    expect(view.compactions).toHaveLength(1)
+    expect(view.requests.some((request) => request.runId === marker.runId)).toBe(true)
+    expect(view.requests.some((request) => request.items.some((item) => item.label === '压缩指令'))).toBe(true)
     // The rolling messages are gone from the current context; the summary is there instead.
     const current = JSON.stringify(view.items)
-    expect(current).not.toContain('回复一。')
+    expect(current).not.toContain('回复一')
     expect(current).toContain('摘要：发热三天')
 
     // Future prompts carry the summary plus the re-injected live clinic and consultation data.
@@ -109,12 +140,12 @@ describe('Copilot context accounting', () => {
     expect(system.content.includes('好些了'), `system: ${system.content}`).toBe(true)
     expect(system.content.includes('现在好些了吗'), `system: ${system.content}`).toBe(true)
     expect(outbound.messages.some((m) => m.role === 'assistant' && m.content.includes('摘要：发热三天'))).toBe(true)
-    expect(outbound.messages.some((m) => m.role === 'assistant' && m.content.includes('回复一。'))).toBe(false)
+    expect(outbound.messages.some((m) => m.role === 'assistant' && m.content.includes('回复一'))).toBe(false)
     expectNoCaseTruth('post-compaction requests', JSON.stringify(outbound))
     // The summarizer saw exactly the rolling conversation (the two replies, not the system context).
     const summarizer = compactor.requests.at(-1)!
     expect(summarizer.messages.some((m) => m.role === 'user' && m.content.includes('回复一'))).toBe(true)
-    expect(summarizer.messages.some((m) => m.content.includes('当前就诊概况'))).toBe(false)
+    expect(summarizer.messages.some((m) => m.content.includes('患者与分诊'))).toBe(false)
   })
 
   it('refuses compaction while a turn runs, and twice in a row when there is nothing left to summarize', async () => {
@@ -129,11 +160,112 @@ describe('Copilot context accounting', () => {
     await promptCopilot(encounterId, 't1', '总结')
     await copilotSettled(encounterId)
     installScripted('copilot').reply('摘要')
-    expect((await compact(encounterId)).status).toBe(201)
+    await compactAndSettle(encounterId)
 
     // Everything rolling is already one summary; compacting again finds nothing.
     const again = await compact(encounterId)
     expect(again.status).toBe(409)
+  })
+
+  it('serializes compaction with ordinary turns: a prompt enqueued during compaction runs after it', async () => {
+    installScripted('copilot').reply('回复：患者三天前出现发热，建议先休息、多饮水并观察体温，必要时复诊评估。')
+    const encounterId = await startEncounter()
+    await promptCopilot(encounterId, 't1', '总结')
+    await copilotSettled(encounterId)
+    // Gate the compaction's summarization; a prompt enqueued meanwhile must wait behind it.
+    const compaction = installScripted('copilot').gate('摘要中', '摘要：发热三天')
+    const response = await compact(encounterId)
+    expect(response.status).toBe(202)
+    const queued = await promptCopilot(encounterId, 't2', '压缩完再总结', 'queue')
+    expect(queued.status).toBe(201)
+    compaction.release()
+    // The compaction run is invisible to the session (only its marker shows), so wait on the marker,
+    // then on the prompt that was queued behind it.
+    await vi.waitFor(async () => {
+      expect((await contextOf(encounterId)).compactions).toHaveLength(1)
+    })
+    await copilotSettled(encounterId)
+    const view = await contextOf(encounterId)
+    expect(view.compactions).toHaveLength(1)
+    // The compaction ran before the prompt: its request precedes the prompt's on the timeline, and the
+    // prompt was built from the compacted context (no raw transcript request afterwards).
+    const compactionRequest = view.requests.find((request) => request.runId === view.compactions[0].runId)!
+    const promptRequest = view.requests.filter((request) => request.runId !== view.compactions[0].runId).at(-1)!
+    expect(compactionRequest.at <= promptRequest.at).toBe(true)
+    expect(promptRequest.items.some((item) => item.label === '待压缩对话历史')).toBe(false)
+  })
+
+  it('abandonment cancels an in-flight compaction: no marker, no rewritten context, and later compaction is refused', async () => {
+    installScripted('copilot').reply('回复：患者三天前出现发热，伴咳嗽，查体未见明显异常，建议观察并必要时复查血常规进一步评估。')
+    const encounterId = await startEncounter()
+    await promptCopilot(encounterId, 't1', '总结')
+    await copilotSettled(encounterId)
+    const compaction = installScripted('copilot').gate('摘要中', '摘要：发热三天')
+    expect((await compact(encounterId)).status).toBe(202)
+    await compaction.reached
+    await send('POST', `/api/encounters/${encounterId}/abandonment`)
+    compaction.release()
+    // Wait until the compaction run has closed (stopped), deterministically, before asserting nothing settled.
+    await vi.waitFor(async () => {
+      await runInDurableObject(env.CLINICAL_COPILOT.getByName(encounterId), (_i, state) => {
+        const statuses = state.storage.sql
+          .exec<{ status: string }>("SELECT status FROM agent_run WHERE kind = 'compaction'")
+          .toArray()
+        expect(statuses.every((row) => row.status !== 'running' && row.status !== 'queued')).toBe(true)
+      })
+    })
+    const view = await contextOf(encounterId)
+    // The frozen Encounter kept its context: no marker, rolling history still active.
+    expect(view.compactions).toHaveLength(0)
+    expect(JSON.stringify(view.items)).toContain('三天前')
+    // A frozen Encounter takes no new compaction.
+    installScripted('copilot').reply('摘要')
+    expect((await compact(encounterId)).status).toBe(409)
+  })
+
+  it('edit-and-resend after compaction leaves no stale facts: the superseded summary leaves the context', async () => {
+    installScripted('patient').reply('医生，我发烧三天了。')
+    const llm = installScripted('copilot').reply('回复：已记录患者三天前出现发热。')
+    const encounterId = await startEncounter()
+    await settled(encounterId, (await asked(encounterId, '您哪里不舒服？')).patientTurn.turnId)
+    await promptCopilot(encounterId, 't1', '请记住资料甲：三天前起病')
+    await copilotSettled(encounterId)
+    installScripted('copilot').reply('摘要：资料甲（三天前起病）已记录')
+    await compactAndSettle(encounterId)
+
+    // Edit-and-resend t1 with replacement facts: the compaction run and its summary are superseded with it.
+    installScripted('patient').reply('好的。')
+    const snapshot = await copilotSnapshot(encounterId)
+    const resent = await send('POST', `/api/encounters/${encounterId}/copilot/turns/${snapshot.turns[0].turnId}/resend`, {
+      clientPromptId: 'resend-1',
+      text: '请记住资料乙：今天起病',
+      mentions: [],
+    })
+    expect(resent.status).toBe(201)
+    installScripted('copilot').reply('回复：已改为记录资料乙。')
+    await copilotSettled(encounterId)
+    const replacement = llm.requests.at(-1)!
+    void replacement
+    const view = await contextOf(encounterId)
+    const current = JSON.stringify(view.items)
+    // Neither the compacted originals nor the derived summary may resurrect the superseded fact.
+    expect(current).not.toContain('资料甲')
+    expect(current).toContain('资料乙')
+  })
+
+  it('a failing provider leaves the rolling inputs untouched: retry stays possible and no marker lands', async () => {
+    installScripted('copilot').reply('回复：患者三天前出现发热，建议观察体温变化，必要时复诊。')
+    const encounterId = await startEncounter()
+    await promptCopilot(encounterId, 't1', '总结')
+    await copilotSettled(encounterId)
+    installScripted('copilot').fail(500)
+    await compactAndSettleFail(encounterId)
+    const view = await contextOf(encounterId)
+    expect(view.compactions).toHaveLength(0)
+    // The inputs are still active, so a retried compaction has the same material to summarize.
+    installScripted('copilot').reply('摘要：发热三天')
+    await compactAndSettle(encounterId)
+    expect((await contextOf(encounterId)).compactions).toHaveLength(1)
   })
 
   it('refuses compaction while a run is running, even one waiting on a gate', async () => {

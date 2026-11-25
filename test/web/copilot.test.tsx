@@ -221,10 +221,11 @@ describe('Clinical Copilot panel', () => {
     const dialog = await screen.findByRole('dialog', { name: '助手上下文（只读）' })
     await user.click(within(dialog).getByRole('button', { name: '压缩上下文' }))
     expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/compact`)).toHaveLength(1)
-    expect((await within(dialog).findAllByText(/已压缩 1 条/)).length).toBeGreaterThan(0)
+    // The compaction is queued as a run; the notice says so, and the marker lands in the session when it completes.
+    expect(await within(dialog).findByText(/已加入压缩队列/)).toBeInTheDocument()
     // The marker shows in the session log after the dialog closes.
     await user.keyboard('{Escape}')
-    await waitFor(() => expect(screen.getByRole('log', { name: '临床助手会话' })).toHaveTextContent('已压缩 1 条'))
+    await waitFor(() => expect(screen.getByRole('log', { name: '临床助手会话' })).toHaveTextContent('已压缩'))
   })
 
   it('shows a reconnecting notice when the socket drops, and recovers', async () => {

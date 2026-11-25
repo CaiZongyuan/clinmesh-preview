@@ -8,24 +8,46 @@ import type { LlmMessage, ToolSpec } from '../llm/types'
 // category, and how the estimates reconcile with the provider-reported usage. Case Truth is never itemized
 // here — the view adds the explicit zero row.
 
-// The system message is composed as `COPILOT_SYSTEM_PROMPT` + overview sections joined by '\n\n## ', so it
-// splits back losslessly along the same boundary.
+// The system message is composed as `COPILOT_SYSTEM_PROMPT` + the re-injected overview sections joined by
+// '\n\n## ', so it splits back losslessly along the same boundary. Each section maps to its category:
+// patient visible data, HIS state, and the finalized consultation.
+const SECTION_HEADERS: { prefix: string; category: ContextCategory; label: string }[] = [
+  { prefix: '患者与分诊', category: 'patient_visible', label: `${CONTEXT_CATEGORY_LABEL.patient_visible}（患者与分诊）` },
+  { prefix: '就诊状态', category: 'his_state_ui', label: `${CONTEXT_CATEGORY_LABEL.his_state_ui}（就诊状态）` },
+  { prefix: '问诊记录', category: 'consultation', label: `${CONTEXT_CATEGORY_LABEL.consultation}（已定稿）` },
+]
+
 export function systemSections(content: string): { label: string; category: ContextCategory; text: string }[] {
   const [prompt = '', ...sections] = content.split('\n\n## ')
   return [
     { label: CONTEXT_CATEGORY_LABEL.system, category: 'system', text: prompt },
-    ...sections.map((section) => ({
-      label: section.startsWith('当前就诊概况')
-        ? `${CONTEXT_CATEGORY_LABEL.his_state_ui}（就诊概况）`
-        : `${CONTEXT_CATEGORY_LABEL.consultation}（已定稿）`,
-      category: (section.startsWith('当前就诊概况') ? 'his_state_ui' : 'consultation') as ContextCategory,
-      text: `## ${section}`,
-    })),
+    ...sections.map((section) => {
+      const known = SECTION_HEADERS.find((header) => section.startsWith(header.prefix))
+      return {
+        label: known?.label ?? CONTEXT_CATEGORY_LABEL.his_state_ui,
+        category: known?.category ?? ('his_state_ui' as ContextCategory),
+        text: `## ${section}`,
+      }
+    }),
   ]
 }
 
 // Itemizes one request's context exactly as it is sent: system sections, tool definitions, and every durable
 // message by role (doctor prompts and replies/thinking, tool results). Ids are positional and stable.
+// Itemizes a compaction run's outbound request: the summarizer instructions and the transcript of rolling
+// history it was given (never the live system context).
+export function compactionItems(messages: LlmMessage[]): ContextItem[] {
+  const items: ContextItem[] = []
+  let i = 0
+  for (const message of messages) {
+    const compaction = message.role === 'system'
+      ? { id: `compact-system-${++i}`, category: 'system' as const, label: '压缩指令', text: message.content }
+      : { id: `compact-input-${++i}`, category: 'replies_thinking' as const, label: '待压缩对话历史', text: message.content }
+    items.push({ ...compaction, tokens: estimateTokens(compaction.text) })
+  }
+  return items
+}
+
 export function requestItems(context: { messages: LlmMessage[]; tools: ToolSpec[] }): ContextItem[] {
   const items: ContextItem[] = []
   let i = 0
@@ -118,13 +140,14 @@ export function readRequestBreakdowns(sql: SqlStorage): CopilotRequestBreakdown[
 
 export function readCompactions(sql: SqlStorage, limit: number): CopilotCompactionEntry[] {
   return sql
-    .exec<{ id: number; created_at: number; summarized_messages: number; tokens_before: number; tokens_after: number; summary: string }>(
-      'SELECT id, created_at, summarized_messages, tokens_before, tokens_after, summary FROM copilot_compaction ORDER BY id DESC LIMIT ?',
+    .exec<{ id: number; run_id: string; created_at: number; summarized_messages: number; tokens_before: number; tokens_after: number; summary: string }>(
+      'SELECT id, run_id, created_at, summarized_messages, tokens_before, tokens_after, summary FROM copilot_compaction ORDER BY id DESC LIMIT ?',
       limit,
     )
     .toArray()
     .map((row) => ({
       markerId: row.id,
+      runId: row.run_id,
       at: new Date(row.created_at).toISOString(),
       summarizedMessages: row.summarized_messages,
       tokensBefore: row.tokens_before,
@@ -146,9 +169,11 @@ export const MIN_RESERVE_TOKENS = 4_096
 export const contextReserve = (modelWindow: number): number => Math.max(MIN_RESERVE_TOKENS, Math.round(modelWindow * RESERVE_RATIO))
 
 // The full view: the next request's itemized context, the request timeline with reconciliation, every
-// compaction marker, and the explicit Case Truth row that never leaves zero.
+// compaction marker, and the explicit Case Truth row that never leaves zero. The current context is
+// assembled on the same path as an outbound request: the system message (system prompt + re-injected
+// patient visible data, HIS state and consultation) ahead of the durable rolling messages.
 export function buildContextView(current: CurrentContext, sql: SqlStorage): CopilotContextView {
-  const items = requestItems(current)
+  const items = requestItems({ messages: [{ role: 'system', content: current.systemContent }, ...current.messages], tools: current.tools })
   const estimatedInput = items.reduce((sum, item) => sum + item.tokens, 0)
   const reserve = contextReserve(current.modelWindow)
   return {
@@ -172,10 +197,13 @@ export const COMPACTION_SYSTEM_PROMPT = [
 // The rolling messages eligible for compaction: every active durable message (doctor prompts, replies and
 // thinking, tool results). The system context (就诊概况、问诊记录) is rebuilt each request and never compacted.
 export function rollingMessages(sql: SqlStorage): { seq: number; message: LlmMessage; tokens: number }[] {
-  // A lone compaction summary from an earlier run has nothing left to compress.
+  // The compaction runs' own summaries are outputs, not inputs: a lone summary has nothing left to compress.
   return sql
     .exec<{ seq: number; content_json: string }>(
-      `SELECT seq, content_json FROM agent_message WHERE state = 'active' AND (origin_ref IS NULL OR origin_ref NOT LIKE 'compaction:%') ORDER BY seq`,
+      `SELECT seq, content_json FROM agent_message
+       WHERE state = 'active'
+         AND (run_id IS NULL OR run_id NOT IN (SELECT run_id FROM agent_run WHERE kind = 'compaction'))
+       ORDER BY seq`,
     )
     .toArray()
     .map((row) => {
@@ -188,9 +216,9 @@ export function rollingMessages(sql: SqlStorage): { seq: number; message: LlmMes
     })
 }
 
-export const summarizeTranscript = (messages: { message: LlmMessage }[]): string =>
+export const summarizeTranscript = (messages: LlmMessage[]): string =>
   messages
-    .map(({ message }) => {
+    .map((message) => {
       if (message.role === 'user') return `- 医生提问：${message.content}`
       if (message.role === 'tool') return `- 工具结果：${message.content}`
       if (message.role !== 'assistant') return ''

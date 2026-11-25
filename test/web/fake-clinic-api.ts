@@ -3,6 +3,7 @@ import type { AgentEvent, ClientMessage, ServerMessage } from '../../src/shared/
 import type { ConsultationTurn, PatientTurnFailure } from '../../src/shared/consultation'
 import type { EncounterError, EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
+import type { CopilotCompactionEntry } from '../../src/shared/copilot-context'
 import type { CopilotSnapshot, CopilotTurn } from '../../src/shared/copilot-turn'
 import { BODY_SYSTEM_NAME, isBodySystem, type PhysicalExaminationView } from '../../src/shared/physical-examination'
 import { goldenCase1Chart, goldenCase1Findings, goldenCase1QueueEntry } from '../fixtures/golden-case-1'
@@ -126,7 +127,7 @@ export function createFakeClinicApi({
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
   // The Clinical Copilot's session per Encounter, with its own event log for its socket.
-  const copilotSessions = new Map<string, { turns: CopilotTurn[]; queued: { turnId: string; kind: 'doctor'; text: string }[]; seq: number; model: CopilotSnapshot['model']; events: { seq: number; event: AgentEvent }[]; compactions?: { markerId: number; at: string; summarizedMessages: number; tokensBefore: number; tokensAfter: number; summary: string }[] }>()
+  const copilotSessions = new Map<string, { turns: CopilotTurn[]; queued: { turnId: string; kind: 'doctor'; text: string }[]; seq: number; model: CopilotSnapshot['model']; events: { seq: number; event: AgentEvent }[]; compactions?: CopilotCompactionEntry[] }>()
   const copilotOf = (encounterId: string) =>
     copilotSessions.get(encounterId) ??
     copilotSessions
@@ -356,8 +357,10 @@ export function createFakeClinicApi({
     }
     if (method === 'POST' && action === 'copilot/compact') {
       const session = copilotOf(encounter.encounterId)
-      const marker = {
-        markerId: (session.compactions?.at(-1)?.markerId ?? 0) + 1,
+      const markerId = (session.compactions?.at(-1)?.markerId ?? 0) + 1
+      const marker: CopilotCompactionEntry = {
+        markerId,
+        runId: `compaction-run-${markerId}`,
         at: new Date().toISOString(),
         summarizedMessages: Math.max(1, session.turns.length),
         tokensBefore: 640,
@@ -366,7 +369,7 @@ export function createFakeClinicApi({
       }
       session.compactions = [...(session.compactions ?? []), marker]
       emitCopilot(encounter.encounterId, { type: 'session.updated', runId: null })
-      return Response.json(marker, { status: 201 })
+      return Response.json({ turnId: `compaction-${marker.markerId}` }, { status: 202 })
     }
     if (action === 'copilot' || (method === 'POST' && action === 'copilot/prompts')) {
       const session = copilotOf(encounter.encounterId)

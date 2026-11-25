@@ -21,6 +21,7 @@ export interface CopilotTrigger {
 
 type RunRow = {
   run_id: string
+  kind: string
   status: CopilotTurnStatus | 'queued'
   trigger_json: string
   error: CopilotFailure | null
@@ -61,15 +62,16 @@ function parseArgs(json: string): unknown {
 export function readSession(sql: SqlStorage): { turns: CopilotTurn[]; queued: CopilotQueuedItem[]; checkpoint: number; compactions: CopilotCompactionEntry[] } {
   const runs = sql
     .exec<RunRow>(
-      `SELECT run_id, status, trigger_json, error, stop_reason, usage_json, started_at, finished_at, superseded_by, copilot_feedback.value AS feedback
+      `SELECT run_id, kind, status, trigger_json, error, stop_reason, usage_json, started_at, finished_at, superseded_by, copilot_feedback.value AS feedback
        FROM agent_run LEFT JOIN copilot_feedback USING (run_id)
        ORDER BY started_at IS NULL, started_at, queue_order`,
     )
     .toArray()
   const steers = sql.exec<SteerRow>('SELECT run_id, trigger_json, created_at, consumed_at, requeued_as FROM agent_steer ORDER BY id').toArray()
 
+  // Compaction runs are not turns: the doctor sees their markers, not a session entry.
   const turns = runs
-    .filter((run) => run.status !== 'queued' && run.started_at !== null)
+    .filter((run) => run.kind !== 'compaction' && run.status !== 'queued' && run.started_at !== null)
     .map((run): CopilotTurn => {
       const trigger = JSON.parse(run.trigger_json) as CopilotTrigger
       const steps = sql.exec<StepRow>('SELECT * FROM agent_step WHERE run_id = ? ORDER BY step', run.run_id).toArray()
@@ -136,7 +138,7 @@ export function readSession(sql: SqlStorage): { turns: CopilotTurn[]; queued: Co
     })
 
   const queued = runs
-    .filter((run) => run.status === 'queued')
+    .filter((run) => run.kind !== 'compaction' && run.status === 'queued')
     .map((run): CopilotQueuedItem => {
       const trigger = JSON.parse(run.trigger_json) as CopilotTrigger
       return { turnId: run.run_id, kind: trigger.kind, text: trigger.text }
@@ -145,12 +147,13 @@ export function readSession(sql: SqlStorage): { turns: CopilotTurn[]; queued: Co
     sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_step WHERE status != 'running'`).one().n +
     sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_tool_call WHERE status != 'dispatched'`).one().n
   const compactions: CopilotCompactionEntry[] = sql
-    .exec<{ id: number; created_at: number; summarized_messages: number; tokens_before: number; tokens_after: number; summary: string }>(
-      'SELECT id, created_at, summarized_messages, tokens_before, tokens_after, summary FROM copilot_compaction ORDER BY id DESC LIMIT 20',
+    .exec<{ id: number; run_id: string; created_at: number; summarized_messages: number; tokens_before: number; tokens_after: number; summary: string }>(
+      'SELECT id, run_id, created_at, summarized_messages, tokens_before, tokens_after, summary FROM copilot_compaction ORDER BY id DESC LIMIT 20',
     )
     .toArray()
     .map((row) => ({
       markerId: row.id,
+      runId: row.run_id,
       at: new Date(row.created_at).toISOString(),
       summarizedMessages: row.summarized_messages,
       tokensBefore: row.tokens_before,

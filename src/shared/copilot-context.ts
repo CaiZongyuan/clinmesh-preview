@@ -27,6 +27,8 @@ export interface CopilotRequestBreakdown {
 // A manual compaction: how many rolling messages the summary replaced and what it saved.
 export interface CopilotCompactionEntry {
   markerId: number
+  // The serialized run that produced the summary; its provider call appears on the request timeline.
+  runId: string
   at: string
   summarizedMessages: number
   tokensBefore: number
@@ -48,9 +50,8 @@ export interface CopilotContextView {
   compactions: CopilotCompactionEntry[]
 }
 
+// Manual compaction is a serialized run: the response names the queued run, and the marker appears in the
+// session and context view once it completes.
 export interface CopilotCompactResponse {
-  markerId: number
-  summarizedMessages: number
-  tokensBefore: number
-  tokensAfter: number
+  turnId: string
 }

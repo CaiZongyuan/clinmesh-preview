@@ -13,19 +13,13 @@ import type {
 import type { EncounterError } from '../../shared/encounter'
 import { DurableAgentRuntime, RunHalted, type AgentDefinition } from '../durable-agent/runtime'
 import { resolveLlmConfig, type LlmEnv } from '../llm/config'
-import { resolveLlmProvider } from '../llm/registry'
-import type { LlmMessage, ToolSpec } from '../llm/types'
-import { estimateTokens } from '../durable-agent/context'
+import type { ToolSpec } from '../llm/types'
+import type { AgentEvent } from '../../shared/agent-wire'
 import { applyMigrations } from '../sqlite-migrations'
 import { WORKSPACE_NAME } from '../workspace-name'
 import { COPILOT_SYSTEM_PROMPT, encounterOverview, promptContent } from './copilot-context'
-import {
-  COMPACTION_SYSTEM_PROMPT,
-  buildContextView,
-  requestItems,
-  rollingMessages,
-  summarizeTranscript,
-} from './copilot-accounting'
+import { COMPACTION_SYSTEM_PROMPT, buildContextView, compactionItems, requestItems, rollingMessages, summarizeTranscript } from './copilot-accounting'
+import { estimateTokens } from '../durable-agent/context'
 import type { CopilotRead, CopilotReadResult } from './copilot-reads'
 type ReadWorkspace = <R extends CopilotRead>(request: R) => Promise<CopilotReadResult<R['kind']>>
 import { readSession, type CopilotTrigger } from './copilot-session'
@@ -40,13 +34,18 @@ const COPILOT_MIGRATIONS: readonly string[] = [
      updated_at INTEGER NOT NULL
    );`,
   // Context accounting and manual compaction (#13): one row per compaction marker the doctor triggered.
+  // The seq range ties the summary to the rolling messages it replaced, so the runtime's supersede
+  // invalidation covers derived material too.
   `CREATE TABLE copilot_compaction (
      id INTEGER PRIMARY KEY AUTOINCREMENT,
+     run_id TEXT NOT NULL,
      summarized_messages INTEGER NOT NULL,
      tokens_before INTEGER NOT NULL,
      tokens_after INTEGER NOT NULL,
      summary TEXT NOT NULL,
-     provider_input INTEGER,
+     from_seq INTEGER NOT NULL,
+     upto_seq INTEGER NOT NULL,
+     summary_seq INTEGER NOT NULL,
      created_at INTEGER NOT NULL
    );`,
 ]
@@ -84,19 +83,63 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
       streamThinking: true,
       traceSteps: true,
       tools,
-      buildContext: async ({ messages }) => {
+      buildContext: async ({ run, messages }) => {
         const state = await this.read({ kind: 'encounter-state' })
         // A frozen Encounter takes no more analysis: whatever is still running or queued stops.
         if (!state.ok || state.data.status !== 'active') throw new RunHalted('encounter-ended')
+        if (run.kind === 'compaction') {
+          // The summarizer sees exactly the rolling history — never the live system context, which is
+          // re-injected on every request and must not be compacted away.
+          return {
+            messages: [
+              { role: 'system', content: COMPACTION_SYSTEM_PROMPT },
+              { role: 'user', content: `以下是临床助手本会话的对话历史，请输出摘要：\n\n${summarizeTranscript(messages)}` },
+            ],
+            tools: [],
+          }
+        }
         return {
           messages: [{ role: 'system', content: `${COPILOT_SYSTEM_PROMPT}\n\n${encounterOverview(state.data)}` }, ...messages],
           tools: toolSpecs,
         }
       },
       // #13: itemize exactly what each outbound request carries. The system message is the prompt plus the
-      // re-injected 就诊概况 (HIS state) and 问诊记录 (consultation), split back by the same boundary; the
-      // durable messages are the rolling doctor prompts, replies/thinking and tool results.
-      account: ({ messages }) => requestItems({ messages, tools: toolSpecs }),
+      // re-injected 患者与分诊 (patient visible), 就诊状态 (HIS state) and 问诊记录 (consultation) sections,
+      // split back by the same boundary; the durable messages are the rolling prompts, replies and results.
+      account: ({ run, messages }) =>
+        run.kind === 'compaction'
+          ? compactionItems(messages)
+          : requestItems({ messages, tools: toolSpecs }),
+      // The compaction's finalization shares the run's closing transaction: the summary reply is already
+      // persisted, so marking its inputs compacted and writing the marker is exactly as durable as the run.
+      // A run that never completes (stopped, failed provider, frozen Encounter) settles nothing.
+      settle: (run, outcome): AgentEvent[] => {
+        if (run.kind !== 'compaction' || outcome.text.trim() === '') return []
+        const sql = this.ctx.storage.sql
+        const summarySeq = sql
+          .exec<{ seq: number }>("SELECT seq FROM agent_message WHERE run_id = ? AND role = 'assistant' ORDER BY seq DESC LIMIT 1", run.runId)
+          .toArray()[0]?.seq
+        if (summarySeq === undefined) return []
+        const summarized = sql
+          .exec<{ seq: number; content_json: string }>(
+            `SELECT seq, content_json FROM agent_message WHERE state = 'active' AND seq < ? AND (run_id IS NULL OR run_id != ?) ORDER BY seq`,
+            summarySeq, run.runId,
+          )
+          .toArray()
+        if (summarized.length === 0) return []
+        const tokensBefore = summarized.reduce(
+          (sum, row) => sum + estimateTokens((JSON.parse(row.content_json) as { content: string }).content),
+          0,
+        )
+        for (const { seq } of summarized) sql.exec(`UPDATE agent_message SET state = 'compacted' WHERE seq = ? AND state = 'active'`, seq)
+        sql.exec(
+          `INSERT INTO copilot_compaction (run_id, summarized_messages, tokens_before, tokens_after, summary, from_seq, upto_seq, summary_seq, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          run.runId, summarized.length, tokensBefore, estimateTokens(outcome.text.trim()), outcome.text.trim(),
+          summarized[0].seq, summarized[summarized.length - 1].seq, summarySeq, Date.now(),
+        )
+        return [{ type: 'session.updated', runId: null }]
+      },
     }
     this.runtime = new DurableAgentRuntime(ctx, env as unknown as LlmEnv, agent)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -126,71 +169,24 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     )
   }
 
-  // Manual compaction (#13): summarizes the rolling doctor prompts, replies/thinking and tool results into one
-  // persisted summary message, marks the originals compacted, and leaves a marker. The 就诊概况 and 问诊记录
-  // live in the system context rebuilt before every request, so compaction never drops live clinic or
-  // consultation data. The summary is generated before the atomic write, so a crash anywhere simply loses the
-  // attempt and the doctor retries; the write itself re-checks that nothing started running meanwhile.
+  // Manual compaction (#13): a serialized runtime run of its own. It queues behind (or after) any ordinary
+  // turn, so provider work never overlaps; the runtime's stall timeout and abort paths bound an
+  // uncooperative provider; recovery replays it from its checkpoint; and freeze/stop close it without
+  // settling — the rolling inputs stay untouched on failure. On completion its reply is the persisted
+  // summary and `settle` marks the summarized inputs compacted and writes the marker.
   async compact(encounterId: string): Promise<CopilotResult<CopilotCompactResponse>> {
     this.bind(encounterId)
     const sql = this.ctx.storage.sql
     if (this.hasUnfinishedRun()) return { ok: false, error: busy }
-    const rolling = rollingMessages(sql)
-    if (rolling.length === 0) return { ok: false, error: nothingToCompact }
-    const llm = resolveLlmProvider(this.env as unknown as LlmEnv, 'copilot', this.runtime.sessionConfig())
-    if (!llm.ok) return { ok: false, error: { code: 'copilot-llm-unavailable', message: '未配置大模型接口（LLM_API_KEY），无法生成摘要。' } }
-    const transcript = summarizeTranscript(rolling)
-    const tokensBefore = rolling.reduce((sum, entry) => sum + entry.tokens, 0)
-    let summary = ''
-    let providerInput: number | null = null
-    const controller = new AbortController()
-    try {
-      const stream = llm.provider.stream(
-        {
-          model: llm.model,
-          effort: llm.effort,
-          messages: [
-            { role: 'system', content: COMPACTION_SYSTEM_PROMPT },
-            { role: 'user', content: `以下是临床助手本会话的对话历史，请输出摘要：\n\n${transcript}` },
-          ],
-          tools: [],
-        },
-        controller.signal,
-      )
-      for await (const event of stream) {
-        if (event.type === 'text.delta') summary += event.text
-        else if (event.type === 'usage') providerInput = event.input
-      }
-    } catch (error) {
-      return { ok: false, error: { code: 'copilot-llm-unavailable', message: `生成摘要失败：${error instanceof Error ? error.message : String(error)}` } }
-    }
-    if (summary.trim() === '') return { ok: false, error: { code: 'copilot-llm-unavailable', message: '模型没有返回摘要，未做任何修改。' } }
-    const tokensAfter = estimateTokens(summary)
-    const written = this.ctx.storage.transactionSync((): CopilotCompactResponse | null => {
-      const sql = this.ctx.storage.sql
-      // A prompt enqueued while the summary streamed must not lose its context to a racing compaction.
-      if (this.hasUnfinishedRun()) return null
-      const stillThere = new Set(rollingMessages(sql).map((entry) => entry.seq))
-      const compacted = rolling.filter((entry) => stillThere.has(entry.seq))
-      if (compacted.length === 0) return null
-      const now = Date.now()
-      sql.exec(
-        `INSERT INTO agent_message (run_id, role, content_json, origin_ref, state, created_at) VALUES (NULL, 'assistant', ?, ?, 'active', ?)`,
-        JSON.stringify({ role: 'assistant', content: summary.trim() } satisfies LlmMessage),
-        `compaction:${crypto.randomUUID()}`, now,
-      )
-      for (const entry of compacted) sql.exec(`UPDATE agent_message SET state = 'compacted' WHERE seq = ? AND state = 'active'`, entry.seq)
-      const { markerId } = sql
-        .exec<{ markerId: number }>(
-          `INSERT INTO copilot_compaction (summarized_messages, tokens_before, tokens_after, summary, provider_input, created_at)
-           VALUES (?, ?, ?, ?, ?, ?) RETURNING id AS markerId`,
-          compacted.length, tokensBefore, tokensAfter, summary.trim(), providerInput, now,
-        )
-        .one()
-      this.runtime.announce({ type: 'session.updated', runId: null })
-      return { markerId, summarizedMessages: compacted.length, tokensBefore, tokensAfter }
+    if (rollingMessages(sql).length === 0) return { ok: false, error: nothingToCompact }
+    const { runId } = await this.runtime.enqueue({
+      kind: 'compaction',
+      externalRef: `compaction-${crypto.randomUUID()}`,
+      trigger: { kind: 'doctor', text: '压缩上下文', mentions: [] },
+      deadlineAt: null,
+      messages: [],
     })
-    return written === null ? { ok: false, error: busy } : { ok: true, value: written }
+    return { ok: true, value: { turnId: runId } }
   }
 
   private hasUnfinishedRun(): boolean {

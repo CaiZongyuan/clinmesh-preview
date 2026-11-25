@@ -79,6 +79,10 @@ export interface AgentDefinition {
   // Per-request context accounting (#13): itemizes what the next LLM step would carry, by category. The
   // items are stored with the step, so the doctor's context view can show and reconcile every request.
   account?: (context: { run: AgentRun; messages: LlmMessage[]; tools: ToolSpec[] }) => ContextItem[]
+  // Finalizes a run durably, inside the closing transaction (the Clinical Copilot's compaction marks its
+  // summarized messages compacted and writes its marker here). Called only when a run completed; the
+  // returned events are appended to the log with the run's own closing event.
+  settle?: (run: AgentRun, outcome: Extract<RunOutcome, { status: 'done' }>) => AgentEvent[]
   // A run whose outcome another Durable Object must accept. Its reply stays `unsettled` (out of the context)
   // until `deliver` resolves true, and turns `void` when refused.
   settlement?: {
@@ -763,6 +767,11 @@ export class DurableAgentRuntime {
         run.runId, JSON.stringify({ role: 'assistant', content: outcome.text } satisfies LlmMessage),
         this.messageState(), now,
       )
+    }
+    // A completed run's host finalization shares the closing transaction, so its effects are exactly as
+    // durable as the run itself: a crash before this point replays, after this point it is committed.
+    if (outcome.status === 'done' && this.agent.settle) {
+      for (const event of this.agent.settle(run, outcome)) published.push(this.events.append(event))
     }
     // Every tool call the model made gets an answer, so the context stays well-formed for the next run.
     const unanswered = this.sql

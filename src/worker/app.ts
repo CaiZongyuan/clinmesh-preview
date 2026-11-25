@@ -498,18 +498,15 @@ app.get('/encounters/:encounterId/copilot/context', async (c) => {
 })
 
 // Manual compaction (#13): authorized and audited like every Copilot command, since it rewrites its context.
+// The compaction is a serialized run: the response names the queued run and the marker lands when it completes.
 app.post('/encounters/:encounterId/copilot/compact', async (c) => {
   const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
   if (!allowed.ok) return refuse(c, allowed.error)
   const result = await copilot(c).compact(c.req.param('encounterId'))
   if (!result.ok) return refuse(c, result.error)
-  const audited = await workspace(c).auditCopilotCommand(
-    c.req.param('encounterId'),
-    'copilot-compacted',
-    `#${result.value.markerId} ${result.value.summarizedMessages}条`,
-  )
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-compacted', result.value.turnId)
   if (!audited.ok) return refuse(c, audited.error)
-  return c.json<CopilotCompactResponse>(result.value, 201)
+  return c.json<CopilotCompactResponse>(result.value, 202)
 })
 
 // Streams the Clinical Copilot's events for one Encounter.
