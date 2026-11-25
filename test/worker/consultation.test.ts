@@ -10,6 +10,7 @@ import { SimulatedPatientDO } from '../../src/worker/simulated-patient/simulated
 import { expectNoCaseTruth } from './case-truth'
 import { api, ask, asked, eventsOf, openPatientSocket, retry, send, settled, startEncounter, transcript } from './support/clinic'
 import { installScripted } from './support/scripted-llm'
+import { allowUncaught } from './uncaught'
 
 // Doctor lines avoid diagnosis words: the Case Truth denylist would flag them in the transcript otherwise.
 const Q1 = '您哪里不舒服？'
@@ -469,6 +470,7 @@ describe('settling patient turns', () => {
       if (++calls === 1) throw new Error('connection lost after commit')
       return result
     }
+    allowUncaught(/connection lost after commit/)
     try {
       const llm = installScripted('patient').reply(R1).reply(R2)
       const encounterId = await startEncounter()
@@ -500,6 +502,7 @@ describe('settling patient turns', () => {
       if (++calls === 1) throw new Error('workspace briefly unreachable')
       return original.call(this, settlement)
     }
+    allowUncaught(/workspace briefly unreachable/)
     try {
       installScripted('patient').reply(R1)
       const encounterId = await startEncounter()
@@ -521,6 +524,7 @@ describe('settling patient turns', () => {
     SimulatedPatientDO.prototype.beginReply = async () => {
       throw new Error('patient unreachable')
     }
+    allowUncaught(/patient unreachable/)
     try {
       const encounterId = await startEncounter()
       const { patientTurn } = await asked(encounterId, Q1)
@@ -549,6 +553,7 @@ describe('settling patient turns', () => {
         throw new Error('response lost')
       }
     }
+    allowUncaught(/response lost/)
     try {
       const llm = installScripted('patient').reply(R1)
       const gate = llm.gate('青霉素', '过敏。')
@@ -592,7 +597,9 @@ describe('settling patient turns', () => {
     const response = await api(`/api/encounters/${encounterId}/patient/socket`, { headers: { upgrade: 'websocket' } })
     const ws = response.webSocket!
     const frames: string[] = []
-    ws.addEventListener('message', (event) => frames.push(String(event.data)))
+    ws.addEventListener('message', (event) => {
+      frames.push(String(event.data))
+    })
     ws.accept()
     for (const junk of ['null', '42', '"hello"', '{"type":"hello"}', 'not json']) ws.send(junk)
     ws.send(JSON.stringify({ type: 'hello', afterSeq: 0 }))
