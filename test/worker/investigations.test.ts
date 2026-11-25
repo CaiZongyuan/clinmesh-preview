@@ -12,6 +12,8 @@ import type {
 } from '../../src/shared/investigation'
 import { ageOn } from '../../src/worker/golden-case-pack'
 import { admitCatalog, bandFor, flagFor, type CatalogItem, type RawCatalog } from '../../src/worker/investigation-catalog'
+import { EncounterRepository } from '../../src/worker/encounter-repository'
+import { InvestigationRepository } from '../../src/worker/investigation-repository'
 
 const T0 = Date.parse('2026-11-24T00:40:00.000Z')
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString()
@@ -563,6 +565,31 @@ describe('Report amendments', () => {
     expect(response.status).toBe(200)
     const [after] = ((await response.json()) as InvestigationsResponse).investigations
     expect(after.reports.map((r) => r.acknowledgement?.acknowledgedAt)).toEqual([at(30), at(160)])
+  })
+
+  it('keeps a scripted amendment out of releasedReports, the one read of Report content, until it publishes', async () => {
+    const encounterId = await startEncounter()
+    const [cbc] = ((await (await issue(encounterId, ['cbc'])).json()) as InvestigationsResponse).investigations
+    await releaseNow(encounterId, cbc.investigationId)
+    const read = (seconds: number) =>
+      runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
+        const encounters = new EncounterRepository(state.storage.sql)
+        const found = encounters.get(encounterId)
+        if (!found.ok) throw new Error(found.error.message)
+        const written = state.storage.sql
+          .exec('SELECT version FROM report WHERE investigation_id = ? ORDER BY version', cbc.investigationId)
+          .toArray()
+          .map((r) => r.version)
+        const released = new InvestigationRepository(state.storage.sql, encounters).releasedReports(found.encounter, T0 + seconds * 1000)
+        return { written, released: released.map((r) => [r.investigationId, r.version, r.correctionReason]) }
+      })
+
+    // The amendment is already written, 120 s ahead, yet absent from the accessor until then.
+    expect(await read(119)).toEqual({ written: [1, 2], released: [[cbc.investigationId, 1, null]] })
+    expect((await read(120)).released).toEqual([
+      [cbc.investigationId, 1, null],
+      [cbc.investigationId, 2, amendment('cbc').reason],
+    ])
   })
 
   it('never publishes an amendment scripted after the Encounter ended', async () => {

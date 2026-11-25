@@ -235,14 +235,15 @@ describe('Case Truth isolation over HTTP', () => {
     await probeEveryRoute(ctx, 'Report version 1 released', { keepActive: true })
     expect(ctx.revealed, 'the Physical Examination probe examined the vitals').toHaveLength(3)
 
-    // Only the CBC amendment is out at 150 s: the chest X-ray one stays hidden until it publishes.
+    // Only the CBC amendment is out at 150 s: the chest X-ray one stays hidden on every route until it publishes.
     vi.setSystemTime(T0 + 150_000)
+    ctx.revealed.push(releasedAmendments(['cbc']))
     const cbcAmended = await (await request('GET', `/api/encounters/${encounterId}/investigations`)).text()
-    expectNoCaseTruth('CBC amended', cbcAmended, [...ctx.revealed, releasedAmendments(['cbc'])])
     expect(cbcAmended).toContain(releasedAmendments(['cbc'])[0].reason)
+    await probeEveryRoute(ctx, 'CBC amended', { keepActive: true })
 
     vi.setSystemTime(T0 + 200_000)
-    ctx.revealed.push(releasedAmendments(['cbc', 'cxr']))
+    ctx.revealed.push(releasedAmendments(['cxr']))
     const amended = await (await request('GET', `/api/encounters/${encounterId}/investigations`)).text()
     expect(amended).toContain(releasedAmendments(['cxr'])[0].textOverride!.impression)
     const amendedList = (JSON.parse(amended) as InvestigationsResponse).investigations

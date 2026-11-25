@@ -32,6 +32,11 @@ type ReportRow = {
 // Rows written before amendments existed have no correctionReason; they are all version 1.
 type ReportContent = Pick<ReportView, 'reporter' | 'reviewer' | 'specimenOrSite'> & { correctionReason?: string | null; body: ReportBody }
 
+// A released Report version and the Investigation it belongs to.
+export interface ReleasedReport extends ReportView {
+  investigationId: string
+}
+
 export type InvestigationsResult = { ok: true; investigations: InvestigationView[] } | { ok: false; error: EncounterError }
 
 const refuse = (error: EncounterError) => ({ ok: false, error }) as const
@@ -92,7 +97,7 @@ export class InvestigationRepository {
     if (row.cancelled_at) return refuse({ code: 'investigation-cancelled', message: '该检查已取消，不会出报告。' })
     const unsettled = this.settle(active.encounter, now)
     if (unsettled) return refuse(unsettled)
-    if (!this.hasReport(investigationId)) {
+    if (!this.hasReleasedReport(active.encounter, investigationId, now)) {
       const truth = caseTruth(active.encounter.caseId, active.encounter.caseVersion)
       if (!truth.ok) return refuse(truth.error)
       const stageTimes = (JSON.parse(row.stage_times) as string[]).map((at) => (at > iso(now) ? iso(now) : at))
@@ -111,7 +116,7 @@ export class InvestigationRepository {
     if (row.cancelled_at) return refuse({ code: 'investigation-cancelled', message: '该检查已取消。' })
     const unsettled = this.settle(active.encounter, now)
     if (unsettled) return refuse(unsettled)
-    if (this.hasReport(investigationId)) {
+    if (this.hasReleasedReport(active.encounter, investigationId, now)) {
       return refuse({ code: 'investigation-already-reported', message: '该检查已出报告，报告发布后不能取消。' })
     }
     this.sql.exec(
@@ -128,16 +133,15 @@ export class InvestigationRepository {
     if (!active.ok) return active
     const unsettled = this.settle(active.encounter, now)
     if (unsettled) return refuse(unsettled)
-    const clock = clockOf(active.encounter, now)
-    const reports = this.rows(encounterId).flatMap((row) => this.reportRows(row.investigation_id, clock))
+    const reports = this.releasedReports(active.encounter, now)
     for (const reportId of reportIds) {
-      const report = reports.find((r) => r.report_id === reportId)
+      const report = reports.find((r) => r.reportId === reportId)
       if (!report) return refuse({ code: 'report-not-found', message: `找不到报告 ${reportId}` })
-      const latest = Math.max(...reports.filter((r) => r.investigation_id === report.investigation_id).map((r) => r.version))
+      const latest = Math.max(...reports.filter((r) => r.investigationId === report.investigationId).map((r) => r.version))
       if (report.version !== latest) {
         return refuse({ code: 'report-superseded', message: `第 ${report.version} 版报告已被更正版本替代，请确认最新版本。` })
       }
-      if (report.acknowledged_at) return refuse({ code: 'report-already-acknowledged', message: '该版本报告已确认已阅。' })
+      if (report.acknowledgement) return refuse({ code: 'report-already-acknowledged', message: '该版本报告已确认已阅。' })
     }
     for (const reportId of reportIds) {
       this.sql.exec(
@@ -155,10 +159,13 @@ export class InvestigationRepository {
   list(encounter: EncounterView, now: number): InvestigationView[] {
     this.settle(encounter, now)
     const clock = clockOf(encounter, now)
+    const released = this.releasedReports(encounter, now)
     return this.rows(encounter.encounterId).map((row): InvestigationView => {
       const item = catalogItem(row.catalog_item_id)!
       const stageTimes = JSON.parse(row.stage_times) as string[]
-      const reports = this.reportRows(row.investigation_id, clock).map(toReportView)
+      const reports = released
+        .filter((report) => report.investigationId === row.investigation_id)
+        .map(({ investigationId: _, ...report }): ReportView => report)
       // A cancelled Investigation stops where it was; cancellation always happens while the Encounter is active.
       const until = row.cancelled_at ?? clock
       return {
@@ -181,12 +188,33 @@ export class InvestigationRepository {
     })
   }
 
+  // The only read of Report content: every version of the Encounter's Reports released by its clock, oldest first
+  // within each Investigation. Scripted amendments are written ahead of their release time, so whatever shows or
+  // reasons about Reports must read them here, never from the report table: the investigation list, acknowledgement,
+  // cancellation, Completion Gate 2 (#11) and the Clinical Copilot's read_released_reports tool (#12). It does not
+  // settle; run a command or `list` first to release Reports that have come due.
+  releasedReports(encounter: EncounterView, now: number): ReleasedReport[] {
+    return this.sql
+      .exec<ReportRow>(
+        `SELECT report.report_id, report.investigation_id, version, released_at, content,
+           report_acknowledgement.practitioner_id AS acknowledged_by, acknowledged_at
+         FROM report
+           JOIN investigation ON investigation.investigation_id = report.investigation_id
+           LEFT JOIN report_acknowledgement ON report_acknowledgement.report_id = report.report_id
+         WHERE investigation.encounter_id = ? AND released_at <= ?
+         ORDER BY investigation.rowid, version`,
+        encounter.encounterId, clockOf(encounter, now),
+      )
+      .toArray()
+      .map((row) => ({ investigationId: row.investigation_id, ...toReportView(row) }))
+  }
+
   // Writes every Report version 1 that has come due, with its scripted amendments. Refuses, writing nothing,
   // when a due Report's Case Truth is retired.
   private settle(encounter: EncounterView, now: number): EncounterError | null {
     const clock = clockOf(encounter, now)
     const due = this.rows(encounter.encounterId).filter(
-      (row) => !row.cancelled_at && reportTime(row) <= clock && !this.hasReport(row.investigation_id),
+      (row) => !row.cancelled_at && reportTime(row) <= clock && !this.isSettled(row.investigation_id),
     )
     if (due.length === 0) return null
     const truth = caseTruth(encounter.caseId, encounter.caseVersion)
@@ -228,22 +256,13 @@ export class InvestigationRepository {
       .toArray()
   }
 
-  // Version 1 is written only once released, so any row means the first Report exists.
-  private hasReport(investigationId: string): boolean {
-    return this.sql.exec('SELECT 1 FROM report WHERE investigation_id = ? LIMIT 1', investigationId).toArray().length > 0
+  private hasReleasedReport(encounter: EncounterView, investigationId: string, now: number): boolean {
+    return this.releasedReports(encounter, now).some((report) => report.investigationId === investigationId)
   }
 
-  // The versions released by `clock`; later scripted amendments stay out of every read.
-  private reportRows(investigationId: string, clock: string): ReportRow[] {
-    return this.sql
-      .exec<ReportRow>(
-        `SELECT report.report_id, investigation_id, version, released_at, content,
-           report_acknowledgement.practitioner_id AS acknowledged_by, acknowledged_at
-         FROM report LEFT JOIN report_acknowledgement USING (report_id)
-         WHERE investigation_id = ? AND released_at <= ? ORDER BY version`,
-        investigationId, clock,
-      )
-      .toArray()
+  // Whether settling has written this Investigation's Reports; reads no Report content, only for `settle`.
+  private isSettled(investigationId: string): boolean {
+    return this.sql.exec('SELECT 1 FROM report WHERE investigation_id = ? LIMIT 1', investigationId).toArray().length > 0
   }
 }
 
