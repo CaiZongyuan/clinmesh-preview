@@ -13,6 +13,25 @@ import { createFakeDiagnoses } from './fake-diagnosis'
 import { createFakeInvestigations, fakeCatalog } from './fake-investigations'
 import { createFakePrescriptions, fakeMedicationCatalog } from './fake-prescriptions'
 
+// A tiny canonical 44-byte-header WAV the speech endpoint answers with.
+const SPEECH_WAV = (() => {
+  const bytes = new Uint8Array(48)
+  const view = new DataView(bytes.buffer)
+  'RIFF'.split('').forEach((s, i) => (bytes[i] = s.charCodeAt(0)))
+  view.setUint32(4, bytes.byteLength - 8, true)
+  'WAVEfmt '.split('').forEach((s, i) => (bytes[8 + i] = s.charCodeAt(0)))
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, 16_000, true)
+  view.setUint32(28, 32_000, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  'data'.split('').forEach((s, i) => (bytes[36 + i] = s.charCodeAt(0)))
+  view.setUint32(40, 4, true)
+  return bytes.buffer
+})()
+
 const STATUS: Record<EncounterError['code'], number> = {
   'catalog-item-not-found': 404,
   'investigation-already-issued': 409,
@@ -100,6 +119,7 @@ export function createFakeClinicApi({
   notes = {} as Record<string, ClinicalNoteView>,
   diagnoses = {} as Record<string, DiagnosisView>,
   recognizer = 'web-speech' as 'web-speech' | 'paraformer-realtime-v2',
+  patientSpeech = false,
   debriefReference = undefined as CaseDebriefReference | undefined,
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
@@ -119,6 +139,8 @@ export function createFakeClinicApi({
   const copilotSockets = new Set<FakeCopilotSocket>()
   let copilotPromptCount = 0
   const turns = new Map(Object.entries(consultations).map(([id, list]) => [id, [...list]]))
+  // Patient speech requests the workbench made to the Sambert endpoint.
+  const speechRequests: { encounterId: string; turnId: string; text: string }[] = []
   const log: { encounterId: string; seq: number; event: AgentEvent }[] = []
   const runOf = new Map<string, string>()
   const sockets = new Set<FakePatientSocket>()
@@ -287,6 +309,15 @@ export function createFakeClinicApi({
     if (method === 'POST' && action === 'consultation/doctor-turns') return askPatient(encounter, JSON.parse(String(init?.body)))
     const retried = action?.match(/^consultation\/patient-turns\/([^/]+)\/retry$/)
     if (method === 'POST' && retried) return retry(encounter, retried[1])
+    const speech = action?.match(/^consultation\/patient-turns\/([^/]+)\/speech$/)
+    if (method === 'POST' && speech) {
+      if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，不再合成语音。')
+      if (!patientSpeech) return refuse('invalid-request', '未配置语音合成（BAILIAN_TOKEN）。')
+      const requested = body as { text?: string }
+      if (typeof requested?.text !== 'string' || !requested.text.trim()) return refuse('invalid-request', '请求体须为 { "text": string }')
+      speechRequests.push({ encounterId: encounter.encounterId, turnId: speech[1], text: requested.text })
+      return new Response(SPEECH_WAV.slice(0), { headers: { 'content-type': 'audio/wav' } })
+    }
     if (action === 'copilot' || (method === 'POST' && action === 'copilot/prompts')) {
       const session = copilotOf(encounter.encounterId)
       if (method === 'GET') return Response.json({ snapshot: copilotSnapshotOf(encounter.encounterId) })
@@ -516,11 +547,13 @@ export function createFakeClinicApi({
     }
   }
 
-  // One constructor for both sockets: it dispatches on the path and forwards to the real fake.
+  // One constructor dispatches to the transport selected by the browser.
   class FakeSocket {
-    private readonly inner: FakePatientSocket | FakeCopilotSocket
+    private readonly inner: FakePatientSocket | FakeCopilotSocket | FakeVoiceSocket
     constructor(url: string) {
-      this.inner = url.endsWith('/copilot/socket') ? new FakeCopilotSocket(url) : new FakePatientSocket(url)
+      if (url.endsWith('/voice')) this.inner = new FakeVoiceSocket(url)
+      else if (url.endsWith('/copilot/socket')) this.inner = new FakeCopilotSocket(url)
+      else this.inner = new FakePatientSocket(url)
     }
     get onopen() { return this.inner.onopen }
     set onopen(value) { this.inner.onopen = value }
@@ -609,6 +642,7 @@ export function createFakeClinicApi({
   }
   return {
     handle,
+    speechRequests: () => [...speechRequests],
     VoiceSocket: FakeVoiceSocket,
     voiceSockets: () => [...voiceSockets],
     spokenTurn,

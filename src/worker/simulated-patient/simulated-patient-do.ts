@@ -98,6 +98,10 @@ export class SimulatedPatientDO extends DurableObject<Env> {
     })
   }
 
+  async replyText(patientTurnId: string): Promise<string> {
+    return this.runtime.replyText(patientTurnId)
+  }
+
   async fetch(request: Request): Promise<Response> {
     return this.runtime.sockets.accept(request)
   }

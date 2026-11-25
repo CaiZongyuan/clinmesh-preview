@@ -9,7 +9,7 @@ import {
   ScrollAreaViewport,
 } from '@ui-sdk/react/scroll-area'
 import { SegmentedControl, SegmentedControlIndicator, SegmentedControlItem } from '@ui-sdk/react/segmented-control'
-import { ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, MicIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon } from 'lucide-react'
+import { ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, MicIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon, RotateCcwIcon, Volume2Icon, VolumeXIcon } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { MAX_QUESTION_LENGTH, type ConsultationTurn, type PatientTurnFailure, type Recognizer } from '../../shared/consultation'
 import type { EncounterView } from '../../shared/encounter'
@@ -20,6 +20,7 @@ import { formatClockSeconds } from './format'
 import { badge, iconButton, pane, paneHeader } from './pane-styles'
 import { PhysicalExaminationPanel, PhysicalExaminationRow } from './physical-examination'
 import { useVoiceCapture } from '../voice/use-voice-capture'
+import { usePatientSpeech } from '../voice/use-patient-speech'
 import { VoiceBar } from './voice-bar'
 
 export interface EncounterContext {
@@ -76,7 +77,9 @@ interface ColumnProps {
 export function ConsultationColumn({ encounter: context, consultation, onCollapse }: ColumnProps) {
   const [filter, setFilter] = useState<TranscriptFilter>('all')
   const encounter = context?.encounter
-  const voice = useVoiceCapture(encounter?.encounterId ?? null, consultation.accept)
+  const liveEncounterId = encounter?.status === 'active' ? encounter.encounterId : null
+  const speech = usePatientSpeech(liveEncounterId, consultation)
+  const voice = useVoiceCapture(liveEncounterId, consultation.accept, speech.interrupt)
   const visible = transcriptOf(consultation.turns, context?.examinations ?? []).filter(
     (entry) => filter === 'all' || entry.channel === filter,
   )
@@ -114,7 +117,19 @@ export function ConsultationColumn({ encounter: context, consultation, onCollaps
                 </SegmentedControlItem>
               ))}
             </SegmentedControl>
-            <StreamStatus consultation={consultation} />
+            <div className="flex items-center gap-1">
+              <StreamStatus consultation={consultation} />
+              {liveEncounterId && (
+                <Button
+                  aria-label={speech.muted ? '取消患者语音静音' : '静音患者语音'}
+                  title={speech.muted ? '取消静音' : '静音'}
+                  className={iconButton}
+                  onClick={speech.toggleMute}
+                >
+                  {speech.muted ? <VolumeXIcon aria-hidden="true" size={15} /> : <Volume2Icon aria-hidden="true" size={15} />}
+                </Button>
+              )}
+            </div>
           </div>
           <ScrollArea stickToEnd className="relative min-h-0 flex-1">
             <ScrollAreaViewport role="log" aria-label="问诊实时记录" className="h-full">
@@ -132,6 +147,18 @@ export function ConsultationColumn({ encounter: context, consultation, onCollaps
                           turn={entry.turn}
                           patientName={encounter.patient.name}
                           streamed={consultation.streamed[entry.turn.turnId]}
+                          speech={
+                            entry.turn.speaker === 'patient'
+                              ? {
+                                  interrupted: speech.interrupted.has(entry.turn.turnId),
+                                  progress: speech.playingTurnId === entry.turn.turnId ? speech.progress : null,
+                                  replay:
+                                    liveEncounterId && entry.turn.status === 'final' && entry.turn.text.trim()
+                                      ? () => speech.replay(entry.turn)
+                                      : undefined,
+                                }
+                              : null
+                          }
                           retry={
                             entry.turn.status === 'failed' && entry.turn.seq === latestSeq && encounter.status === 'active'
                               ? () => void consultation.retry(entry.turn.turnId)
@@ -180,14 +207,21 @@ function StreamStatus({ consultation }: { consultation: Consultation }) {
   )
 }
 
+interface TurnSpeech {
+  interrupted: boolean
+  progress: number | null
+  replay?: () => void
+}
+
 interface TurnRowProps {
   turn: ConsultationTurn
   patientName: string
   streamed: string | undefined
+  speech?: TurnSpeech | null
   retry?: () => void
 }
 
-function TurnRow({ turn, patientName, streamed, retry }: TurnRowProps) {
+function TurnRow({ turn, patientName, streamed, speech, retry }: TurnRowProps) {
   const doctor = turn.speaker === 'doctor'
   const failed = turn.status === 'failed'
   return (
@@ -227,6 +261,11 @@ function TurnRow({ turn, patientName, streamed, retry }: TurnRowProps) {
             <span className={`${badge} h-[18px] bg-muted px-[5px] text-[11px] font-normal`}>模拟患者</span>
           )}
           {turn.attempt > 1 && <span className="text-[11px]">第 {turn.attempt} 次作答</span>}
+          {speech?.interrupted && (
+            <span className={`${badge} h-[18px] bg-warning px-[5px] text-[11px] font-normal text-warning-foreground`}>
+              播放已打断
+            </span>
+          )}
         </div>
         {turn.status === 'pending' ? (
           <PendingReply since={turn.createdAt} streamed={streamed} />
@@ -242,12 +281,31 @@ function TurnRow({ turn, patientName, streamed, retry }: TurnRowProps) {
             )}
           </div>
         ) : (
-          <p className="m-0 text-sm leading-relaxed [overflow-wrap:anywhere]">{turn.text}</p>
+          <div>
+            <p className="m-0 text-sm leading-relaxed [overflow-wrap:anywhere]">{turn.text}</p>
+          </div>
+        )}
+        {speech && speech.progress !== null && (
+          <div
+            role="progressbar"
+            aria-label={`第 ${turn.seq} 条语音播放进度`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(speech.progress * 100)}
+            className="mt-1 h-1 w-40 overflow-hidden rounded-full bg-muted"
+          >
+            <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${speech.progress * 100}%` }} />
+          </div>
         )}
       </div>
       {turn.status === 'final' && (
         <div className="absolute top-0 right-0 flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-open]]:opacity-100">
           <CopyTurn turn={turn} />
+          {speech?.replay && (
+            <Button aria-label={`重播第 ${turn.seq} 条回答`} title="重播" className={`${iconButton} size-6 bg-card`} onClick={speech.replay}>
+              <RotateCcwIcon aria-hidden="true" size={12} />
+            </Button>
+          )}
           <QuoteMenu label={`引用第 ${turn.seq} 条到病历`} text={quotedTurn(turn.speaker, turn.text)} />
         </div>
       )}

@@ -159,6 +159,15 @@ export async function retryPatientTurn(encounterId: string, turnId: string): Pro
   return (await request<RetryPatientTurnResponse>(path, post())).patientTurn
 }
 
+// The repaired WAV for one patient reply chunk, spoken by Sambert. Aborting the fetch tears down the upstream
+// synthesis task, so a cancelled playback or a navigation does not leave a late job running.
+export async function synthesizePatientSpeech(encounterId: string, turnId: string, text: string, signal: AbortSignal): Promise<ArrayBuffer> {
+  const path = `${encounterPath(encounterId)}/consultation/patient-turns/${encodeURIComponent(turnId)}/speech`
+  const response = await fetch(path, { ...post({ text }), signal })
+  if (!response.ok) throw new Error(((await response.json().catch(() => null)) as ErrorResponse | null)?.error.message ?? '语音合成失败')
+  return response.arrayBuffer()
+}
+
 const clinicalNotePath = (encounterId: string) => `${encounterPath(encounterId)}/clinical-note`
 
 export async function fetchClinicalNote(encounterId: string): Promise<ClinicalNoteView> {

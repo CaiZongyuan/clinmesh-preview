@@ -135,6 +135,8 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'GET /api/encounters/:encounterId/patient/socket': ({ encounterId }) => patientSocketFrames(encounterId),
   'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry': ({ encounterId, failedPatientTurnId }) =>
     request('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/retry`),
+  'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/speech': ({ encounterId, failedPatientTurnId }) =>
+    request('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/speech`, { text: '您好。' }),
   'GET /api/encounters/:encounterId/clinical-note': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/clinical-note`),
   'GET /api/encounters/:encounterId/diagnosis': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/diagnosis`),
   'PUT /api/encounters/:encounterId/diagnosis/draft': ({ encounterId }) =>

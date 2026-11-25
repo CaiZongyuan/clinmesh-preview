@@ -47,8 +47,9 @@ import type {
 } from '../shared/medication'
 import { prescriptionLines, type PrescriptionsResult } from './prescription-repository'
 import { medicationCatalog } from './medication-catalog'
-import type { VoiceConfigResponse } from '../shared/voice'
-import { recognizerFor } from './voice/voice-config'
+import { SAMBERT_MAX_TEXT, type PatientSpeechRequest, type VoiceConfigResponse } from '../shared/voice'
+import { recognizerFor, sambertUpstream } from './voice/voice-config'
+import { SambertTTSProvider } from './voice/sambert-tts-provider'
 
 import { WORKSPACE_NAME } from './workspace-name'
 
@@ -335,6 +336,36 @@ app.post('/encounters/:encounterId/consultation/doctor-turns', async (c) => {
 app.post('/encounters/:encounterId/consultation/patient-turns/:turnId/retry', async (c) => {
   const result = await workspace(c).retryPatientTurn(c.req.param('encounterId'), c.req.param('turnId'))
   return result.ok ? c.json<RetryPatientTurnResponse>({ patientTurn: result.patientTurn }, 201) : refuse(c, result.error)
+})
+
+app.post('/encounters/:encounterId/consultation/patient-turns/:turnId/speech', async (c) => {
+  const encounterId = c.req.param('encounterId')
+  const found = await workspace(c).getEncounter(encounterId)
+  if (!found.ok) return refuse(c, found.error)
+  if (found.encounter.status !== 'active') {
+    return refuse(c, { code: 'encounter-not-active', message: '该就诊已结束，不再合成语音。' })
+  }
+  const body = (await c.req.json().catch(() => null)) as PatientSpeechRequest | null
+  if (typeof body?.text !== 'string' || !body.text.trim() || body.text.length > SAMBERT_MAX_TEXT) {
+    return refuse(c, { code: 'invalid-request', message: `请求体须为 { "text": string }，1–${SAMBERT_MAX_TEXT} 字` })
+  }
+  const consultation = await workspace(c).getConsultation(encounterId)
+  if (!consultation.ok) return refuse(c, consultation.error)
+  const turn = consultation.turns.find((candidate) => candidate.turnId === c.req.param('turnId'))
+  if (turn?.speaker !== 'patient' || turn.status === 'failed') {
+    return refuse(c, { code: 'invalid-request', message: '只能合成患者的回复。' })
+  }
+  const available = turn.status === 'pending'
+    ? await c.env.SIMULATED_PATIENT.getByName(encounterId).replyText(turn.turnId)
+    : turn.text
+  if (!available.includes(body.text)) {
+    return refuse(c, { code: 'invalid-request', message: '语音内容须来自患者已经显示的回复。' })
+  }
+  const upstream = sambertUpstream(c.env as unknown as Record<string, unknown>)
+  if (!upstream) return refuse(c, { code: 'invalid-request', message: '未配置语音合成（BAILIAN_TOKEN）。' })
+  const wav = await new SambertTTSProvider(upstream).synthesize(body.text, c.req.raw.signal)
+  if (!wav) return refuse(c, { code: 'invalid-request', message: '语音合成失败，请重试。' })
+  return new Response(wav, { headers: { 'content-type': 'audio/wav', 'cache-control': 'no-store' } })
 })
 
 // Streams the Simulated Patient's replies for one Encounter (see src/shared/agent-wire.ts).
