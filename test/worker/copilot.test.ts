@@ -1,6 +1,7 @@
 import { abortAllDurableObjects, env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import { describe, expect, it, vi } from 'vitest'
+import type { ClinicalNoteResponse } from '../../src/shared/clinical-note'
 import type { AuditEventsResponse, EncounterResponse } from '../../src/shared/encounter'
 import { ClinicWorkspaceDO } from '../../src/worker/clinic-workspace-do'
 import type { CopilotRead } from '../../src/worker/clinical-copilot/copilot-reads'
@@ -118,6 +119,45 @@ describe('what the Copilot is asked', () => {
       role: 'user',
       content: expect.stringContaining('报告「血常规 第1版」'),
     })
+  })
+
+  it('includes only the selected visible signed section and current Draft in the outbound request', async () => {
+    const llm = installScripted('copilot').reply('已核对两个段落。')
+    const encounterId = await startEncounter()
+    const path = `/api/encounters/${encounterId}/clinical-note`
+    const sections = {
+      'chief-complaint': '首次签署主诉文本',
+      'present-illness': '未引用的签署段落',
+      'past-history': '',
+      findings: '',
+      assessment: '',
+      plan: '',
+    }
+    const first = await send('POST', `${path}/revisions`, { sections })
+    expect(first.status).toBe(201)
+    const { note } = (await first.json()) as ClinicalNoteResponse
+    expect((await send('POST', `${path}/revisions`, {
+      sections: { ...sections, 'chief-complaint': '后来签署的主诉文本' },
+    })).status).toBe(201)
+    expect((await send('PATCH', `${path}/draft`, {
+      sections: { 'chief-complaint': '当前尚未签署的主诉草稿', plan: '未引用的草稿段落' },
+    })).status).toBe(200)
+
+    const references = [
+      { kind: 'note-section', id: `${note.revisions[0].revisionId}:chief-complaint`, label: '主诉（已签署）' },
+      { kind: 'draft', id: 'chief-complaint', label: '主诉（草稿）' },
+      { kind: 'note-section', id: 'another-encounter:chief-complaint', label: '不存在的修订' },
+    ]
+    expect((await prompt(encounterId, 'note-refs', '请对照两段内容。', 'queue', references)).status).toBe(201)
+    await copilotSettled(encounterId)
+    expect(llm.requests).toHaveLength(1)
+    const outbound = JSON.stringify(llm.requests[0].messages)
+    expect(outbound).toContain('首次签署主诉文本')
+    expect(outbound).toContain('当前尚未签署的主诉草稿')
+    expect(outbound).not.toContain('后来签署的主诉文本')
+    expect(outbound).not.toContain('未引用的签署段落')
+    expect(outbound).not.toContain('未引用的草稿段落')
+    expectNoCaseTruth('Copilot note references', outbound)
   })
 
   it('rebuilds the HIS state in the system prompt every step, never the Case Truth', async () => {

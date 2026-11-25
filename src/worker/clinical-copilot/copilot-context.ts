@@ -1,6 +1,6 @@
 import { COPILOT_COMMANDS, MENTION_KIND_LABEL, type CopilotMention } from '../../shared/copilot-turn'
 import { BODY_SYSTEM_NAME } from '../../shared/physical-examination'
-import type { CopilotEncounterState } from './copilot-reads'
+import type { CopilotEncounterState, CopilotNoteMention } from './copilot-reads'
 
 const SEX = { male: '男', female: '女' } as const
 
@@ -8,7 +8,7 @@ export const COPILOT_SYSTEM_PROMPT = [
   '你是门诊临床助手（Clinical Copilot），在负责医生接诊时提供分析与建议。',
   '',
   '## 规则',
-  '- 你只能用只读工具查阅本次就诊中医生同样可见的资料：既往资料、诊所检查目录、就诊状态与问诊记录、已完成的查体发现、已发布的检查检验报告（含未确认已阅的版本）。',
+  '- 你仅能查阅医生同样可见的本次就诊资料：医生在提问中引用的病历与草稿，以及只读工具可查阅的既往资料、诊所检查目录、就诊状态与问诊记录、已完成的查体发现、已发布的检查检验报告（含未确认已阅的版本）。',
   '- 没有查过的部位、没开立或还没出报告的检查，你都不知道结果；不要推测或编造数值。',
   '- 你没有正式医疗签发权：诊断、开检查、开处方、确认报告已阅、签署病历和完诊都必须由医生本人确认。',
   '- 用简体中文和 Markdown 回答，简洁、分点，说明依据来自哪份资料。',
@@ -34,11 +34,14 @@ export function encounterOverview(state: CopilotEncounterState): string {
   return lines.join('\n')
 }
 
-// What the Copilot is asked for a doctor's prompt: a slash command expands to its instruction, and @-mentioned
-// HIS objects are listed by id so the Copilot can read them with its tools.
-export function promptContent(text: string, mentions: readonly CopilotMention[]): string {
+export function promptContent(text: string, mentions: readonly CopilotMention[], notes: readonly CopilotNoteMention[]): string {
   const command = COPILOT_COMMANDS.find((c) => c.prompt && (text === c.command || text.startsWith(`${c.command} `)))
   const asked = command ? [command.prompt, text.slice(command.command.length).trim()].filter(Boolean).join('\n') : text
   if (mentions.length === 0) return asked
-  return [asked, '', '医生引用的 HIS 对象：', ...mentions.map((m) => `- ${MENTION_KIND_LABEL[m.kind]}「${m.label}」（id: ${m.id}）`)].join('\n')
+  const references = mentions.map(({ kind, id, label }) => {
+    const description = `- ${MENTION_KIND_LABEL[kind]}「${label}」（id: ${id}）`
+    const note = notes.find((reference) => reference.kind === kind && reference.id === id)
+    return note ? `${description}：${JSON.stringify(note.content)}` : description
+  })
+  return [asked, '', '医生引用的 HIS 对象：', ...references].join('\n')
 }

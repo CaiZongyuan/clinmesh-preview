@@ -1,4 +1,7 @@
-import type { CopilotRead, CopilotReadData, CopilotReadResult } from './clinical-copilot/copilot-reads'
+import { isNoteSection } from '../shared/clinical-note'
+import type { CopilotMention } from '../shared/copilot-turn'
+import type { CopilotNoteMention, CopilotRead, CopilotReadData, CopilotReadResult } from './clinical-copilot/copilot-reads'
+import type { ClinicalNoteRepository } from './clinical-note-repository'
 import type { ConsultationRepository } from './consultation-repository'
 import type { EncounterRepository } from './encounter-repository'
 import { catalogView } from './investigation-catalog'
@@ -15,7 +18,30 @@ export class CopilotReadModel {
     private readonly examinations: PhysicalExaminationRepository,
     private readonly investigations: InvestigationRepository,
     private readonly consultation: ConsultationRepository,
+    private readonly notes: ClinicalNoteRepository,
   ) {}
+
+  noteMentions(encounterId: string, mentions: readonly CopilotMention[]): CopilotNoteMention[] {
+    const selected = mentions.filter(({ kind }) => kind === 'note-section' || kind === 'draft')
+    if (selected.length === 0) return []
+    const found = this.notes.view(encounterId)
+    if (!found.ok) return []
+    const { note } = found
+    const resolved: CopilotNoteMention[] = []
+    for (const { kind, id } of selected) {
+      const separator = kind === 'note-section' ? id.indexOf(':') : -1
+      const section = id.slice(separator + 1)
+      if (!isNoteSection(section)) continue
+      const revision = separator === -1
+        ? note.revisions.at(-1)
+        : note.revisions.find(({ revisionId }) => revisionId === id.slice(0, separator))
+      const content = kind === 'draft'
+        ? note.draft.find((draft) => draft.section === section)?.content
+        : revision?.sections[section]
+      if (content?.trim()) resolved.push({ kind, id, content })
+    }
+    return resolved
+  }
 
   read<R extends CopilotRead>(encounterId: string, read: R, now: number): CopilotReadResult<R['kind']> {
     const found = this.encounters.get(encounterId)

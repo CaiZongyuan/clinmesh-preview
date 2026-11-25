@@ -3,8 +3,7 @@ import type { CopilotCompactionEntry } from './copilot-context'
 
 export type { ReasoningEffort } from './reasoning-effort'
 
-// HIS objects a doctor can @-mention in a Copilot prompt. Sources that don't exist yet (note sections, Drafts)
-// join this list as their features land; the Copilot reads every kind the same way, as a reference to look up.
+// HIS objects a doctor can @-mention in a Copilot prompt.
 export type CopilotMentionKind = 'report' | 'examination' | 'note-section' | 'draft'
 
 export interface CopilotMention {

@@ -7,11 +7,13 @@ import {
   TriggerMenu,
   TriggerMenuContent,
   TriggerMenuEmpty,
+  TriggerMenuGroup,
+  TriggerMenuGroupLabel,
   TriggerMenuItem,
   TriggerMenuInput,
   TriggerMenuList,
 } from '@ui-sdk/react/trigger-menu'
-import type { TriggerMenuContentState, TriggerMenuData, TriggerMenuDataItem } from '@ui-sdk/react/trigger-menu'
+import type { TriggerMenuContentState, TriggerMenuData, TriggerMenuDataGroup, TriggerMenuDataItem, TriggerMenuSelectDetails } from '@ui-sdk/react/trigger-menu'
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -28,7 +30,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { CONTEXT_COMMAND, COPILOT_COMMANDS, MENTION_KIND_LABEL, MAX_PROMPT_LENGTH } from '../../shared/copilot-turn'
-import { NOTE_SECTION_NAME, type NoteSection } from '../../shared/clinical-note'
+import { NOTE_SECTION_NAME, NOTE_SECTIONS } from '../../shared/clinical-note'
 import type { EncounterView } from '../../shared/encounter'
 import type {
   CopilotMention,
@@ -185,7 +187,7 @@ function CopilotTurnView({ turn, index, copilot, onEdit }: { turn: CopilotTurn; 
       {turn.trigger.mentions.length > 0 && (
         <p className="m-0 flex flex-wrap gap-1">
           {turn.trigger.mentions.map((mention) => (
-            <span key={mention.id} className={badge}>
+            <span key={`${mention.kind}:${mention.id}`} className={badge}>
               {MENTION_KIND_LABEL[mention.kind]} · {mention.label}
             </span>
           ))}
@@ -274,7 +276,6 @@ interface ComposerProps {
   onCancelEdit: () => void
 }
 
-// The mentions a `@` menu may insert: every released Report version and every completed examination.
 type MentionItem = TriggerMenuDataItem<string> & { value: string; label: string }
 
 function mentionCandidates(encounterId: string, examinations: PhysicalExaminationView[]) {
@@ -285,7 +286,7 @@ function mentionCandidates(encounterId: string, examinations: PhysicalExaminatio
     const investigations = await fetchInvestigations(encounterId)
     return [
       {
-        value: 'reports',
+        type: 'group',
         label: '已发布报告',
         items: queryItems(
           investigations.flatMap((investigation) =>
@@ -296,30 +297,40 @@ function mentionCandidates(encounterId: string, examinations: PhysicalExaminatio
       },
     ]
   }
-  const exams: { value: string; label: string; items: MentionItem[] } = {
-    value: 'examinations',
+  const exams: TriggerMenuDataGroup<string> = {
+    type: 'group',
     label: '查体',
     items: examinations.map((examination) => item(`examination:${examination.system}`, BODY_SYSTEM_NAME[examination.system])),
   }
-  // What the doctor can see of the Clinical Note: signed sections from the latest revision, and the draft
-  // sections as they are on screen. Doctor-authored content only — nothing beyond the note's visible state.
   const noteSections = async (query: string): Promise<TriggerMenuData<string>> => {
     const note = await fetchClinicalNote(encounterId)
-    const signed = note.revisions.at(-1)?.sections
+    const signed = note.revisions.at(-1)
     const signedItems = signed
-      ? (Object.entries(signed) as [NoteSection, string][])
-          .filter(([, content]) => content.trim() !== '')
-          .map(([section]) => item(`note-section:${section}`, NOTE_SECTION_NAME[section]))
+      ? NOTE_SECTIONS
+          .filter((section) => signed.sections[section].trim() !== '')
+          .map((section) => item(`note-section:${signed.revisionId}:${section}`, `${NOTE_SECTION_NAME[section]}（已签署）`))
       : []
     const draftItems = note.draft
       .filter((draft) => draft.content.trim() !== '')
       .map((draft) => item(`draft:${draft.section}`, `${NOTE_SECTION_NAME[draft.section]}（草稿）`))
     return [
-      { value: 'note-sections', label: '病历（已签署）', items: queryItems(signedItems, query) },
-      { value: 'drafts', label: '病历草稿', items: queryItems(draftItems, query) },
+      { type: 'group', label: '病历（已签署）', items: queryItems(signedItems, query) },
+      { type: 'group', label: '病历草稿', items: queryItems(draftItems, query) },
     ]
   }
   return { reports, exams, noteSections }
+}
+
+function renderMenuItem(item: TriggerMenuData<unknown>[number]) {
+  if (typeof item !== 'object' || !('value' in item) || typeof item.value !== 'string') return null
+  return (
+    <TriggerMenuItem key={item.value} value={item.value} label={item.label} className="copilot-menu-item">
+      <span>{item.label}</span>
+      {'description' in item && typeof item.description === 'string' && (
+        <span className="text-[11px] text-muted-foreground">{item.description}</span>
+      )}
+    </TriggerMenuItem>
+  )
 }
 
 function CompactionMarkers({ compactions }: { compactions: CopilotSession['compactions'] }) {
@@ -375,18 +386,6 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
 
   const known = useRef(mentionCandidates(encounterId, examinations))
   known.current = mentionCandidates(encounterId, examinations)
-  const mentionOf = (value: string): CopilotMention | null => {
-    const [kind, id] = [value.slice(0, value.indexOf(':')), value.slice(value.indexOf(':') + 1)]
-    if (kind === 'report') {
-      for (const investigation of lastInvestigations.current) {
-        const report = investigation.reports.find((r) => r.reportId === id)
-        if (report) return { kind: 'report', id, label: `${investigation.name} 第${report.version}版` }
-      }
-    }
-    if (kind === 'examination') return { kind: 'examination', id, label: BODY_SYSTEM_NAME[id as keyof typeof BODY_SYSTEM_NAME] ?? id }
-    return null
-  }
-  const lastInvestigations = useRef<Awaited<ReturnType<typeof fetchInvestigations>>>([])
 
   const triggers = useMemo(
     () => [
@@ -406,10 +405,9 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
         type: 'mention',
         spaces: true,
         items: async (query: string): Promise<TriggerMenuData<string>> => {
-          const groups = await known.current.reports(query)
-          lastInvestigations.current = await fetchInvestigations(encounterId)
-          const noteGroups = await known.current.noteSections(query)
-          return [...groups, known.current.exams, ...noteGroups]
+          const { reports, exams, noteSections } = known.current
+          const [reportGroups, noteGroups] = await Promise.all([reports(query), noteSections(query)])
+          return [...reportGroups, exams, ...noteGroups]
         },
         insert: (item: { value: string; label: string }) => `@${item.label} `,
       },
@@ -417,15 +415,20 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
     [encounterId],
   )
 
-  const onSelect = (value: string, details?: { preventDefault?: () => void }) => {
+  const onSelect = (value: string, details: TriggerMenuSelectDetails<string>) => {
     if (value === CONTEXT_COMMAND) {
       // Open the read-only context view; the composer keeps whatever the doctor had typed.
-      details?.preventDefault?.()
+      details.preventDefault()
       setContextOpen(true)
       return
     }
-    const mention = mentionOf(value)
-    if (mention) onMentionsChange([...mentions.filter((m) => m.id !== mention.id), mention])
+    if (details.trigger !== '@') return
+    const separator = value.indexOf(':')
+    const kind = value.slice(0, separator)
+    const id = value.slice(separator + 1)
+    if (kind === 'report' || kind === 'examination' || kind === 'note-section' || kind === 'draft') {
+      onMentionsChange([...mentions.filter((mention) => mention.kind !== kind || mention.id !== id), { kind, id, label: details.item.label }])
+    }
   }
 
   return (
@@ -447,7 +450,7 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
           ref={input}
           aria-label="问临床助手"
           data-copilot-composer
-          placeholder={copilot.busy ? '助手正在运行：发送可指引（steer）或排队' : '输入问题，/ 唤出命令，@ 引用报告与查体'}
+          placeholder={copilot.busy ? '助手正在运行：发送可指引（steer）或排队' : '输入问题，/ 唤出命令，@ 引用就诊资料与草稿'}
           value={draft}
           maxLength={MAX_PROMPT_LENGTH}
           onChange={(event) => onDraftChange(event.target.value)}
@@ -458,17 +461,16 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
           <TriggerMenuEmpty>没有匹配的命令或对象</TriggerMenuEmpty>
           <TriggerMenuList className="max-h-56 overflow-auto">
             {(state: TriggerMenuContentState) =>
-              state.items.flatMap((raw) => {
-                const item = raw as { value?: string; label?: string; description?: string }
-                return typeof item.value === 'string'
-                  ? [
-                      <TriggerMenuItem key={item.value} value={item.value} label={item.label ?? item.value} className="copilot-menu-item">
-                        <span>{item.label ?? item.value}</span>
-                        {item.description && <span className="text-[11px] text-muted-foreground">{item.description}</span>}
-                      </TriggerMenuItem>,
-                    ]
-                  : []
-              })
+              state.items.map((entry) =>
+                typeof entry === 'object' && 'type' in entry && entry.type === 'group'
+                  ? (
+                      <TriggerMenuGroup key={entry.label}>
+                        <TriggerMenuGroupLabel className="px-2 py-1 text-xs text-muted-foreground">{entry.label}</TriggerMenuGroupLabel>
+                        {entry.items.map(renderMenuItem)}
+                      </TriggerMenuGroup>
+                    )
+                  : renderMenuItem(entry),
+              )
             }
           </TriggerMenuList>
         </TriggerMenuContent>
@@ -597,7 +599,11 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
             ) : (
               <ol className="m-0 flex list-none flex-col gap-3 pb-3">
                 {copilot.turns.map((turn, index) => (
-                  <CopilotTurnView key={turn.turnId} index={index} turn={turn} copilot={copilot} onEdit={(text) => { setDraft(text); setEditing(turn.turnId) }} />
+                  <CopilotTurnView key={turn.turnId} index={index} turn={turn} copilot={copilot} onEdit={(text) => {
+                    setDraft(text)
+                    setMentions(turn.trigger.mentions)
+                    setEditing(turn.turnId)
+                  }} />
                 ))}
               </ol>
             )}

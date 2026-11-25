@@ -1,3 +1,4 @@
+import type { CopilotMention } from '../../shared/copilot-turn'
 import type { ConsultationTurn } from '../../shared/consultation'
 import type { BannerPatient, EncounterError, EncounterStatus, Triage, VisibleSourceHistory } from '../../shared/encounter'
 import type { CatalogItemView, InvestigationCategory, ReportBody } from '../../shared/investigation'
@@ -11,6 +12,8 @@ export type CopilotRead =
   | { kind: 'examination-findings'; system?: BodySystem }
   | { kind: 'released-reports'; investigationId?: string }
   | { kind: 'catalog'; query?: string }
+
+export type CopilotNoteMention = Pick<CopilotMention, 'kind' | 'id'> & { content: string }
 
 export interface CopilotEncounterState {
   status: EncounterStatus
