@@ -27,18 +27,21 @@ interface Setup {
 function openEncounter({ encounters = [encounterFor()], turns = [], recognizer = 'web-speech' }: Setup = {}) {
   const api = createFakeClinicApi({ encounters, consultations: { [ENCOUNTER]: turns }, recognizer })
   fetchStub.mockImplementation(api.handle)
+  const voiceConnections = vi.fn()
   // One WebSocket class routing both sockets by URL, like the Worker routes them.
   vi.stubGlobal(
     'WebSocket',
     class {
       constructor(url: string) {
-        return url.endsWith('/voice') ? new api.VoiceSocket(url) : new api.WebSocket(url)
+        if (!url.endsWith('/voice')) return new api.WebSocket(url)
+        voiceConnections(url)
+        return new api.VoiceSocket(url)
       }
     } as unknown as typeof WebSocket,
   )
   const view = () =>
     render(<RouterProvider router={createAppRouter({ history: createMemoryHistory({ initialEntries: [`/encounters/${ENCOUNTER}`] }) })} />)
-  return { api, view, rendered: view() }
+  return { api, voiceConnections, view, rendered: view() }
 }
 
 const column = () => screen.findByRole('region', { name: '问诊记录' })
@@ -48,13 +51,14 @@ const openVoiceSocket = (api: ReturnType<typeof createFakeClinicApi>) =>
   waitFor(() => expect(api.voiceSockets()).toHaveLength(1)).then(() => api.voiceSockets()[0])
 
 // jsdom has no media stack: a silent mic and two selectable devices are enough for the browser seam.
-function stubMicrophone(): { fireAudio(): void } {
+function stubMicrophone() {
   const processors: { onaudioprocess: ((event: { inputBuffer: { getChannelData(ch: number): Float32Array } }) => void) | null }[] = []
-  const track = { stop: () => {}, label: '测试麦克风' }
+  const track = { stop: vi.fn(), label: '测试麦克风' }
   const stream: { getTracks(): unknown[]; getAudioTracks(): unknown[] } = { getTracks: () => [track], getAudioTracks: () => [track] }
+  const getUserMedia = vi.fn(async () => stream)
   Object.defineProperty(navigator, 'mediaDevices', {
     value: {
-      getUserMedia: vi.fn(async () => stream),
+      getUserMedia,
       enumerateDevices: vi.fn(async () => [
         { deviceId: 'mic-1', kind: 'audioinput', label: '测试麦克风', groupId: 'g', toJSON: {} },
         { deviceId: 'mic-2', kind: 'audioinput', label: '另一支麦克风', groupId: 'g', toJSON: {} },
@@ -88,6 +92,8 @@ function stubMicrophone(): { fireAudio(): void } {
   )
   // One processor callback run = one 4096-sample frame of silence leaves the browser.
   return {
+    getUserMedia,
+    stopTrack: track.stop,
     fireAudio() {
       for (const processor of processors) processor.onaudioprocess?.({ inputBuffer: { getChannelData: () => new Float32Array(4096) } })
     },
@@ -106,7 +112,8 @@ function stubSpeechRecognition() {
       onresult: ((event: { resultIndex: number; results: Array<{ isFinal: boolean; 0: { transcript: string; confidence: number } }> }) => void) | null = null
       onerror: ((event: { error: string }) => void) | null = null
       start = vi.fn(function (this: { __i?: number }) { instances.push(this as never) })
-      stop = vi.fn()
+      onend: (() => void) | null = null
+      stop = vi.fn(() => this.onend?.())
       abort = vi.fn()
     },
   )
@@ -118,7 +125,8 @@ const finalResult = (text: string) => ({ resultIndex: 0, results: [{ isFinal: tr
 describe('voice capture', () => {
   it('falls back to the browser Web Speech API without a Bailian token, and records spoken turns with their metadata', { timeout: 20_000 }, async () => {
     const instances = stubSpeechRecognition()
-    const { api } = openEncounter({ recognizer: 'web-speech' })
+    const mic = stubMicrophone()
+    const { api, voiceConnections } = openEncounter({ recognizer: 'web-speech' })
     await column()
     const user = userEvent.setup()
     await user.click(within(await voiceBar()).getByRole('button', { name: '开始持续收音' }))
@@ -133,6 +141,40 @@ describe('voice capture', () => {
     const request = fetchStub.mock.calls.find(([url, init]) => String(url).endsWith('/consultation/doctor-turns') && init?.method === 'POST')!
     expect(JSON.parse(String(request[1]!.body))).toMatchObject({ voice: { recognizer: 'web-speech', confidence: 0.82 } })
     await waitFor(() => expect(api.turns(ENCOUNTER)[0]).toMatchObject({ source: 'voice', voice: { recognizer: 'web-speech' } }))
+    expect(voiceConnections).not.toHaveBeenCalled()
+    expect(mic.getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('commits a hold as one Web Speech turn on release', async () => {
+    const instances = stubSpeechRecognition()
+    const mic = stubMicrophone()
+    const { api, voiceConnections } = openEncounter({ recognizer: 'web-speech' })
+    const bar = await voiceBar()
+    await waitFor(() => expect(within(bar).getByRole('status', { name: '语音识别状态' })).toHaveTextContent('网页语音识别'))
+
+    const startedAt = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt)
+    try {
+      fireEvent.pointerDown(within(bar).getByRole('button', { name: '按住说话' }))
+      expect(instances).toHaveLength(1)
+      act(() => {
+        instances[0].onresult!(finalResult('咳嗽有痰吗？'))
+        instances[0].onresult!(finalResult('什么颜色？'))
+      })
+      expect(api.turns(ENCOUNTER)).toHaveLength(0)
+
+      clock.mockReturnValue(startedAt + 650)
+      fireEvent.pointerUp(within(bar).getByRole('button', { name: /正在录音/ }))
+    } finally {
+      clock.mockRestore()
+    }
+    await waitFor(() => expect(api.turns(ENCOUNTER)[0]).toMatchObject({
+      source: 'voice',
+      text: '咳嗽有痰吗？什么颜色？',
+      voice: { recognizer: 'web-speech', durationMs: 650, confidence: 0.82 },
+    }))
+    expect(voiceConnections).not.toHaveBeenCalled()
+    expect(mic.getUserMedia).not.toHaveBeenCalled()
   })
 
   it('streams to the Paraformer voice socket in continuous mode, shows interim captions, and accepts the recorded turn', { timeout: 20_000 }, async () => {
@@ -214,7 +256,7 @@ describe('voice capture', () => {
     }
   })
 
-  it('pausing shows a persistent privacy banner and stops sending audio frames', { timeout: 20_000 }, async () => {
+  it('pausing releases the microphone and shows a persistent privacy banner', { timeout: 20_000 }, async () => {
     const mic = stubMicrophone()
     const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
     await column()
@@ -231,11 +273,31 @@ describe('voice capture', () => {
     await user.click(within(await voiceBar()).getByRole('button', { name: '暂停收音' }))
     const banner = await screen.findByRole('status', { name: '麦克风已暂停' })
     expect(banner).toHaveTextContent('不会收音')
+    expect(mic.stopTrack).toHaveBeenCalledOnce()
+    expect(screen.queryByLabelText('正在收音')).not.toBeInTheDocument()
     mic.fireAudio()
     expect(socket.frames).toBe(1) // paused: nothing is transcribed
     expect(within(await voiceBar()).getByRole('button', { name: '恢复收音' })).toBeInTheDocument()
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(screen.getByRole('status', { name: '麦克风已暂停' })).toBeInTheDocument() // persistent
+
+    await user.click(within(await voiceBar()).getByRole('button', { name: '恢复收音' }))
+    expect(mic.getUserMedia).toHaveBeenCalledTimes(2)
+    mic.fireAudio()
+    expect(socket.frames).toBe(2)
+  })
+
+  it('lets Space activate a focused workbench button', async () => {
+    stubMicrophone()
+    const { voiceConnections } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
+    const consultation = await column()
+    const collapse = within(consultation).getByRole('button', { name: '收起问诊记录' })
+    await voiceBar()
+    collapse.focus()
+    await userEvent.setup().keyboard(' ')
+
+    expect(await screen.findByRole('button', { name: '展开问诊记录' })).toBeInTheDocument()
+    expect(voiceConnections).not.toHaveBeenCalled()
   })
 
   it('M toggles hands-free listening and Space is push-to-talk', { timeout: 20_000 }, async () => {
@@ -253,7 +315,9 @@ describe('voice capture', () => {
     await waitFor(() => expect(api.voiceSockets()).toHaveLength(1))
     const socket = api.voiceSockets()[0]
     expect(within(await voiceBar()).getByRole('button', { name: /正在录音/ })).toBeInTheDocument()
-    fireEvent.keyUp(document, { code: 'Space' })
+    const composer = screen.getByRole('textbox', { name: '键入向患者的提问' })
+    composer.focus()
+    fireEvent.keyUp(composer, { code: 'Space' })
     await waitFor(async () => expect(within(await voiceBar()).getByRole('button', { name: '按住说话' })).toBeInTheDocument())
     // Released instantly: too short, so no commit, no recorded turn, and the tap notice says so.
     expect(socket.sent.filter((m) => m.type === 'clinmesh.commit')).toHaveLength(0)

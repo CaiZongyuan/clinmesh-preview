@@ -21,7 +21,9 @@ async function openVoiceSocket(encounterId: string): Promise<VoiceSocket> {
   expect(response.status).toBe(101)
   const ws = response.webSocket!
   const messages: VoiceServerMessage[] = []
-  ws.addEventListener('message', (event) => messages.push(JSON.parse(String(event.data)) as VoiceServerMessage))
+  ws.addEventListener('message', (event) => {
+    messages.push(JSON.parse(String(event.data)) as VoiceServerMessage)
+  })
   ws.accept()
   const socket: VoiceSocket = {
     messages,
@@ -103,7 +105,13 @@ describe('voice capture (ADR-0003: the doctor speaks, the pipeline asks the Simu
       { speaker: 'doctor', source: 'voice', text: '您哪里不舒服？' },
       { speaker: 'patient', source: 'simulated', text: '医生，我这三天一直发烧，咳嗽得厉害。' },
     ])
-    expectNoCaseTruth('voice socket', JSON.stringify(socket.messages), [])
+    // The measured latency can equal a hidden clinical number purely by timing.
+    const messages = socket.messages.map((message) =>
+      message.type === 'clinmesh.voice-turn' && typeof message.latencyMs === 'number'
+        ? { ...message, latencyMs: null }
+        : message,
+    )
+    expectNoCaseTruth('voice socket', JSON.stringify(messages))
     expect(tasks).toHaveLength(1)
     expect(tasks[0].actions.map((a) => a.header.action)).toEqual(['run-task', 'finish-task'])
   })

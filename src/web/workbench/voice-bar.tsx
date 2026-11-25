@@ -1,6 +1,6 @@
 import { Button } from '@ui-sdk/react/button'
 import { MicIcon, MicOffIcon, HandIcon, CircleStopIcon } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type Ref, type RefObject } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import type { VoiceCaptureController } from '../voice/use-voice-capture'
 import { badge } from './pane-styles'
@@ -48,7 +48,8 @@ function useHoldControls(voice: VoiceCaptureController, active: boolean): HoldCo
 // cancels. While paused a persistent banner says nothing is being heard or transcribed.
 export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice: VoiceCaptureController }) {
   const active = encounter.status === 'active'
-  useVoiceKeys(voice, active)
+  const holdButton = useRef<HTMLButtonElement>(null)
+  useVoiceKeys(voice, active, holdButton)
   const hold = useHoldControls(voice, active)
   return (
     <div className="flex flex-col gap-1.5">
@@ -79,7 +80,7 @@ export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice
       <div className="flex flex-wrap items-center gap-2" data-testid="voice-bar">
         {active && !voice.paused ? (
           voice.holding ? (
-            <HoldButton voice={voice} hold={hold} />
+            <HoldButton voice={voice} hold={hold} buttonRef={holdButton} />
           ) : (
             <>
               <Button
@@ -93,7 +94,7 @@ export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice
                 {voice.capturing ? '停止收音' : '持续收音'}
                 <kbd className="font-mono text-[10px] opacity-60">M</kbd>
               </Button>
-              <HoldButton voice={voice} hold={hold} />
+              <HoldButton voice={voice} hold={hold} buttonRef={holdButton} />
               <Button aria-label="暂停收音" aria-pressed={false} className="h-8 gap-1.5 px-2.5 text-xs" onClick={voice.togglePause}>
                 <MicOffIcon aria-hidden="true" size={13} />
                 暂停
@@ -106,7 +107,7 @@ export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice
             恢复收音
           </Button>
         )}
-        {voice.capturing && !voice.holding && (
+        {voice.capturing && !voice.holding && !voice.paused && (
           <span aria-label="正在收音" className="flex items-center gap-1 text-xs text-destructive">
             <LevelDot level={voice.level} />
             正在收音{voice.interim !== null && voice.interim !== '' ? ` · ${voice.interim}` : ''}
@@ -138,28 +139,34 @@ export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice
 // Hold-to-talk: press and hold (pointer or Space), with the elapsed time and a live level meter. Sliding up
 // arms cancellation; releasing under 600 ms discards the tap. The press and release are the browser's only
 // signals in this mode, so both arrive through the same button.
-// M toggles hands-free listening; Space is push-to-talk — only when the doctor isn't typing in a field.
-function useVoiceKeys(voice: VoiceCaptureController, active: boolean) {
+function useVoiceKeys(voice: VoiceCaptureController, active: boolean, holdButton: RefObject<HTMLButtonElement | null>) {
   const ref = useRef(voice)
   ref.current = voice
   useEffect(() => {
     if (!active) return
+    let holdsSpace = false
     const typing = (target: EventTarget | null) =>
       target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
     const down = (event: KeyboardEvent) => {
-      if (typing(event.target)) return
-      if (event.code === 'KeyM' && !event.repeat) ref.current.toggle()
-      if (event.code === 'Space' && !event.repeat) {
+      const capture = ref.current
+      if (event.code === 'Space' && holdsSpace) {
         event.preventDefault()
-        ref.current.press()
+        return
       }
+      if (event.defaultPrevented || event.repeat || capture.paused) return
+      if (event.code === 'KeyM' && !typing(event.target)) capture.toggle()
+      const isHoldTarget = event.target === holdButton.current ||
+        event.target === document.body || event.target === document
+      if (event.code !== 'Space' || !isHoldTarget || capture.capturing) return
+      event.preventDefault()
+      holdsSpace = true
+      capture.press()
     }
     const up = (event: KeyboardEvent) => {
-      if (typing(event.target)) return
-      if (event.code === 'Space') {
-        event.preventDefault()
-        ref.current.release()
-      }
+      if (event.code !== 'Space' || !holdsSpace) return
+      event.preventDefault()
+      holdsSpace = false
+      ref.current.release()
     }
     document.addEventListener('keydown', down)
     document.addEventListener('keyup', up)
@@ -167,10 +174,10 @@ function useVoiceKeys(voice: VoiceCaptureController, active: boolean) {
       document.removeEventListener('keydown', down)
       document.removeEventListener('keyup', up)
     }
-  }, [active])
+  }, [active, holdButton])
 }
 
-function HoldButton({ voice, hold }: { voice: VoiceCaptureController; hold: HoldControls }) {
+function HoldButton({ voice, hold, buttonRef }: { voice: VoiceCaptureController; hold: HoldControls; buttonRef: Ref<HTMLButtonElement> }) {
   const down = (event: React.PointerEvent) => {
     if (voice.capturing) return
     event.preventDefault()
@@ -179,6 +186,7 @@ function HoldButton({ voice, hold }: { voice: VoiceCaptureController; hold: Hold
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={voice.holding ? (voice.cancelArmed ? '松开以取消' : '正在录音，松开结束') : '按住说话'}
       data-holding={voice.holding || undefined}

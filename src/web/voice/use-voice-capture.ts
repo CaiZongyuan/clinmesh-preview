@@ -82,7 +82,8 @@ export function useVoiceCapture(
   const [refused, setRefused] = useState<VoiceError | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const holding = session?.mode === 'hold'
+  const captureMode = session?.mode
+  const holding = captureMode === 'hold'
   const capturing = session !== null
   const cancelArmed = session?.cancelled ?? false
   // While holding, a short interval re-renders so the elapsed timer advances.
@@ -134,6 +135,7 @@ export function useVoiceCapture(
       if (why) setNotice(why)
       closeSocket()
       stopMic()
+      webSpeechRef.current?.dispose()
     },
     [closeSocket, stopMic],
   )
@@ -155,12 +157,12 @@ export function useVoiceCapture(
 
   // The voice socket lives for exactly one capture session.
   useEffect(() => {
-    if (!encounterId || !session) return
+    if (recognizer !== 'paraformer-realtime-v2' || !encounterId || !captureMode) return
     const ws = openVoiceSocket(encounterId)
     socketRef.current = ws
     setAsr('connecting')
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'clinmesh.capture', mode: session.mode } satisfies VoiceClientMessage))
+      ws.send(JSON.stringify({ type: 'clinmesh.capture', mode: captureMode } satisfies VoiceClientMessage))
       ws.send(JSON.stringify({ type: 'start_call' }))
     }
     ws.onmessage = (event) => {
@@ -170,7 +172,7 @@ export function useVoiceCapture(
       } catch {
         return
       }
-      if (message.type === 'transcript_interim') setInterim(message.text || null)
+      if (message.type === 'transcript_interim' && !pausedRef.current) setInterim(message.text || null)
       else if (message.type === 'status' && message.status === 'listening') setAsr('ready')
       else if (message.type === 'error') {
         setError(message.message)
@@ -188,11 +190,11 @@ export function useVoiceCapture(
         setAsr('off')
       }
     }
-  }, [encounterId, session, onVoiceTurn, endSession, closeSocket])
+  }, [recognizer, encounterId, captureMode, onVoiceTurn, endSession, closeSocket])
 
   // The microphone streams while a capture is open (continuous keeps it between sentences).
   useEffect(() => {
-    if (!session || micRef.current) return
+    if (recognizer !== 'paraformer-realtime-v2' || !captureMode || paused) return
     const mic = new MicStream((frame) => {
       if (socketRef.current?.readyState === WebSocket.OPEN && !pausedRef.current) socketRef.current.send(frame)
     }, deviceId, { onReady: setDeviceLabel, onDevices: setDevices, onLevel: setLevel })
@@ -202,11 +204,9 @@ export function useVoiceCapture(
       endSession()
     })
     return () => {
-      void micRef.current?.stop()
-      micRef.current = null
-      setLevel(0)
+      stopMic()
     }
-  }, [session, deviceId, endSession])
+  }, [recognizer, captureMode, paused, deviceId, endSession, stopMic])
 
   const beginSession = useCallback((mode: CaptureMode) => {
     setError(null)
@@ -224,9 +224,8 @@ export function useVoiceCapture(
       endSession()
       return
     }
-    if (recognizer === 'web-speech') webSpeechRef.current?.start()
     beginSession('continuous')
-  }, [beginSession, endSession, recognizer])
+  }, [beginSession, endSession])
 
   const press = useCallback(() => {
     if (sessionRef.current) return
@@ -244,16 +243,14 @@ export function useVoiceCapture(
     const duration = Date.now() - held.startedAt
     if (held.cancelled) endSession('已取消，这段话没有记录。')
     else if (duration < MIN_HOLD_MS) endSession('按得太短，没有记录。再说请按住说话。')
+    else if (recognizer === 'web-speech') webSpeechRef.current?.commit(duration)
     else send({ type: 'clinmesh.commit' })
-  }, [endSession])
+  }, [endSession, recognizer])
 
   const togglePause = useCallback(() => {
-    setPaused((was) => {
-      if (!was) webSpeechRef.current?.stop()
-      else if (sessionRef.current && recognizer === 'web-speech') webSpeechRef.current?.start()
-      return !was
-    })
-  }, [recognizer])
+    setPaused((was) => !was)
+    setInterim(null)
+  }, [])
 
   const selectDevice = useCallback((id: string) => setDeviceId(id), [])
 
@@ -267,10 +264,11 @@ export function useVoiceCapture(
 
   // The Web Speech fallback: the browser recognizes speech itself; each final result asks the patient over HTTP.
   useEffect(() => {
-    if (recognizer !== 'web-speech' || !encounterId) return
-    const speech = new WebSpeechSession({
+    if (recognizer !== 'web-speech' || !encounterId || !captureMode || paused) return
+    const speech = new WebSpeechSession(captureMode, {
       onFinal: (text, durationMs, confidence) => {
         setInterim(null)
+        if (captureMode === 'hold') endSession()
         void askPatient(encounterId, crypto.randomUUID(), text, {
           recognizer: 'web-speech',
           durationMs,
@@ -281,11 +279,21 @@ export function useVoiceCapture(
         )
       },
       onInterim: setInterim,
-      onError: (message) => setError(message),
+      onError: (message) => {
+        setError(message)
+        endSession()
+      },
+      onEmpty: () => endSession('这段没有听清，没有记录。'),
+      onEnd: endSession,
     })
     webSpeechRef.current = speech
-    return () => speech.dispose()
-  }, [recognizer, encounterId, onTurn])
+    if (speech.start()) setAsr('ready')
+    return () => {
+      speech.dispose()
+      webSpeechRef.current = null
+      setAsr('off')
+    }
+  }, [recognizer, encounterId, captureMode, paused, onTurn, endSession])
 
   return {
     recognizer,
@@ -318,6 +326,7 @@ export function useVoiceCapture(
 class MicStream {
   private ctx: AudioContext | null = null
   private stream: MediaStream | null = null
+  private stopped = false
 
   constructor(
     private readonly onFrame: (frame: ArrayBuffer) => void,
@@ -330,14 +339,20 @@ class MicStream {
   ) {}
 
   async start(onFailure: (message: string) => void) {
+    let stream: MediaStream
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: this.deviceId ? { deviceId: { exact: this.deviceId } } : true,
       })
     } catch {
-      onFailure('无法访问麦克风，请检查浏览器权限。')
+      if (!this.stopped) onFailure('无法访问麦克风，请检查浏览器权限。')
       return
     }
+    if (this.stopped) {
+      stream.getTracks().forEach((track) => track.stop())
+      return
+    }
+    this.stream = stream
     const ctx = new AudioContext()
     this.ctx = ctx
     const source = ctx.createMediaStreamSource(this.stream)
@@ -349,6 +364,7 @@ class MicStream {
     // pipeline is mono voice at 16 kHz, which it handles fine.
     const processor = ctx.createScriptProcessor(4096, 1, 1)
     processor.onaudioprocess = (event) => {
+      if (this.stopped) return
       analyser.getByteTimeDomainData(meter)
       let sum = 0
       for (const value of meter) sum += (value - 128) ** 2
@@ -365,10 +381,12 @@ class MicStream {
     source.connect(processor)
     processor.connect(ctx.destination)
     this.hooks.onReady(this.stream.getAudioTracks()[0]?.label ?? null)
-    this.hooks.onDevices(await navigator.mediaDevices.enumerateDevices().catch(() => []))
+    const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [])
+    if (!this.stopped) this.hooks.onDevices(devices)
   }
 
   async stop() {
+    this.stopped = true
     this.stream?.getTracks().forEach((track) => track.stop())
     this.stream = null
     await this.ctx?.close().catch(() => {})
@@ -376,17 +394,22 @@ class MicStream {
   }
 }
 
-// The browser's SpeechRecognition (Chromium), used when the Worker has no BAILIAN_TOKEN. Each final result is
-// one question; the session keeps listening until stopped.
 class WebSpeechSession {
   private recognition: SpeechRecognitionLike | null = null
   private startedAt = 0
+  private ended = false
+  private committedDuration: number | null = null
+  private readonly phrases: string[] = []
+  private confidence: number | null = null
 
   constructor(
+    private readonly mode: CaptureMode,
     private readonly hooks: {
       onFinal(text: string, durationMs: number, confidence: number | null): void
       onInterim(text: string | null): void
       onError(message: string): void
+      onEmpty(): void
+      onEnd(): void
     },
   ) {}
 
@@ -394,19 +417,30 @@ class WebSpeechSession {
     const Ctor =
       (globalThis as { SpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition ??
       (globalThis as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition
-    if (!Ctor) return
+    if (!Ctor) {
+      this.hooks.onError('此浏览器不支持网页语音识别。')
+      return false
+    }
     const recognition = new Ctor()
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = 'zh-CN'
     recognition.onresult = (event) => {
+      if (this.recognition !== recognition) return
       let interim: string | null = null
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i]
         const alternative = result[0]
         if (result.isFinal) {
           const text = alternative.transcript.trim()
-          if (text) this.hooks.onFinal(text, Date.now() - this.startedAt, alternative.confidence >= 0 ? alternative.confidence : null)
+          if (!text) continue
+          const confidence = alternative.confidence >= 0 ? alternative.confidence : null
+          if (this.mode === 'continuous') {
+            this.hooks.onFinal(text, Date.now() - this.startedAt, confidence)
+          } else {
+            this.phrases.push(text)
+            if (confidence !== null) this.confidence = Math.min(confidence, this.confidence ?? confidence)
+          }
         } else {
           interim = alternative.transcript
         }
@@ -414,21 +448,43 @@ class WebSpeechSession {
       this.hooks.onInterim(interim)
     }
     recognition.onerror = (event) => {
-      if (event.error !== 'aborted') this.hooks.onError('网页语音识别出错，请重试。')
+      if (this.recognition === recognition && event.error !== 'aborted') this.hooks.onError('网页语音识别出错，请重试。')
+    }
+    recognition.onend = () => {
+      if (this.recognition !== recognition) return
+      this.ended = true
+      if (this.mode === 'continuous') this.hooks.onEnd()
+      else if (this.committedDuration !== null) this.finish(this.committedDuration)
     }
     this.recognition = recognition
     this.startedAt = Date.now()
-    recognition.start()
+    try {
+      recognition.start()
+      return true
+    } catch {
+      this.ended = true
+      this.hooks.onError('无法启动网页语音识别，请重试。')
+      return false
+    }
   }
 
-  stop() {
-    this.recognition?.stop()
-    this.hooks.onInterim(null)
+  commit(durationMs: number) {
+    if (!this.recognition || this.committedDuration !== null) return
+    this.committedDuration = durationMs
+    if (this.ended) this.finish(durationMs)
+    else this.recognition.stop()
+  }
+
+  private finish(durationMs: number) {
+    const text = this.phrases.join('')
+    if (text) this.hooks.onFinal(text, durationMs, this.confidence)
+    else this.hooks.onEmpty()
   }
 
   dispose() {
-    this.recognition?.abort()
+    const recognition = this.recognition
     this.recognition = null
+    if (!this.ended) recognition?.abort()
   }
 }
 

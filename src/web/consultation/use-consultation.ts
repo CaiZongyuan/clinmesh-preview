@@ -181,9 +181,9 @@ export function useConsultation(encounterId: string | null, encounterStatus?: st
     }
   }
 
-  const accept = (doctorTurn: ConsultationTurn, patientTurn: ConsultationTurn) => {
+  const accept = useCallback((doctorTurn: ConsultationTurn, patientTurn: ConsultationTurn) => {
     setTurns((known) => merge(known, [doctorTurn, patientTurn]))
-  }
+  }, [])
 
   return { turns, streamed, pending, stream, error, ask, retry, accept }
 }
