@@ -53,6 +53,8 @@ export async function settled(encounterId: string, patientTurnId: string, timeou
 export interface PatientSocket {
   messages: ServerMessage[]
   raw: string[]
+  // The raw socket, for tests that answer the bridge role's calls.
+  ws: WebSocket
   waitFor(predicate: (messages: ServerMessage[]) => boolean, timeout?: number): Promise<void>
   close(): void
 }
@@ -72,6 +74,7 @@ export async function openPatientSocket(encounterId: string, afterSeq = 0): Prom
   const socket: PatientSocket = {
     messages,
     raw,
+    ws,
     waitFor: (predicate, timeout = 4000) =>
       vi.waitFor(() => expect(predicate(messages), JSON.stringify(messages)).toBe(true), { timeout, interval: 10 }),
     close: () => ws.close(),
@@ -108,6 +111,7 @@ async function openCopilotSocketAt(path: string, afterSeq: number): Promise<Pati
   const socket: PatientSocket = {
     messages,
     raw,
+    ws,
     waitFor: (predicate, timeout = 4000) =>
       vi.waitFor(() => expect(predicate(messages), JSON.stringify(messages)).toBe(true), { timeout, interval: 10 }),
     close: () => ws.close(),
