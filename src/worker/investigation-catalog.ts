@@ -62,10 +62,20 @@ export interface Patient {
   age: number
 }
 
+// A scripted correction of one item's Report, published `releaseAfterSeconds` after Report version 1.
+export interface ReportAmendment {
+  catalogItem: string
+  releaseAfterSeconds: number
+  reason: string
+  laboratoryOverrides?: { id: string; value: number | string }[]
+  textOverride?: { findings: string; impression: string }
+}
+
 // What a Golden Case's Case Truth says about one Encounter's investigations; nothing else of the case.
 export interface CaseTruthResults {
   laboratories: { id: string; catalogItem: string; value: number | string }[]
   textResults: { catalogItem: string; findings: string; impression: string }[]
+  reportAmendments: ReportAmendment[]
 }
 
 const SEXES: readonly Sex[] = ['male', 'female']
@@ -159,4 +169,28 @@ export function resolveReportBody(item: CatalogItem, patient: Patient, truth: Ca
     }
   })
   return { kind: 'results', results }
+}
+
+export interface ScriptedAmendment {
+  releaseAfterSeconds: number
+  reason: string
+  body: ReportBody
+}
+
+// The item's scripted amendments in order, each with the body it publishes: its overrides and every earlier
+// amendment's, applied over the case's results.
+export function scriptedAmendments(item: CatalogItem, patient: Patient, truth: CaseTruthResults): ScriptedAmendment[] {
+  const amendments = truth.reportAmendments.filter((amendment) => amendment.catalogItem === item.id)
+  return amendments.map((amendment, i) => {
+    const applied = amendments.slice(0, i + 1).reverse()
+    const amended: CaseTruthResults = {
+      ...truth,
+      laboratories: [
+        ...applied.flatMap((a) => (a.laboratoryOverrides ?? []).map((o) => ({ ...o, catalogItem: item.id }))),
+        ...truth.laboratories,
+      ],
+      textResults: [...applied.flatMap((a) => (a.textOverride ? [{ catalogItem: item.id, ...a.textOverride }] : [])), ...truth.textResults],
+    }
+    return { releaseAfterSeconds: amendment.releaseAfterSeconds, reason: amendment.reason, body: resolveReportBody(item, patient, amended) }
+  })
 }

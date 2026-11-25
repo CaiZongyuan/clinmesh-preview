@@ -126,6 +126,12 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     )
   }
 
+  cancelInvestigation(encounterId: string, investigationId: string): InvestigationsResult {
+    return this.ctx.storage.transactionSync(() =>
+      this.investigations.cancel(encounterId, investigationId, DEMO_PRACTITIONER_ID, Date.now()),
+    )
+  }
+
   acknowledgeReports(encounterId: string, reportIds: string[]): InvestigationsResult {
     return this.ctx.storage.transactionSync(() =>
       this.investigations.acknowledge(encounterId, reportIds, DEMO_PRACTITIONER_ID, Date.now()),

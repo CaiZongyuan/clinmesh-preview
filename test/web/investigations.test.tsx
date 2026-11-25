@@ -45,6 +45,15 @@ const catalogNames = () =>
 const investigationsTab = () => screen.getByRole('tab', { name: /^检验检查/ })
 const card = (name: string) => screen.getByRole('article', { name })
 
+async function confirmIn(user: User, dialogName: string, confirmLabel: string) {
+  const dialog = await screen.findByRole('alertdialog', { name: dialogName })
+  const confirm = within(dialog).getByRole('button', { name: confirmLabel })
+  expect(confirm).toHaveAttribute('data-agent-confirm')
+  await user.click(confirm)
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+  return dialog
+}
+
 async function issue(user: User, names: string[]) {
   for (const name of names) await user.click(screen.getByRole('button', { name: `加入待开立：${name}` }))
   await user.click(screen.getByRole('button', { name: `开立 ${names.length} 项` }))
@@ -210,12 +219,123 @@ describe('Reports', () => {
   })
 })
 
+describe('Report amendments', () => {
+  it('shows an amendment as the current version, reopened for acknowledgement with its reason, above the superseded versions', async () => {
+    const { user, api } = await openInvestigations()
+    await issue(user, ['血常规（五分类）'])
+    await user.click(screen.getByRole('button', { name: '立即出报告：血常规（五分类）' }))
+    await user.click(await screen.findByRole('button', { name: '确认已阅：血常规（五分类）' }))
+    await confirmIn(user, '确认已阅：血常规（五分类）', '确认已阅')
+    await within(card('血常规（五分类）')).findByText('医生已阅')
+
+    api.amendReport('encounter-1', 'investigation-1', '仪器复核后更正', {
+      kind: 'results',
+      results: [{ analyteId: 'cbc-wbc', name: '白细胞计数 WBC', value: 15, decimals: 1, unit: '×10⁹/L', referenceRange: '3.5–9.5', flag: 'high' }],
+    })
+    // The amendment arrives with the next poll; the browser cannot know in advance that one is scripted.
+    const cbc = card('血常规（五分类）')
+    await within(cbc).findByText('第 2 版（当前）', {}, { timeout: 4000 })
+    expect(cbc).toHaveTextContent('待阅')
+    expect(cbc).not.toHaveTextContent('医生已阅')
+    expect(cbc).toHaveTextContent('更正原因：仪器复核后更正。旧版本的已阅不延续到本版本。')
+    expect(investigationsTab()).toHaveTextContent('检验检查待处理 1')
+
+    await user.click(within(cbc).getByRole('button', { name: '查看报告：血常规（五分类）' }))
+    const report = within(cbc).getByRole('region', { name: '血常规（五分类）报告' })
+    expect(report).toHaveTextContent('第 2 版')
+    expect(within(report).getAllByRole('row')[1]).toHaveTextContent('白细胞计数 WBC15.0 ↑')
+    const history = within(cbc).getByRole('list', { name: '血常规（五分类）历史版本' })
+    expect(within(history).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      expect.stringMatching(/^第 1 版（已替代） · 报告时间 \d\d:\d\d · 已阅 \d\d:\d\d · demo-practitioner$/),
+    ])
+
+    await user.click(within(cbc).getByRole('button', { name: '确认已阅：血常规（五分类）' }))
+    const dialog = await confirmIn(user, '确认已阅：血常规（五分类）', '确认已阅')
+    expect(dialog).toHaveTextContent('第 2 版（当前）')
+    await within(cbc).findByText('医生已阅')
+    expect(bodyOf(requestsTo('POST', '/api/encounters/encounter-1/report-acknowledgements').at(-1)!)).toEqual({
+      reportIds: ['report-investigation-1-v2'],
+    })
+  })
+})
+
+describe('cancelling an Investigation', () => {
+  it('cancels only before its first Report and only with the doctor’s Clinical Confirmation, then allows issuing it again', async () => {
+    const { user } = await openInvestigations()
+    await issue(user, ['C 反应蛋白', '血常规（五分类）'])
+    await user.click(screen.getByRole('button', { name: '立即出报告：血常规（五分类）' }))
+    await within(card('血常规（五分类）')).findByText('第 1 版（当前）')
+    expect(within(card('血常规（五分类）')).queryByRole('button', { name: /^取消检查/ })).not.toBeInTheDocument()
+
+    const byAgent = await agent.act({ steps: [{ ref: '取消检查：C 反应蛋白', action: 'press', args: ['确认取消'] }] })
+    expect(byAgent.ok).toBe(false)
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(requestsTo('POST', '/api/encounters/encounter-1/investigations/investigation-1/cancellation')).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: '取消检查：C 反应蛋白' }))
+    const dialog = await confirmIn(user, '取消检查：C 反应蛋白？', '确认取消')
+    expect(dialog).toHaveTextContent('仅首份报告发布前可取消')
+    const cancelled = await screen.findByRole('article', { name: 'C 反应蛋白（已取消）' })
+    expect(requestsTo('POST', '/api/encounters/encounter-1/investigations/investigation-1/cancellation')).toHaveLength(1)
+    expect(within(cancelled).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(within(cancelled).getByRole('list', { name: 'C 反应蛋白（已取消）执行进度' })).getAllByRole('listitem').map((s) => s.textContent)).toEqual([
+      expect.stringMatching(/^已开立\d\d:\d\d$/),
+      expect.stringMatching(/^已取消\d\d:\d\d$/),
+    ])
+
+    await user.click(screen.getByRole('button', { name: '加入待开立：C 反应蛋白' }))
+    await user.click(screen.getByRole('button', { name: '开立 1 项' }))
+    await confirmIn(user, '开立 1 项检查？', '确认开立')
+    expect(await screen.findByRole('article', { name: 'C 反应蛋白' })).toHaveTextContent('预计')
+    expect(screen.getByRole('article', { name: 'C 反应蛋白（已取消）' })).toBeInTheDocument()
+  })
+})
+
+describe('batch Report Acknowledgement', () => {
+  it('acknowledges the selected Reports together with one Clinical Confirmation', async () => {
+    const { user } = await openInvestigations()
+    const names = ['血常规（五分类）', 'C 反应蛋白', '胸部正侧位 X 线']
+    await issue(user, names)
+    for (const name of names) {
+      await user.click(screen.getByRole('button', { name: `立即出报告：${name}` }))
+      await screen.findByRole('button', { name: `确认已阅：${name}` })
+    }
+    expect(screen.getByRole('button', { name: '确认所选已阅' })).toBeDisabled()
+
+    await user.click(screen.getByRole('checkbox', { name: '选择待阅：血常规（五分类）' }))
+    await user.click(screen.getByRole('checkbox', { name: '选择待阅：胸部正侧位 X 线' }))
+    const byAgent = await agent.act({ steps: [{ ref: '确认所选已阅（2）', action: 'press', args: ['确认 2 份已阅'] }] })
+    expect(byAgent.ok).toBe(false)
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '确认所选已阅（2）' }))
+    const dialog = await confirmIn(user, '确认 2 份报告已阅？', '确认 2 份已阅')
+    expect(dialog).toHaveTextContent('血常规（五分类） · 第 1 版（当前）')
+    expect(dialog).toHaveTextContent('胸部正侧位 X 线 · 第 1 版（当前）')
+
+    await within(card('胸部正侧位 X 线')).findByText('医生已阅')
+    expect(card('血常规（五分类）')).toHaveTextContent('医生已阅')
+    expect(card('C 反应蛋白')).toHaveTextContent('待阅')
+    expect(requestsTo('POST', '/api/encounters/encounter-1/report-acknowledgements').map(bodyOf)).toEqual([
+      { reportIds: ['report-investigation-1', 'report-investigation-3'] },
+    ])
+    expect(investigationsTab()).toHaveTextContent('检验检查待处理 1')
+    expect(screen.queryByRole('button', { name: /^确认所选已阅/ })).not.toBeInTheDocument()
+  })
+})
+
 describe('检验检查 tab', () => {
   it('names every control uniquely with pending, issued and released items', async () => {
     const { user } = await openInvestigations()
     await issue(user, ['血常规（五分类）', 'C 反应蛋白'])
     await user.click(screen.getByRole('button', { name: '立即出报告：血常规（五分类）' }))
     await screen.findByRole('button', { name: '确认已阅：血常规（五分类）' })
+    await issue(user, ['胸部正侧位 X 线', '12 导联心电图'])
+    await user.click(screen.getByRole('button', { name: '立即出报告：胸部正侧位 X 线' }))
+    await screen.findByRole('button', { name: '确认已阅：胸部正侧位 X 线' })
+    await user.click(screen.getByRole('button', { name: '取消检查：12 导联心电图' }))
+    await confirmIn(user, '取消检查：12 导联心电图？', '确认取消')
+    await user.click(screen.getByRole('checkbox', { name: '选择待阅：胸部正侧位 X 线' }))
     await user.click(screen.getByRole('button', { name: '加入待开立：降钙素原' }))
 
     const components = agent.snapshot().filter((entry) => !entry.offPage && entry.component !== 'more')
@@ -224,7 +344,18 @@ describe('检验检查 tab', () => {
     }
     const labels = components.map((entry) => entry.label)
     expect(new Set(labels).size, `duplicate names in ${labels.join(', ')}`).toBe(labels.length)
-    for (const label of ['搜索检查项目', '检查类别', '开立 1 项', '移除：降钙素原', '立即出报告：C 反应蛋白', '确认已阅：血常规（五分类）', '仅看异常']) {
+    for (const label of [
+      '搜索检查项目',
+      '检查类别',
+      '开立 1 项',
+      '移除：降钙素原',
+      '立即出报告：C 反应蛋白',
+      '取消检查：C 反应蛋白',
+      '确认已阅：血常规（五分类）',
+      '选择待阅：血常规（五分类）',
+      '确认所选已阅（1）',
+      '仅看异常',
+    ]) {
       expect(labels, `${label} is missing from the snapshot`).toContain(label)
     }
   })

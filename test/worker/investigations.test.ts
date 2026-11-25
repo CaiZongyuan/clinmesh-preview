@@ -12,6 +12,8 @@ import type {
 } from '../../src/shared/investigation'
 import { ageOn } from '../../src/worker/golden-case-pack'
 import { admitCatalog, bandFor, flagFor, type CatalogItem, type RawCatalog } from '../../src/worker/investigation-catalog'
+import { EncounterRepository } from '../../src/worker/encounter-repository'
+import { InvestigationRepository } from '../../src/worker/investigation-repository'
 
 const T0 = Date.parse('2026-11-24T00:40:00.000Z')
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString()
@@ -164,6 +166,7 @@ describe('issuing Investigations', () => {
       issuedAt: at(0),
       expectedReportAt: at(150),
       stages: [{ name: '已开立', at: at(0) }],
+      cancellation: null,
       reports: [],
     })
     expect(await investigations(encounterId)).toEqual(issued)
@@ -331,6 +334,7 @@ describe('Report content', () => {
       reporter: '王丽（检验师）',
       reviewer: '陈刚（主管检验师）',
       specimenOrSite: '静脉血 · EDTA 紫帽',
+      correctionReason: null,
       acknowledgement: null,
       body: {
         kind: 'results',
@@ -416,13 +420,9 @@ describe('Report Acknowledgement', () => {
     const list = await investigations(encounterId)
     const cbcV1 = byItem(list, 'cbc').reports[0].reportId
     const crpV1 = byItem(list, 'crp').reports[0].reportId
-    await runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
-      state.storage.sql.exec(
-        `INSERT INTO report (report_id, investigation_id, version, released_at, content)
-         SELECT 'cbc-v2', investigation_id, 2, released_at, content FROM report WHERE report_id = ?`,
-        cbcV1,
-      )
-    })
+    // The CBC amendment publishes 120 s after version 1, the CRP one only at 150 s.
+    vi.setSystemTime(T0 + 130_000)
+    const cbcV2 = byItem(await investigations(encounterId), 'cbc').reports[1].reportId
 
     for (const reportIds of [[cbcV1], [crpV1, cbcV1]]) {
       const response = await acknowledge(encounterId, reportIds)
@@ -432,7 +432,7 @@ describe('Report Acknowledgement', () => {
     const unchanged = await investigations(encounterId)
     expect(unchanged.flatMap((i) => i.reports.map((r) => r.acknowledgement))).toEqual([null, null, null])
 
-    const latest = await acknowledge(encounterId, ['cbc-v2'])
+    const latest = await acknowledge(encounterId, [cbcV2])
     expect(latest.status).toBe(200)
     const [cbc] = ((await latest.json()) as InvestigationsResponse).investigations
     expect(cbc.reports.map((r) => [r.version, r.acknowledgement?.practitionerId ?? null])).toEqual([
@@ -440,7 +440,26 @@ describe('Report Acknowledgement', () => {
       [2, 'demo-practitioner'],
     ])
     const audit = ((await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents
-    expect(audit.filter((e) => e.eventType === 'report-acknowledged').map((e) => e.subject)).toEqual(['cbc-v2'])
+    expect(audit.filter((e) => e.eventType === 'report-acknowledged').map((e) => e.subject)).toEqual([cbcV2])
+  })
+
+  it('acknowledges several latest-version Reports in one command, each with time and practitioner and its own audit event', async () => {
+    const encounterId = await startEncounter()
+    const issued = ((await (await issue(encounterId, ['cbc', 'crp', 'cxr'])).json()) as InvestigationsResponse).investigations
+    for (const i of issued) await releaseNow(encounterId, i.investigationId)
+    const reportIds = (await investigations(encounterId)).map((i) => i.reports[0].reportId)
+
+    vi.setSystemTime(T0 + 40_000)
+    const response = await acknowledge(encounterId, reportIds)
+    expect(response.status).toBe(200)
+    const list = ((await response.json()) as InvestigationsResponse).investigations
+    expect(list.map((i) => i.reports[0].acknowledgement)).toEqual(
+      reportIds.map(() => ({ acknowledgedAt: at(40), practitionerId: 'demo-practitioner' })),
+    )
+    const audit = ((await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents
+    expect(audit.filter((e) => e.eventType === 'report-acknowledged')).toEqual(
+      reportIds.map((subject) => ({ eventType: 'report-acknowledged', practitionerId: 'demo-practitioner', occurredAt: at(40), subject })),
+    )
   })
 
   it('refuses unknown or malformed Report ids without acknowledging any of the batch', async () => {
@@ -468,5 +487,192 @@ describe('Report Acknowledgement', () => {
       expect(response.status).toBe(404)
       expect(await errorCode(response)).toBe('encounter-not-found')
     }
+  })
+})
+
+describe('Report amendments', () => {
+  const amendment = (catalogItem: string) => casePack.cases[0].reportAmendments.find((a) => a.catalogItem === catalogItem)!
+
+  it('publishes a scripted amendment as a new version with its correction reason at its scripted time', async () => {
+    const encounterId = await startEncounter()
+    await issue(encounterId, ['cbc', 'cxr', 'renal'])
+    // CBC version 1 is due at 90 s, the chest X-ray at 150 s; their amendments 120 s and 180 s later.
+    vi.setSystemTime(T0 + 209_000)
+    let list = await investigations(encounterId)
+    expect(byItem(list, 'cbc').reports.map((r) => r.version)).toEqual([1])
+
+    vi.setSystemTime(T0 + 210_000)
+    list = await investigations(encounterId)
+    const [v1, v2] = byItem(list, 'cbc').reports
+    expect(v2).toEqual({
+      reportId: expect.any(String),
+      version: 2,
+      releasedAt: at(210),
+      reporter: v1.reporter,
+      reviewer: v1.reviewer,
+      specimenOrSite: v1.specimenOrSite,
+      correctionReason: amendment('cbc').reason,
+      acknowledgement: null,
+      body: {
+        kind: 'results',
+        results: [
+          row('白细胞计数 WBC', 15.0, '×10⁹/L', '3.5–9.5', 'high'),
+          row('中性粒细胞百分比 NEUT%', 87.4, '%', '40–75', 'high'),
+          row('淋巴细胞百分比 LYM%', 8.8, '%', '20–50', 'low'),
+          row('红细胞计数 RBC', 4.82, '×10¹²/L', '4.3–5.8', null),
+          row('血红蛋白 HGB', 142, 'g/L', '130–175', null),
+          row('血小板计数 PLT', 236, '×10⁹/L', '125–350', null),
+        ],
+      },
+    })
+    expect(v1).toEqual(expect.objectContaining({ version: 1, releasedAt: at(90), correctionReason: null }))
+    expect(byItem(list, 'cbc').stages.at(-1)).toEqual({ name: '已出报告', at: at(90) })
+
+    expect(byItem(list, 'cxr').reports.map((r) => r.version)).toEqual([1])
+    vi.setSystemTime(T0 + 330_000)
+    const cxr = byItem(await investigations(encounterId), 'cxr')
+    expect(cxr.reports[1]).toEqual(
+      expect.objectContaining({
+        version: 2,
+        releasedAt: at(330),
+        correctionReason: amendment('cxr').reason,
+        body: { kind: 'narrative', ...amendment('cxr').textOverride },
+      }),
+    )
+
+    vi.setSystemTime(T0 + 3_600_000)
+    expect(byItem(await investigations(encounterId), 'renal').reports.map((r) => r.version)).toEqual([1])
+  })
+
+  it('reopens an acknowledged Report as unacknowledged and keeps the earlier acknowledgement on the superseded version', async () => {
+    const encounterId = await startEncounter()
+    const [crp] = ((await (await issue(encounterId, ['crp'])).json()) as InvestigationsResponse).investigations
+    await releaseNow(encounterId, crp.investigationId)
+    const [{ reports: [v1] }] = await investigations(encounterId)
+    vi.setSystemTime(T0 + 30_000)
+    await acknowledge(encounterId, [v1.reportId])
+
+    vi.setSystemTime(T0 + 150_000)
+    const [amended] = await investigations(encounterId)
+    expect(amended.reports.map((r) => [r.version, r.correctionReason, r.acknowledgement])).toEqual([
+      [1, null, { acknowledgedAt: at(30), practitionerId: 'demo-practitioner' }],
+      [2, amendment('crp').reason, null],
+    ])
+    expect(amended.reports[1].body).toEqual({ kind: 'results', results: [row('C 反应蛋白 CRP', 112, 'mg/L', '0–8', 'high')] })
+
+    vi.setSystemTime(T0 + 160_000)
+    const response = await acknowledge(encounterId, [amended.reports[1].reportId])
+    expect(response.status).toBe(200)
+    const [after] = ((await response.json()) as InvestigationsResponse).investigations
+    expect(after.reports.map((r) => r.acknowledgement?.acknowledgedAt)).toEqual([at(30), at(160)])
+  })
+
+  it('keeps a scripted amendment out of releasedReports, the one read of Report content, until it publishes', async () => {
+    const encounterId = await startEncounter()
+    const [cbc] = ((await (await issue(encounterId, ['cbc'])).json()) as InvestigationsResponse).investigations
+    await releaseNow(encounterId, cbc.investigationId)
+    const read = (seconds: number) =>
+      runInDurableObject(env.CLINIC_WORKSPACE.getByName('default'), (_instance, state) => {
+        const encounters = new EncounterRepository(state.storage.sql)
+        const found = encounters.get(encounterId)
+        if (!found.ok) throw new Error(found.error.message)
+        const written = state.storage.sql
+          .exec('SELECT version FROM report WHERE investigation_id = ? ORDER BY version', cbc.investigationId)
+          .toArray()
+          .map((r) => r.version)
+        const released = new InvestigationRepository(state.storage.sql, encounters).releasedReports(found.encounter, T0 + seconds * 1000)
+        return { written, released: released.map((r) => [r.investigationId, r.version, r.correctionReason]) }
+      })
+
+    // The amendment is already written, 120 s ahead, yet absent from the accessor until then.
+    expect(await read(119)).toEqual({ written: [1, 2], released: [[cbc.investigationId, 1, null]] })
+    expect((await read(120)).released).toEqual([
+      [cbc.investigationId, 1, null],
+      [cbc.investigationId, 2, amendment('cbc').reason],
+    ])
+  })
+
+  it('never publishes an amendment scripted after the Encounter ended', async () => {
+    const encounterId = await startEncounter()
+    const [cbc] = ((await (await issue(encounterId, ['cbc'])).json()) as InvestigationsResponse).investigations
+    await releaseNow(encounterId, cbc.investigationId)
+    vi.setSystemTime(T0 + 60_000)
+    await post(`/api/encounters/${encounterId}/abandonment`)
+    vi.setSystemTime(T0 + 3_600_000)
+    const [after] = await investigations(encounterId)
+    expect(after.reports.map((r) => r.version)).toEqual([1])
+  })
+})
+
+describe('cancelling an Investigation', () => {
+  const cancel = (encounterId: string, investigationId: string) =>
+    post(`/api/encounters/${encounterId}/investigations/${investigationId}/cancellation`)
+
+  it('cancels before the first Report, audited with the practitioner; it then never advances or reports', async () => {
+    const encounterId = await startEncounter()
+    const [cbc] = ((await (await issue(encounterId, ['cbc', 'crp'])).json()) as InvestigationsResponse).investigations
+    vi.setSystemTime(T0 + 40_000)
+    const response = await cancel(encounterId, cbc.investigationId)
+    expect(response.status).toBe(200)
+    const afterCancel = ((await response.json()) as InvestigationsResponse).investigations
+    expect(byItem(afterCancel, 'cbc').cancellation).toEqual({ cancelledAt: at(40), practitionerId: 'demo-practitioner' })
+    expect(byItem(afterCancel, 'crp').cancellation).toBeNull()
+
+    vi.setSystemTime(T0 + 3_600_000)
+    const later = byItem(await investigations(encounterId), 'cbc')
+    expect(later.stages).toEqual([
+      { name: '已开立', at: at(0) },
+      { name: '已采样', at: at(30) },
+    ])
+    expect(later.reports).toEqual([])
+    expect(byItem(await investigations(encounterId), 'crp').reports).not.toEqual([])
+
+    for (const refused of [await cancel(encounterId, cbc.investigationId), await releaseNow(encounterId, cbc.investigationId)]) {
+      expect(refused.status).toBe(409)
+      expect(await errorCode(refused)).toBe('investigation-cancelled')
+    }
+    const audit = ((await (await api(`/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents
+    expect(audit.filter((e) => e.eventType === 'investigation-cancelled')).toEqual([
+      { eventType: 'investigation-cancelled', practitionerId: 'demo-practitioner', occurredAt: at(40), subject: cbc.investigationId },
+    ])
+  })
+
+  it('is refused once the first Report exists, including one that came due without being read', async () => {
+    const encounterId = await startEncounter()
+    const [cbc, crp] = ((await (await issue(encounterId, ['cbc', 'crp'])).json()) as InvestigationsResponse).investigations
+    await releaseNow(encounterId, cbc.investigationId)
+    vi.setSystemTime(T0 + 91_000)
+
+    for (const investigation of [cbc, crp]) {
+      const response = await cancel(encounterId, investigation.investigationId)
+      expect(response.status, investigation.catalogItemId).toBe(409)
+      expect(await errorCode(response)).toBe('investigation-already-reported')
+    }
+    const list = await investigations(encounterId)
+    expect(list.map((i) => [i.cancellation, i.reports.length])).toEqual([
+      [null, 1],
+      [null, 1],
+    ])
+    expect(await auditTypes(encounterId)).not.toContain('investigation-cancelled')
+
+    const missing = await cancel(encounterId, 'no-such-investigation')
+    expect(missing.status).toBe(404)
+    expect(await errorCode(missing)).toBe('investigation-not-found')
+  })
+
+  it('lets the doctor issue a cancelled item again as a new Investigation', async () => {
+    const encounterId = await startEncounter()
+    const [cbc] = ((await (await issue(encounterId, ['cbc'])).json()) as InvestigationsResponse).investigations
+    await cancel(encounterId, cbc.investigationId)
+
+    const again = await issue(encounterId, ['cbc'])
+    expect(again.status).toBe(201)
+    const list = ((await again.json()) as InvestigationsResponse).investigations
+    expect(list.map((i) => [i.catalogItemId, i.cancellation === null])).toEqual([
+      ['cbc', false],
+      ['cbc', true],
+    ])
+    expect(list[1].investigationId).not.toBe(cbc.investigationId)
+    expect((await issue(encounterId, ['cbc'])).status).toBe(409)
   })
 })

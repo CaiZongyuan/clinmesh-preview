@@ -2,7 +2,7 @@
   "id": "clinmesh-preview-outpatient-golden-cases",
   "name": "ClinMesh Preview 门诊 Golden Case",
   "nameEn": "ClinMesh Preview outpatient Golden Cases",
-  "version": "2026-11-24.4",
+  "version": "2026-11-25.1",
   "cases": [
     {
       "id": "golden-case-01",
@@ -201,6 +201,7 @@
       "reportAmendments": [
         {
           "catalogItem": "cbc",
+          "releaseAfterSeconds": 120,
           "reason": "仪器复核后更正",
           "laboratoryOverrides": [
             { "id": "cbc-wbc", "value": 15.0 },
@@ -210,11 +211,13 @@
         },
         {
           "catalogItem": "crp",
+          "releaseAfterSeconds": 150,
           "reason": "原标本溶血，复测更正",
           "laboratoryOverrides": [ { "id": "crp", "value": 112 } ]
         },
         {
           "catalogItem": "cxr",
+          "releaseAfterSeconds": 180,
           "reason": "上级医师审核补充",
           "textOverride": {
             "findings": "右肺下叶实变影，内见少量支气管充气征；余同前。",

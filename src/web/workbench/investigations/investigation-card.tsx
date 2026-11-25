@@ -1,6 +1,7 @@
 import { Button } from '@ui-sdk/react/button'
+import { Checkbox, CheckboxIndicator } from '@ui-sdk/react/checkbox'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@ui-sdk/react/collapsible'
-import { ChevronRightIcon } from 'lucide-react'
+import { CheckIcon, ChevronRightIcon, TriangleAlertIcon } from 'lucide-react'
 import {
   CATEGORY_LABEL,
   INVESTIGATION_STAGES,
@@ -23,25 +24,52 @@ const FLAG: Record<Exclude<ResultFlag, null>, { mark: string; hint: string }> = 
 const resultText = (row: ReportResultRow) =>
   typeof row.value === 'number' ? row.value.toFixed(row.decimals) : row.value
 
+// Offered when several Reports await acknowledgement, so they can be acknowledged together.
+export interface BatchSelection {
+  selected: boolean
+  onSelectedChange: (selected: boolean) => void
+}
+
 interface InvestigationCardProps {
   investigation: InvestigationView
   abnormalOnly: boolean
   writable: boolean
+  selection: BatchSelection | null
   onReleaseNow: () => Promise<void>
+  onCancel: () => Promise<void>
   onAcknowledge: (reportId: string) => Promise<void>
 }
 
-export function InvestigationCard({ investigation, abnormalOnly, writable, onReleaseNow, onAcknowledge }: InvestigationCardProps) {
-  const { name, category, stages } = investigation
+export function InvestigationCard(props: InvestigationCardProps) {
+  const { investigation, abnormalOnly, writable, selection, onReleaseNow, onCancel, onAcknowledge } = props
+  const { name, category, stages, cancellation } = investigation
   const report = latestReport(investigation)
   const reached = new Map(stages.map((stage) => [stage.name, stage.at]))
+  const label = cancellation ? `${name}（已取消）` : name
+  const steps = cancellation
+    ? [...stages, { name: '已取消', at: cancellation.cancelledAt }]
+    : INVESTIGATION_STAGES[category].map((stage) => ({ name: stage, at: reached.get(stage) }))
   return (
-    <article aria-label={name} className="flex flex-col gap-2 rounded-md border p-3">
+    <article aria-label={label} className="flex flex-col gap-2 rounded-md border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
+          {selection && (
+            <Checkbox
+              aria-label={`选择待阅：${name}`}
+              checked={selection.selected}
+              disabled={!writable}
+              onCheckedChange={(checked) => selection.onSelectedChange(checked === true)}
+            >
+              <CheckboxIndicator>
+                <CheckIcon aria-hidden="true" size={12} />
+              </CheckboxIndicator>
+            </Checkbox>
+          )}
           <h4 className="m-0 text-[13px] font-semibold">{name}</h4>
           <span className={`${badge} border`}>{CATEGORY_LABEL[category]}</span>
-          {report ? (
+          {cancellation ? (
+            <span className={`${badge} border text-muted-foreground`}>已取消</span>
+          ) : report ? (
             <>
               <span className={`${badge} border`}>第 {report.version} 版（当前）</span>
               {report.acknowledgement ? (
@@ -57,16 +85,32 @@ export function InvestigationCard({ investigation, abnormalOnly, writable, onRel
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          {!report && (
-            <Button
-              className="h-7 px-2.5 text-xs"
-              disabled={!writable}
-              aria-label={`立即出报告：${name}`}
-              title="模拟测试控件：跳过周转时间"
-              onClick={onReleaseNow}
-            >
-              立即出报告
-            </Button>
+          {!report && !cancellation && (
+            <>
+              <ClinicalConfirmation
+                trigger="取消"
+                triggerLabel={`取消检查：${name}`}
+                triggerClassName="h-7 border-transparent bg-transparent px-2.5 text-xs text-destructive hover:bg-destructive/10"
+                disabled={!writable}
+                title={`取消检查：${name}？`}
+                confirmLabel="确认取消"
+                confirmClassName="border-destructive bg-destructive text-destructive-foreground"
+                intent={`取消${name}检查申请`}
+                onConfirm={onCancel}
+              >
+                <p className="m-0">仅首份报告发布前可取消；若报告已发布，服务端将拒绝取消。</p>
+                <p className="m-0 mt-1 text-muted-foreground">取消后不再出报告，也无需确认已阅；如仍需要可重新开立。</p>
+              </ClinicalConfirmation>
+              <Button
+                className="h-7 px-2.5 text-xs"
+                disabled={!writable}
+                aria-label={`立即出报告：${name}`}
+                title="模拟测试控件：跳过周转时间"
+                onClick={onReleaseNow}
+              >
+                立即出报告
+              </Button>
+            </>
           )}
           {report && !report.acknowledgement && (
             <ClinicalConfirmation
@@ -87,20 +131,23 @@ export function InvestigationCard({ investigation, abnormalOnly, writable, onRel
           )}
         </div>
       </div>
-      <ol aria-label={`${name}执行进度`} className="m-0 grid list-none auto-cols-fr grid-flow-col gap-1 p-0">
-        {INVESTIGATION_STAGES[category].map((stage) => {
-          const at = reached.get(stage)
-          return (
-            <li
-              key={stage}
-              data-reached={at ? '' : undefined}
-              className="flex flex-col border-t-2 border-border pt-1 text-[11.5px] text-muted-foreground data-[reached]:border-success data-[reached]:text-foreground"
-            >
-              <span>{stage}</span>
-              <span className="font-mono">{at ? formatClock(at) : '—'}</span>
-            </li>
-          )
-        })}
+      {report?.correctionReason && (
+        <p className="m-0 flex items-center gap-1 text-xs text-warning">
+          <TriangleAlertIcon aria-hidden="true" size={12} />
+          更正原因：{report.correctionReason}。旧版本的已阅不延续到本版本。
+        </p>
+      )}
+      <ol aria-label={`${label}执行进度`} className="m-0 grid list-none auto-cols-fr grid-flow-col gap-1 p-0">
+        {steps.map(({ name: stage, at }) => (
+          <li
+            key={stage}
+            data-reached={at ? '' : undefined}
+            className="flex flex-col border-t-2 border-border pt-1 text-[11.5px] text-muted-foreground data-[reached]:border-success data-[reached]:text-foreground"
+          >
+            <span>{stage}</span>
+            <span className="font-mono">{at ? formatClock(at) : '—'}</span>
+          </li>
+        ))}
       </ol>
       {report && (
         <Collapsible>
@@ -113,6 +160,7 @@ export function InvestigationCard({ investigation, abnormalOnly, writable, onRel
           </CollapsibleTrigger>
           <CollapsiblePanel>
             <ReportDetail name={name} category={category} report={report} abnormalOnly={abnormalOnly} />
+            {investigation.reports.length > 1 && <SupersededVersions name={name} reports={investigation.reports.slice(0, -1)} />}
           </CollapsiblePanel>
         </Collapsible>
       )}
@@ -161,6 +209,24 @@ function ReportDetail({
       ) : (
         <ResultTable name={name} rows={abnormalOnly ? body.results.filter((row) => row.flag) : body.results} />
       )}
+    </section>
+  )
+}
+
+function SupersededVersions({ name, reports }: { name: string; reports: ReportView[] }) {
+  return (
+    <section className="flex flex-col gap-1 pt-2 text-xs text-muted-foreground">
+      <h5 className="m-0 text-xs font-medium">历史版本</h5>
+      <ul aria-label={`${name}历史版本`} className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {reports.map((report) => (
+          <li key={report.reportId}>
+            第 {report.version} 版（已替代） · 报告时间 {formatClock(report.releasedAt)} ·{' '}
+            {report.acknowledgement
+              ? `已阅 ${formatClock(report.acknowledgement.acknowledgedAt)} · ${report.acknowledgement.practitionerId}`
+              : '未阅'}
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

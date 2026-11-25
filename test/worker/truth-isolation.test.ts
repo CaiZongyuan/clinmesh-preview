@@ -1,5 +1,5 @@
 import { exports } from 'cloudflare:workers'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import type { EncounterResponse } from '../../src/shared/encounter'
 import type { InvestigationsResponse } from '../../src/shared/investigation'
@@ -17,6 +17,7 @@ interface ProbeContext {
   releasedInvestigationId: string
   releasedReportId: string
   failedPatientTurnId: string
+  pendingInvestigationId: string
 }
 
 // The frames a viewer receives on connecting, as one body to check.
@@ -34,6 +35,10 @@ const releasedResults = (catalogItems: readonly string[]) => {
     textResults.filter((t) => catalogItems.includes(t.catalogItem)),
   ]
 }
+
+// The scripted amendments a released Report v2 legitimately shows for these catalog items of Golden Case 1.
+const releasedAmendments = (catalogItems: readonly string[]) =>
+  casePack.cases[0].reportAmendments.filter((a) => catalogItems.includes(a.catalogItem))
 
 const request = (method: string, path: string, body?: unknown) =>
   exports.default.fetch(`http://clinmesh.test${path}`, {
@@ -67,6 +72,8 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     request('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['glu'] }),
   'POST /api/encounters/:encounterId/investigations/:investigationId/instant-release': ({ encounterId, releasedInvestigationId }) =>
     request('POST', `/api/encounters/${encounterId}/investigations/${releasedInvestigationId}/instant-release`),
+  'POST /api/encounters/:encounterId/investigations/:investigationId/cancellation': ({ encounterId, pendingInvestigationId }) =>
+    request('POST', `/api/encounters/${encounterId}/investigations/${pendingInvestigationId}/cancellation`),
   'POST /api/encounters/:encounterId/report-acknowledgements': ({ encounterId, releasedReportId }) =>
     request('POST', `/api/encounters/${encounterId}/report-acknowledgements`, { reportIds: [releasedReportId] }),
   'GET /api/encounters/:encounterId/consultation': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/consultation`),
@@ -79,8 +86,11 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     request('POST', `/api/encounters/${encounterId}/abandonment`),
 }
 
-async function probeEveryRoute(ctx: ProbeContext, phase: string) {
+const ABANDONMENT = 'POST /api/encounters/:encounterId/abandonment'
+
+async function probeEveryRoute(ctx: ProbeContext, phase: string, { keepActive = false } = {}) {
   for (const [route, probe] of Object.entries(probes)) {
+    if (keepActive && route === ABANDONMENT) continue
     const response = await probe(ctx)
     expect(response.status, `${phase}: ${route}`).toBeLessThan(500)
     expectNoCaseTruth(`${phase}: ${route}`, await response.text(), ctx.revealed)
@@ -166,14 +176,22 @@ describe('Golden Case snapshot', () => {
 })
 
 describe('Case Truth isolation over HTTP', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('has a probe for every route the Worker serves', () => {
     const served = app.routes.filter((route) => route.method !== 'ALL').map((route) => `${route.method} ${route.path}`)
     expect(new Set(served)).toEqual(new Set(Object.keys(probes)))
   })
 
-  // Golden Case 1 overrides CBC, CRP, PCT, chest X-ray and chest CT. The Encounter issues CBC, CRP and chest X-ray,
-  // releases CBC and chest X-ray, leaves CRP pending and never orders PCT or chest CT.
+  // Golden Case 1 overrides CBC, CRP, PCT, chest X-ray and chest CT, and scripts amendments for CBC, CRP and chest
+  // X-ray. The Encounter issues CBC, CRP and chest X-ray, releases CBC and chest X-ray, has the cancellation probe
+  // cancel CRP before it reports, and never orders PCT or chest CT. The amendments publish 120 s and 180 s later.
   it('exposes only uncovered Case Truth on any route while the Encounter is active, and nothing more after Encounter Abandonment', async () => {
+    const T0 = Date.parse('2026-11-24T00:40:00.000Z')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0)
     installScripted('patient')
       .reply('医生，我这三天一直发烧，咳嗽得厉害。', { thinking: '我要按自己的感受说。' })
       .fail(500)
@@ -192,7 +210,7 @@ describe('Case Truth isolation over HTTP', () => {
     const issued = await request('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['cbc', 'crp', 'cxr'] })
     const issuedBody = await issued.text()
     expectNoCaseTruth('issue', issuedBody)
-    const [cbc, , cxr] = (JSON.parse(issuedBody) as InvestigationsResponse).investigations
+    const [cbc, crp, cxr] = (JSON.parse(issuedBody) as InvestigationsResponse).investigations
     expectNoCaseTruth('nothing released', await (await request('GET', `/api/encounters/${encounterId}/investigations`)).text())
 
     const revealed = releasedResults(['cbc', 'cxr'])
@@ -212,9 +230,31 @@ describe('Case Truth isolation over HTTP', () => {
       releasedInvestigationId: cbc.investigationId,
       releasedReportId: list[0].reports[0].reportId,
       failedPatientTurnId: failed.turnId,
+      pendingInvestigationId: crp.investigationId,
     }
-    await probeEveryRoute(ctx, 'active Encounter')
+    await probeEveryRoute(ctx, 'Report version 1 released', { keepActive: true })
     expect(ctx.revealed, 'the Physical Examination probe examined the vitals').toHaveLength(3)
+
+    // Only the CBC amendment is out at 150 s: the chest X-ray one stays hidden on every route until it publishes.
+    vi.setSystemTime(T0 + 150_000)
+    ctx.revealed.push(releasedAmendments(['cbc']))
+    const cbcAmended = await (await request('GET', `/api/encounters/${encounterId}/investigations`)).text()
+    expect(cbcAmended).toContain(releasedAmendments(['cbc'])[0].reason)
+    await probeEveryRoute(ctx, 'CBC amended', { keepActive: true })
+
+    vi.setSystemTime(T0 + 200_000)
+    ctx.revealed.push(releasedAmendments(['cxr']))
+    const amended = await (await request('GET', `/api/encounters/${encounterId}/investigations`)).text()
+    expect(amended).toContain(releasedAmendments(['cxr'])[0].textOverride!.impression)
+    const amendedList = (JSON.parse(amended) as InvestigationsResponse).investigations
+    expect(amendedList.map((i) => [i.cancellation !== null, i.reports.length])).toEqual([
+      [false, 2],
+      [true, 0],
+      [false, 2],
+      [false, 1],
+    ])
+    ctx.releasedReportId = amendedList[0].reports[1].reportId
+    await probeEveryRoute(ctx, 'amended Reports released')
 
     const after = (await (await request('GET', `/api/encounters/${encounterId}`)).json()) as EncounterResponse
     expect(after.encounter.status).toBe('abandoned')

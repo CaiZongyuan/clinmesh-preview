@@ -46,6 +46,7 @@ export interface ReportAcknowledgement {
   practitionerId: string
 }
 
+// Version 1 is the first Report; every later version is an amendment that supersedes the one before it.
 export interface ReportView {
   reportId: string
   version: number
@@ -53,8 +54,15 @@ export interface ReportView {
   reporter: string
   reviewer: string
   specimenOrSite: string
+  // Why this version corrects the one before it; null for version 1.
+  correctionReason: string | null
   body: ReportBody
   acknowledgement: ReportAcknowledgement | null
+}
+
+export interface InvestigationCancellation {
+  cancelledAt: string
+  practitionerId: string
 }
 
 export interface ReachedStage {
@@ -73,6 +81,9 @@ export interface InvestigationView {
   issuedAt: string
   expectedReportAt: string
   stages: ReachedStage[]
+  // Only possible before the first Report is released; a cancelled Investigation never reports and needs no acknowledgement.
+  cancellation: InvestigationCancellation | null
+  // Released versions only, oldest first; the last one is current.
   reports: ReportView[]
 }
 

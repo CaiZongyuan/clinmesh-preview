@@ -41,7 +41,8 @@ const STAFF: Record<string, { reporter: string; reviewer: string }> = rawCatalog
 
 type Refuse = (code: EncounterError['code'], message: string) => Response
 
-// The investigation routes of the fake clinic API: issue, instant release and acknowledgement, without any turnaround.
+// The investigation routes of the fake clinic API: issue, instant release, cancellation and acknowledgement, without
+// any turnaround. `amend` stands in for a scripted amendment coming due.
 export function createFakeInvestigations(refuse: Refuse) {
   const byEncounter = new Map<string, InvestigationView[]>()
   let sequence = 0
@@ -52,7 +53,11 @@ export function createFakeInvestigations(refuse: Refuse) {
     const { encounterId } = encounter
     if (method === 'GET' && action === 'investigations') return respond(encounterId)
     if (method !== 'POST') return undefined
-    const isWrite = action === 'investigations' || action === 'report-acknowledgements' || action.endsWith('/instant-release')
+    const isWrite =
+      action === 'investigations' ||
+      action === 'report-acknowledgements' ||
+      action.endsWith('/instant-release') ||
+      action.endsWith('/cancellation')
     if (!isWrite) return undefined
     if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
     const now = new Date().toISOString()
@@ -72,6 +77,7 @@ export function createFakeInvestigations(refuse: Refuse) {
           issuedAt: now,
           expectedReportAt: new Date(Date.now() + 90_000).toISOString(),
           stages: [{ name: '已开立', at: now }],
+          cancellation: null,
           reports: [],
         }
       })
@@ -81,10 +87,12 @@ export function createFakeInvestigations(refuse: Refuse) {
 
     if (action === 'report-acknowledgements') {
       const ids = (body as { reportIds: string[] }).reportIds
-      for (const investigation of list(encounterId)) {
-        for (const report of investigation.reports) {
-          if (ids.includes(report.reportId)) report.acknowledgement = { acknowledgedAt: now, practitionerId: 'demo-practitioner' }
-        }
+      const latest = list(encounterId).flatMap((i) => i.reports.slice(-1))
+      if (!ids.every((id) => latest.some((r) => r.reportId === id))) {
+        return refuse('report-superseded', '该版本报告已被更正版本替代，请确认最新版本。')
+      }
+      for (const report of latest) {
+        if (ids.includes(report.reportId)) report.acknowledgement = { acknowledgedAt: now, practitionerId: 'demo-practitioner' }
       }
       return respond(encounterId)
     }
@@ -92,6 +100,12 @@ export function createFakeInvestigations(refuse: Refuse) {
     const investigationId = action.split('/')[1]
     const investigation = list(encounterId).find((i) => i.investigationId === investigationId)
     if (!investigation) return refuse('investigation-not-found', `找不到检查申请 ${investigationId}`)
+    if (investigation.cancellation) return refuse('investigation-cancelled', '该检查已取消。')
+    if (action.endsWith('/cancellation')) {
+      if (investigation.reports.length > 0) return refuse('investigation-already-reported', '该检查已出报告，报告发布后不能取消。')
+      investigation.cancellation = { cancelledAt: now, practitionerId: 'demo-practitioner' }
+      return respond(encounterId)
+    }
     if (investigation.reports.length === 0) {
       investigation.stages = INVESTIGATION_STAGES[investigation.category].map((name, i) => ({ name, at: i ? now : investigation.issuedAt }))
       investigation.reports = [
@@ -101,6 +115,7 @@ export function createFakeInvestigations(refuse: Refuse) {
           releasedAt: now,
           ...STAFF[investigation.department],
           specimenOrSite: investigation.specimenOrSite,
+          correctionReason: null,
           body: REPORT_BODIES[investigation.catalogItemId] ?? { kind: 'narrative', findings: '未见异常。', impression: '未见明显异常。' },
           acknowledgement: null,
         },
@@ -109,5 +124,22 @@ export function createFakeInvestigations(refuse: Refuse) {
     return respond(encounterId)
   }
 
-  return { handle, list }
+  function amend(encounterId: string, investigationId: string, correctionReason: string, body: ReportBody) {
+    const investigation = list(encounterId).find((i) => i.investigationId === investigationId)!
+    const previous = investigation.reports.at(-1)!
+    investigation.reports = [
+      ...investigation.reports,
+      {
+        ...previous,
+        reportId: `${previous.reportId}-v${previous.version + 1}`,
+        version: previous.version + 1,
+        releasedAt: new Date().toISOString(),
+        correctionReason,
+        body,
+        acknowledgement: null,
+      },
+    ]
+  }
+
+  return { handle, list, amend }
 }
