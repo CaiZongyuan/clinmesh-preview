@@ -7,7 +7,8 @@ import type { AuditEventType, EncounterError, EncounterView } from '../shared/en
 import type { CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
 import { CopilotReadModel } from './copilot-read-model'
 import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
-import type { BodySystem } from '../shared/physical-examination'
+import { BODY_SYSTEM_NAME, type BodySystem } from '../shared/physical-examination'
+import type { CopilotAnalysisEvent } from '../shared/copilot-turn'
 import type { DraftAuthor, NoteSection, NoteSections } from '../shared/clinical-note'
 import { DiagnosisRepository, type DiagnosisResult } from './diagnosis-repository'
 import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
@@ -248,9 +249,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   performPhysicalExamination(encounterId: string, system: BodySystem): PhysicalExaminationResult {
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       this.examinations.perform(encounterId, system, DEMO_PRACTITIONER_ID, new Date().toISOString()),
     )
+    if (result.ok) this.notifyCopilot(encounterId, { ref: `examination:${system}`, text: `查体完成：${BODY_SYSTEM_NAME[system]}` })
+    return result
   }
 
   listPhysicalExaminations(encounterId: string) {
@@ -270,17 +273,47 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   issueInvestigations(encounterId: string, catalogItemIds: string[]): InvestigationsResult {
-    return this.ctx.storage.transactionSync(() => {
+    const result = this.ctx.storage.transactionSync(() => {
       const issued = this.investigations.issue(encounterId, catalogItemIds, DEMO_PRACTITIONER_ID, Date.now())
       if (issued.ok) this.completion.issuedInvestigations(encounterId, catalogItemIds)
       return issued
     })
+    if (result.ok) this.wakeReportAnalysis()
+    return result
   }
 
   releaseInvestigationNow(encounterId: string, investigationId: string): InvestigationsResult {
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       this.investigations.releaseNow(encounterId, investigationId, DEMO_PRACTITIONER_ID, Date.now()),
     )
+    if (result.ok) this.wakeReportAnalysis()
+    return result
+  }
+
+  async alarm(): Promise<void> {
+    const encounter = this.encounters.active()
+    if (!encounter) return
+    const now = Date.now()
+    const investigations = this.ctx.storage.transactionSync(() => this.investigations.list(encounter, now))
+    const released = investigations.flatMap((investigation) => investigation.reports.map((report) => ({
+      ref: `report:${report.reportId}`,
+      text: `${report.version === 1 ? '报告发布' : '报告更正'}：${investigation.name}（第 ${report.version} 版）`,
+      releasedAt: report.releasedAt,
+    }))).sort((a, b) => a.releasedAt.localeCompare(b.releasedAt))
+    for (const { ref, text } of released) {
+      await this.env.CLINICAL_COPILOT.getByName(encounter.encounterId).triggerAnalysis(encounter.encounterId, { ref, text }, false)
+    }
+    const next = this.investigations.nextReportReleaseAt(encounter.encounterId, now)
+    if (next !== null) await this.scheduleReportAnalysis(next)
+  }
+
+  private wakeReportAnalysis() {
+    this.ctx.waitUntil(this.scheduleReportAnalysis(Date.now()).catch((error) => console.error('Report analysis scheduling failed', error)))
+  }
+
+  private async scheduleReportAnalysis(at: number): Promise<void> {
+    const current = await this.ctx.storage.getAlarm()
+    if (current === null || current > at) await this.ctx.storage.setAlarm(at)
   }
 
   cancelInvestigation(encounterId: string, investigationId: string): InvestigationsResult {
@@ -422,16 +455,17 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   // A finalized consultation turn starts the Clinical Copilot's ambient countdown; the trigger is
   // fire-and-forget, so a slow or absent Copilot never blocks settling the patient's reply.
   private triggerCopilot(encounterId: string, patientTurnId: string): void {
-    try {
-      const doctorTurn = this.consultation.doctorTurnOf(patientTurnId)
-      if (!doctorTurn) return
-      this.ctx.waitUntil(this.env.CLINICAL_COPILOT.getByName(encounterId).triggerAnalysis(encounterId, {
-        ref: `consultation:${doctorTurn.turnId}`,
-        text: `问诊定稿：${doctorTurn.text.slice(0, 80)}`,
-      }).catch((error) => console.error('Copilot trigger failed', error)))
-    } catch (error) {
-      console.error('Copilot trigger failed', error)
-    }
+    const doctorTurn = this.consultation.doctorTurnOf(patientTurnId)
+    if (!doctorTurn) return
+    this.notifyCopilot(encounterId, {
+      ref: `consultation:${doctorTurn.turnId}`,
+      text: `问诊定稿：${doctorTurn.text.slice(0, 80)}`,
+    }, true)
+  }
+
+  private notifyCopilot(encounterId: string, event: CopilotAnalysisEvent, debounce = false): void {
+    this.ctx.waitUntil(this.env.CLINICAL_COPILOT.getByName(encounterId).triggerAnalysis(encounterId, event, debounce)
+      .catch((error) => console.error('Copilot trigger failed', error)))
   }
 
   // The Clinical Copilot's only way into the workspace: read-only projections of what the doctor can see.

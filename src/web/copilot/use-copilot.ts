@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ServerMessage } from '../../shared/agent-wire'
 import type { CopilotCompactionEntry } from '../../shared/copilot-context'
 import type {
+  CopilotAnalysisEvent,
   CopilotCountdown,
   CopilotFeedback,
   CopilotMention,
@@ -20,6 +21,8 @@ import {
   promptCopilot,
   resendCopilotPrompt,
   setCopilotFeedback,
+  setCopilotAutomaticAnalysis,
+  runCopilotPendingAnalysis,
   stopCopilot,
 } from '../api'
 
@@ -36,6 +39,10 @@ export interface CopilotSession {
   // Any Copilot turn is running or queued.
   busy: boolean
   countdown: CopilotCountdown | null
+  autoAnalysis: boolean
+  pendingAnalysis: CopilotAnalysisEvent[]
+  setAutomaticAnalysis(enabled: boolean): Promise<boolean>
+  runPendingAnalysis(): Promise<boolean>
   flushCountdown(ref: string): Promise<boolean>
   skipCountdown(ref: string): Promise<boolean>
   prompt(text: string, mentions: CopilotMention[], mode: CopilotPromptMode): Promise<boolean>
@@ -172,6 +179,10 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
     stream: encounterId ? stream : 'connecting',
     unread,
     countdown: snapshot?.countdown ?? null,
+    autoAnalysis: snapshot?.autoAnalysis ?? true,
+    pendingAnalysis: snapshot?.pendingAnalysis ?? [],
+    setAutomaticAnalysis: (enabled) => apply(() => setCopilotAutomaticAnalysis(encounterId!, enabled)),
+    runPendingAnalysis: () => apply(() => runCopilotPendingAnalysis(encounterId!)),
     flushCountdown: (ref) => apply(() => flushCopilotCountdown(encounterId!, ref)),
     skipCountdown: (ref) => apply(() => skipCopilotCountdown(encounterId!, ref)),
     busy: (snapshot?.turns ?? []).some((turn) => turn.status === 'running') || (snapshot?.queued.length ?? 0) > 0,

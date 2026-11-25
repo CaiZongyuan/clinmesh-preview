@@ -192,6 +192,10 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'POST /api/encounters/:encounterId/copilot/stop': ({ encounterId }) => request('POST', `/api/encounters/${encounterId}/copilot/stop`),
   'POST /api/encounters/:encounterId/copilot/triggers/:ref/flush': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/copilot/triggers/consultation:probe/flush`),
+  'PUT /api/encounters/:encounterId/copilot/automatic-analysis': ({ encounterId }) =>
+    request('PUT', `/api/encounters/${encounterId}/copilot/automatic-analysis`, { enabled: false }),
+  'POST /api/encounters/:encounterId/copilot/pending-analysis/run': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/copilot/pending-analysis/run`),
   'DELETE /api/encounters/:encounterId/copilot/triggers/:ref': ({ encounterId }) =>
     request('DELETE', `/api/encounters/${encounterId}/copilot/triggers/consultation:probe`),
   'POST /api/encounters/:encounterId/copilot/turns/:turnId/feedback': ({ encounterId, copilotTurnId }) =>

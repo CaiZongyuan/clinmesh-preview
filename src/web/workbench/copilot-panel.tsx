@@ -1,5 +1,6 @@
 import { NoteSuggestions } from './clinical-note/note-suggestions'
 import { Button } from '@ui-sdk/react/button'
+import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
 import { Dialog, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import { Select, SelectContent, SelectItem, SelectList, SelectTrigger, SelectValue } from '@ui-sdk/react/select'
 import {
@@ -541,6 +542,19 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
           {copilot.busy && <span className="text-xs font-normal text-info">运行中</span>}
         </h2>
         <div className="flex items-center gap-1.5">
+          {encounter?.status === 'active' && (
+            <label className="flex shrink-0 items-center gap-1 text-xs">
+              <span>自动分析</span>
+              <Switch
+                checked={copilot.autoAnalysis}
+                disabled={!model}
+                onCheckedChange={(enabled) => void copilot.setAutomaticAnalysis(enabled)}
+                data-agent-confirm="更改自动分析设置"
+              >
+                <SwitchThumb />
+              </Switch>
+            </label>
+          )}
           {model && <ModelChip model={model} onChange={(m, e) => void copilot.configure(m, e)} />}
           <Button aria-label="隐藏临床助手" title="隐藏临床助手" className={iconButton} onClick={onHide}>
             <ChevronRightIcon aria-hidden="true" size={16} />
@@ -562,6 +576,26 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
         <>
           <div className="min-h-0 flex-1 overflow-auto px-3.5 pt-3" role="log" aria-label="临床助手会话">
             {encounter.status === 'active' && <AmbientCountdown copilot={copilot} />}
+            {encounter.status === 'active' && (!copilot.autoAnalysis || copilot.pendingAnalysis.length > 0) && (
+              <section aria-label="待分析" className="mb-2 rounded-md border border-dashed border-border p-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span>{copilot.pendingAnalysis.length} 个事件待分析</span>
+                  <Button
+                    className="h-7 px-2 text-xs"
+                    disabled={!copilot.pendingAnalysis.length}
+                    onClick={() => void copilot.runPendingAnalysis()}
+                    data-agent-confirm="运行待分析事件"
+                  >
+                    立即分析
+                  </Button>
+                </div>
+                {copilot.pendingAnalysis.length > 0 && (
+                  <ul className="m-0 pl-4 text-muted-foreground">
+                    {copilot.pendingAnalysis.map((event) => <li key={event.ref}>{event.text}</li>)}
+                  </ul>
+                )}
+              </section>
+            )}
             <div className="grid gap-2 empty:hidden mb-2"><NoteSuggestions /></div>
             {copilot.queued.length > 0 && (
               <p className="m-0 mb-2 text-xs text-muted-foreground">

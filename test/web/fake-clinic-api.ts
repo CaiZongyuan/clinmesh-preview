@@ -65,6 +65,7 @@ const STATUS: Record<EncounterError['code'], number> = {
   'copilot-turn-not-found': 404,
   'copilot-nothing-to-compact': 409,
   'copilot-llm-unavailable': 503,
+  'copilot-bridge-required': 409,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })
@@ -143,6 +144,8 @@ export function createFakeClinicApi({
   const copilotSockets = new Set<FakeCopilotSocket>()
   const bridgeSockets = new Map<string, FakeBridgeSocket>()
   const countdowns = new Map<string, CopilotCountdown>()
+  const automaticAnalysis = new Map<string, boolean>()
+  const pendingAnalysis = new Map<string, CopilotSnapshot['pendingAnalysis']>()
   let copilotPromptCount = 0
   const turns = new Map(Object.entries(consultations).map(([id, list]) => [id, [...list]]))
   // Patient speech requests the workbench made to the Sambert endpoint.
@@ -384,6 +387,19 @@ export function createFakeClinicApi({
       emitCopilot(encounter.encounterId, { type: 'session.updated', runId: null })
       return Response.json({ turnId: `compaction-${marker.markerId}` }, { status: 202 })
     }
+    if (method === 'PUT' && action === 'copilot/automatic-analysis') {
+      const { enabled } = body as { enabled: boolean }
+      automaticAnalysis.set(encounterId, enabled)
+      emitCopilot(encounterId, { type: 'session.updated', runId: null })
+      return Response.json({ enabled })
+    }
+    if (method === 'POST' && action === 'copilot/pending-analysis/run') {
+      const events = pendingAnalysis.get(encounterId) ?? []
+      if (events.length === 0) return Response.json(null)
+      pendingAnalysis.delete(encounterId)
+      emitCopilot(encounterId, { type: 'session.updated', runId: null })
+      return Response.json({ kind: 'run', turnId: 'batch-1' }, { status: 201 })
+    }
     const trigger = action?.match(/^copilot\/triggers\/([^/]+)(\/flush)?$/)
     if (trigger && (method === 'POST' || method === 'DELETE')) {
       const countdown = countdowns.get(encounterId)
@@ -540,6 +556,8 @@ export function createFakeClinicApi({
       queued: structuredClone(session.queued),
       compactions: structuredClone(session.compactions ?? []),
       countdown: countdowns.get(encounterId) ?? null,
+      autoAnalysis: automaticAnalysis.get(encounterId) ?? true,
+      pendingAnalysis: pendingAnalysis.get(encounterId) ?? [],
     }
   }
 
@@ -777,6 +795,10 @@ export function createFakeClinicApi({
     openSockets: () => [...sockets],
     copilot: {
       snapshot: copilotSnapshotOf,
+      analysisEvent: (encounterId: string, event: CopilotSnapshot['pendingAnalysis'][number]) => {
+        pendingAnalysis.set(encounterId, [...(pendingAnalysis.get(encounterId) ?? []), event])
+        emitCopilot(encounterId, { type: 'session.updated', runId: null })
+      },
       bridge: (encounterId: string) => bridgeSockets.get(encounterId),
       countdown: (encounterId: string, countdown: CopilotCountdown) => {
         countdowns.set(encounterId, countdown)

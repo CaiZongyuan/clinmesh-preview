@@ -93,6 +93,10 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
   'POST /api/encounters/:encounterId/copilot/compact': ({ encounterId }) => send('POST', `/api/encounters/${encounterId}/copilot/compact`),
   'POST /api/encounters/:encounterId/copilot/triggers/:ref/flush': ({ encounterId }) =>
     send('POST', `/api/encounters/${encounterId}/copilot/triggers/consultation:frozen/flush`),
+  'PUT /api/encounters/:encounterId/copilot/automatic-analysis': ({ encounterId }) =>
+    send('PUT', `/api/encounters/${encounterId}/copilot/automatic-analysis`, { enabled: false }),
+  'POST /api/encounters/:encounterId/copilot/pending-analysis/run': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/copilot/pending-analysis/run`),
   'DELETE /api/encounters/:encounterId/copilot/triggers/:ref': ({ encounterId }) =>
     send('DELETE', `/api/encounters/${encounterId}/copilot/triggers/consultation:frozen`),
 }

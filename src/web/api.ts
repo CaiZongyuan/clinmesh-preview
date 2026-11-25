@@ -301,6 +301,14 @@ export function openCopilotSocket(encounterId: string, channel: 'socket' | 'brid
   return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/copilot/${channel}`)
 }
 
+export function setCopilotAutomaticAnalysis(encounterId: string, enabled: boolean) {
+  return request(`${encounterPath(encounterId)}/copilot/automatic-analysis`, { ...post({ enabled }), method: 'PUT' })
+}
+
+export function runCopilotPendingAnalysis(encounterId: string) {
+  return request(`${encounterPath(encounterId)}/copilot/pending-analysis/run`, post())
+}
+
 export function flushCopilotCountdown(encounterId: string, ref: string) {
   return request(`${encounterPath(encounterId)}/copilot/triggers/${encodeURIComponent(ref)}/flush`, post())
 }

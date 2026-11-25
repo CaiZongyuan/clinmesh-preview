@@ -123,6 +123,8 @@ export type AuditEventType =
   | 'copilot-compacted'
   | 'copilot-trigger-flushed'
   | 'copilot-trigger-skipped'
+  | 'copilot-automatic-analysis-changed'
+  | 'copilot-pending-analysis-run'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -169,6 +171,7 @@ export type EncounterErrorCode =
   | 'copilot-turn-not-found'
   | 'copilot-nothing-to-compact'
   | 'copilot-llm-unavailable'
+  | 'copilot-bridge-required'
 
 export interface EncounterError {
   code: EncounterErrorCode
