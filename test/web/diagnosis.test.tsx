@@ -160,6 +160,36 @@ describe('Diagnosis draft', () => {
     expect(screen.getByRole('radio', { name: '设为主诊断 原发性高血压' })).toBeChecked()
   })
 
+  it('keeps a selected non-first primary when a different row is removed, and falls back only when removing the primary', async () => {
+    const { api, openTab, user } = await openWorkspace()
+    await openTab()
+    await user.click(screen.getByRole('button', { name: '添加常用诊断 原发性高血压' }))
+    await waitFor(() => expect(api.diagnosis(ENCOUNTER).draft).toHaveLength(1))
+    await user.click(screen.getByRole('button', { name: '添加常用诊断 发热' }))
+    await waitFor(() => expect(api.diagnosis(ENCOUNTER).draft).toHaveLength(2))
+
+    // The doctor makes the third row the primary, then removes the first row. The primary sits after the
+    // removed row, so preserving it differs from blindly re-marking the first remaining row.
+    await user.click(screen.getByRole('button', { name: '添加常用诊断 2型糖尿病' }))
+    await waitFor(() => expect(api.diagnosis(ENCOUNTER).draft).toHaveLength(3))
+    await user.click(screen.getByRole('radio', { name: '设为主诊断 2型糖尿病' }))
+    await waitFor(() => expect(api.diagnosis(ENCOUNTER).draft).toEqual([
+      { code: 'I10', primary: false, source: 'doctor' },
+      { code: 'R50.9', primary: false, source: 'doctor' },
+      { code: 'E11.9', primary: true, source: 'doctor' },
+    ]))
+    await user.click(screen.getByRole('button', { name: '删除诊断草稿 原发性高血压' }))
+    await waitFor(() => expect(api.diagnosis(ENCOUNTER).draft).toEqual([
+      { code: 'R50.9', primary: false, source: 'doctor' },
+      { code: 'E11.9', primary: true, source: 'doctor' },
+    ]))
+    expect(screen.getByRole('radio', { name: '设为主诊断 2型糖尿病' })).toBeChecked()
+
+    // Removing the primary itself hands the mark to the first remaining entry.
+    await user.click(screen.getByRole('button', { name: '删除诊断草稿 2型糖尿病' }))
+    await waitFor(() => expect(api.diagnosis(ENCOUNTER).draft).toEqual([{ code: 'R50.9', primary: true, source: 'doctor' }]))
+  })
+
   it('stops adding at eight entries', async () => {
     const { api, openTab, user } = await openWorkspace()
     await openTab()

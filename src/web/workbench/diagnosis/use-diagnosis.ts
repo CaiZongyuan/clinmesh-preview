@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { DiagnosisDraftEntry, DiagnosisView } from '../../../shared/diagnosis'
+import { MAX_DIAGNOSIS_ENTRIES, type DiagnosisDraftEntry, type DiagnosisView } from '../../../shared/diagnosis'
 import type { EncounterView } from '../../../shared/encounter'
 import { confirmDiagnosis, fetchDiagnosis, reopenDiagnosis, saveDiagnosisDraft } from '../../api'
 
@@ -61,7 +61,7 @@ export function useDiagnosis(encounter: EncounterView): DiagnosisState {
 
   const add = useCallback(
     (code: string) => {
-      if (view.draft.some((entry) => entry.code === code) || view.draft.length >= 8) return
+      if (view.draft.some((entry) => entry.code === code) || view.draft.length >= MAX_DIAGNOSIS_ENTRIES) return
       void updateDraft([...view.draft, { code, primary: view.draft.length === 0, source: 'doctor' }])
     },
     [view.draft, updateDraft],
@@ -75,8 +75,11 @@ export function useDiagnosis(encounter: EncounterView): DiagnosisState {
   const remove = useCallback(
     (code: string) => {
       const remaining = view.draft.filter((entry) => entry.code !== code)
-      // The first entry stands in as primary so the draft never loses its one mark.
-      void updateDraft(remaining.map((entry, index) => ({ ...entry, primary: index === 0 })))
+      // The draft must never lose its one primary mark: keep the selected primary unless it is the row being
+      // removed, in which case the first remaining entry stands in.
+      void updateDraft(
+        remaining.map((entry, index) => ({ ...entry, primary: entry.primary || (index === 0 && !remaining.some((e) => e.primary)) })),
+      )
     },
     [view.draft, updateDraft],
   )
