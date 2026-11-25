@@ -61,6 +61,8 @@ const STATUS: Record<EncounterError['code'], number> = {
   'no-medication-conflict': 409,
   'copilot-busy': 409,
   'copilot-turn-not-found': 404,
+  'copilot-nothing-to-compact': 409,
+  'copilot-llm-unavailable': 503,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })
@@ -124,7 +126,7 @@ export function createFakeClinicApi({
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
   // The Clinical Copilot's session per Encounter, with its own event log for its socket.
-  const copilotSessions = new Map<string, { turns: CopilotTurn[]; queued: { turnId: string; kind: 'doctor'; text: string }[]; seq: number; model: CopilotSnapshot['model']; events: { seq: number; event: AgentEvent }[] }>()
+  const copilotSessions = new Map<string, { turns: CopilotTurn[]; queued: { turnId: string; kind: 'doctor'; text: string }[]; seq: number; model: CopilotSnapshot['model']; events: { seq: number; event: AgentEvent }[]; compactions?: { markerId: number; at: string; summarizedMessages: number; tokensBefore: number; tokensAfter: number; summary: string }[] }>()
   const copilotOf = (encounterId: string) =>
     copilotSessions.get(encounterId) ??
     copilotSessions
@@ -318,6 +320,53 @@ export function createFakeClinicApi({
       if (typeof requested?.text !== 'string' || !requested.text.trim()) return refuse('invalid-request', '请求体须为 { "text": string }')
       speechRequests.push({ encounterId: encounter.encounterId, turnId: speech[1], text: requested.text })
       return new Response(SPEECH_WAV.slice(0), { headers: { 'content-type': 'audio/wav' } })
+    if (action === 'copilot/context') {
+      const session = copilotOf(encounter.encounterId)
+      const items = [
+        { id: 'ctx-1', category: 'system', label: '系统提示词', tokens: 214, text: '你是门诊临床助手（Clinical Copilot）…' },
+        { id: 'ctx-2', category: 'his_state_ui', label: 'HIS 状态（就诊概况）', tokens: 96, text: '## 当前就诊概况' },
+        { id: 'ctx-3', category: 'consultation', label: '问诊记录（已定稿）', tokens: 88, text: '## 问诊记录' },
+        { id: 'ctx-4', category: 'tools', label: '工具定义', tokens: 310, text: '[…]' },
+      ]
+      const requests = session.turns.map((turn, i) => ({
+        runId: turn.turnId,
+        step: 0,
+        at: turn.startedAt,
+        items: items.map(({ id, category, label, tokens }) => ({ id, category, label, tokens })),
+        estimatedInput: 708 + i * 40,
+        providerInput: 720 + i * 36,
+        reconciled: [
+          { category: 'system' as const, tokens: 220 },
+          { category: 'tools' as const, tokens: 318 },
+          { category: 'consultation' as const, tokens: 90 },
+          { category: 'his_state_ui' as const, tokens: 92 },
+        ],
+      }))
+      const context = {
+        modelWindow: 128000,
+        reserve: 32000,
+        usable: 96000,
+        estimatedInput: 708 + Math.max(0, session.turns.length - 1) * 40,
+        items,
+        caseTruth: { tokens: 0, isolated: true },
+        requests,
+        compactions: structuredClone(session.compactions ?? []),
+      }
+      return Response.json({ context })
+    }
+    if (method === 'POST' && action === 'copilot/compact') {
+      const session = copilotOf(encounter.encounterId)
+      const marker = {
+        markerId: (session.compactions?.at(-1)?.markerId ?? 0) + 1,
+        at: new Date().toISOString(),
+        summarizedMessages: Math.max(1, session.turns.length),
+        tokensBefore: 640,
+        tokensAfter: 120,
+        summary: '要点摘要：……',
+      }
+      session.compactions = [...(session.compactions ?? []), marker]
+      emitCopilot(encounter.encounterId, { type: 'session.updated', runId: null })
+      return Response.json(marker, { status: 201 })
     }
     if (action === 'copilot' || (method === 'POST' && action === 'copilot/prompts')) {
       const session = copilotOf(encounter.encounterId)
@@ -465,6 +514,7 @@ export function createFakeClinicApi({
       model: session.model,
       turns: structuredClone(session.turns),
       queued: structuredClone(session.queued),
+      compactions: structuredClone(session.compactions ?? []),
     }
   }
 

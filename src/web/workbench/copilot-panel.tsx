@@ -18,6 +18,7 @@ import {
   ListPlusIcon,
   PencilIcon,
   RefreshCwIcon,
+  FoldVerticalIcon,
   SparklesIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
@@ -40,6 +41,7 @@ import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import type { CopilotSession } from '../copilot/use-copilot'
 import { formatClockSeconds } from './format'
 import { markdown } from './copilot-markdown'
+import { CopilotContextDialog } from './copilot-context-view'
 import { badge, iconButton, pane, paneHeader } from './pane-styles'
 
 const EFFORT_LABEL: Record<CopilotModelSetting['effort'], string> = { off: '关', low: '低', medium: '中', high: '高' }
@@ -313,25 +315,25 @@ function mentionCandidates(encounterId: string, examinations: PhysicalExaminatio
   return { reports, exams, noteSections }
 }
 
+function CompactionMarkers({ compactions }: { compactions: CopilotSession['compactions'] }) {
+  if (compactions.length === 0) return null
+  return (
+    <ol className="m-0 mb-2 flex list-none flex-col gap-0.5 p-0" aria-label="压缩记录">
+      {compactions.map((marker) => (
+        <li key={marker.markerId} className="flex items-center gap-1 text-[11px] text-muted-foreground" title={marker.summary}>
+          <FoldVerticalIcon aria-hidden="true" size={12} />
+          {formatClockSeconds(marker.at)} 已压缩 {marker.summarizedMessages} 条（{marker.tokensBefore} → {marker.tokensAfter} tokens）
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftChange, mentions, onMentionsChange, editing, onCancelEdit }: ComposerProps) {
   const [mode, setMode] = useState<CopilotPromptMode>('queue')
   const [menuOpen, setMenuOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const input = useRef<HTMLTextAreaElement>(null)
-
-  // What the doctor's assistant currently holds: its session configuration and the usage of its finished
-  // turns. Per-request accounting and compaction state arrive with #13; this is the read-only interim view.
-  const contextSummary = {
-    model: copilot.model,
-    turns: copilot.turns.length,
-    finished: copilot.turns.filter((turn) => turn.status !== 'running').length,
-    queued: copilot.queued.length,
-    usage: copilot.turns.reduce(
-      (total, turn) => ({ in: total.in + (turn.usage?.in ?? 0), out: total.out + (turn.usage?.out ?? 0) }),
-      { in: 0, out: 0 },
-    ),
-    checkpoint: copilot.turns.reduce((total, turn) => total + turn.steps.filter((step) => step.state !== 'running').length, 0),
-  }
 
   useEffect(() => {
     const focus = (event: globalThis.KeyboardEvent) => {
@@ -478,21 +480,12 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
         </TriggerMenuContent>
       </TriggerMenu>
       <Dialog open={contextOpen} onOpenChange={setContextOpen}>
-        <DialogContent className="copilot-menu max-w-sm p-4" aria-label="助手上下文（只读）">
+        <DialogContent className="copilot-menu max-w-lg overflow-auto p-4" aria-label="助手上下文（只读）">
           <DialogTitle className="m-0 text-sm font-semibold">助手上下文（只读）</DialogTitle>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">当前会话信息；分项用量与压缩记录随 #13 提供。</p>
-          <dl className="m-0 mt-2 grid grid-cols-2 gap-1 text-[13px]">
-            <dt className="text-muted-foreground">模型</dt>
-            <dd className="m-0">{contextSummary.model ? `${contextSummary.model.model} · ${EFFORT_LABEL[contextSummary.model.effort]}` : '默认'}</dd>
-            <dt className="text-muted-foreground">轮数</dt>
-            <dd className="m-0">{contextSummary.turns}（已完成 {contextSummary.finished}）</dd>
-            <dt className="text-muted-foreground">排队</dt>
-            <dd className="m-0">{contextSummary.queued}</dd>
-            <dt className="text-muted-foreground">已完成步骤</dt>
-            <dd className="m-0">{contextSummary.checkpoint}</dd>
-            <dt className="text-muted-foreground">累计用量</dt>
-            <dd className="m-0">输入 {contextSummary.usage.in} · 输出 {contextSummary.usage.out}</dd>
-          </dl>
+          <CopilotContextDialog
+            encounterId={encounterId}
+            modelLabel={copilot.model ? `${copilot.model.model} · ${EFFORT_LABEL[copilot.model.effort]}` : null}
+          />
         </DialogContent>
       </Dialog>
       <div className="flex items-center justify-between gap-2">
@@ -569,6 +562,7 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
                 排队中：{copilot.queued.map((item) => item.text).join('、')}
               </p>
             )}
+            <CompactionMarkers compactions={copilot.compactions} />
             {copilot.turns.length === 0 ? (
               <p className="m-0 pb-3 text-[13px] text-muted-foreground">向临床助手提问，它会用只读工具查阅本次就诊的资料后回答。</p>
             ) : (

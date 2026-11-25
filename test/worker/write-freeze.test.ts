@@ -86,6 +86,7 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
     send('POST', `/api/encounters/${encounterId}/copilot/turns/${copilotTurnId}/feedback`, { value: 'up' }),
   'POST /api/encounters/:encounterId/copilot/config': ({ encounterId }) =>
     send('POST', `/api/encounters/${encounterId}/copilot/config`, { model: 'glm-5.3-flash', effort: 'low' }),
+  'POST /api/encounters/:encounterId/copilot/compact': ({ encounterId }) => send('POST', `/api/encounters/${encounterId}/copilot/compact`),
 }
 
 // An Encounter with one released, unacknowledged Report, one pending Investigation, one failed patient reply

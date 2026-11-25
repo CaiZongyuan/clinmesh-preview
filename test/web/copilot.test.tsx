@@ -181,7 +181,7 @@ describe('Clinical Copilot panel', () => {
     expect(api.copilot.snapshot(ENCOUNTER).queued).toContainEqual(expect.objectContaining({ text: '另一个问题' }))
   })
 
-  it('opens the read-only context view from the typed slash command without losing the draft', async () => {
+  it('opens the context view from the typed slash command: ring, categories, Case Truth zero, draft kept', async () => {
     const api = openEncounter()
     await ask('先跑一轮')
     api.copilot.answer(ENCOUNTER, '已完成的回答。')
@@ -191,10 +191,40 @@ describe('Clinical Copilot panel', () => {
     await user.type(input, '/上下文')
     await user.click(screen.getByRole('button', { name: '发送给临床助手' }))
     const dialog = await screen.findByRole('dialog', { name: '助手上下文（只读）' })
-    expect(dialog).toHaveTextContent('累计用量')
-    expect(dialog).toHaveTextContent('输入 320')
+    expect(requestsTo('GET', `/api/encounters/${ENCOUNTER}/copilot/context`)).toHaveLength(1)
+    // Usage ring against the model window with the compaction/output reserve.
+    expect(dialog).toHaveTextContent('预计输入')
+    expect(dialog).toHaveTextContent('128,000')
+    expect(dialog).toHaveTextContent('预留（压缩与输出）')
+    // Category stacked bar and table.
+    expect(dialog).toHaveTextContent('上下文分类明细')
+    expect(dialog).toHaveTextContent('工具定义')
+    // An explicit Case Truth row, always zero and isolated.
+    expect(dialog).toHaveTextContent('Case Truth')
+    expect(dialog).toHaveTextContent('0 tokens · 隔离')
+    // Per-request timeline reconciled with the provider usage.
+    expect(dialog).toHaveTextContent('逐请求时间线')
+    expect(dialog).toHaveTextContent('720')
+    // What the doctor typed stays in the composer and was never sent.
     expect(input).toHaveValue('/上下文')
     expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/prompts`)).toHaveLength(1)
+  })
+
+  it('compacts the context on demand and shows the marker', async () => {
+    const api = openEncounter()
+    await ask('先跑一轮')
+    api.copilot.answer(ENCOUNTER, '已完成的回答。')
+    await waitFor(() => expect(screen.getByRole('log', { name: '临床助手会话' })).toHaveTextContent('已完成的回答。'))
+    const user = userEvent.setup()
+    await user.type(await composer(), '/上下文')
+    await user.click(screen.getByRole('button', { name: '发送给临床助手' }))
+    const dialog = await screen.findByRole('dialog', { name: '助手上下文（只读）' })
+    await user.click(within(dialog).getByRole('button', { name: '压缩上下文' }))
+    expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/compact`)).toHaveLength(1)
+    expect((await within(dialog).findAllByText(/已压缩 1 条/)).length).toBeGreaterThan(0)
+    // The marker shows in the session log after the dialog closes.
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.getByRole('log', { name: '临床助手会话' })).toHaveTextContent('已压缩 1 条'))
   })
 
   it('shows a reconnecting notice when the socket drops, and recovers', async () => {

@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import type { CopilotCompactResponse, CopilotContextView } from '../../shared/copilot-context'
 import type {
   CopilotConfigRequest,
   CopilotFeedback,
@@ -12,10 +13,21 @@ import type {
 import type { EncounterError } from '../../shared/encounter'
 import { DurableAgentRuntime, RunHalted, type AgentDefinition } from '../durable-agent/runtime'
 import { resolveLlmConfig, type LlmEnv } from '../llm/config'
+import { resolveLlmProvider } from '../llm/registry'
+import type { LlmMessage, ToolSpec } from '../llm/types'
+import { estimateTokens } from '../durable-agent/context'
 import { applyMigrations } from '../sqlite-migrations'
 import { WORKSPACE_NAME } from '../workspace-name'
 import { COPILOT_SYSTEM_PROMPT, encounterOverview, promptContent } from './copilot-context'
+import {
+  COMPACTION_SYSTEM_PROMPT,
+  buildContextView,
+  requestItems,
+  rollingMessages,
+  summarizeTranscript,
+} from './copilot-accounting'
 import type { CopilotRead, CopilotReadResult } from './copilot-reads'
+type ReadWorkspace = <R extends CopilotRead>(request: R) => Promise<CopilotReadResult<R['kind']>>
 import { readSession, type CopilotTrigger } from './copilot-session'
 import { copilotTools } from './copilot-tools'
 
@@ -26,6 +38,16 @@ const COPILOT_MIGRATIONS: readonly string[] = [
      run_id TEXT PRIMARY KEY,
      value TEXT NOT NULL CHECK (value IN ('up', 'down')),
      updated_at INTEGER NOT NULL
+   );`,
+  // Context accounting and manual compaction (#13): one row per compaction marker the doctor triggered.
+  `CREATE TABLE copilot_compaction (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     summarized_messages INTEGER NOT NULL,
+     tokens_before INTEGER NOT NULL,
+     tokens_after INTEGER NOT NULL,
+     summary TEXT NOT NULL,
+     provider_input INTEGER,
+     created_at INTEGER NOT NULL
    );`,
 ]
 
@@ -38,31 +60,43 @@ export interface CopilotCommandContext {
 
 const busy: EncounterError = { code: 'copilot-busy', message: '临床助手正在运行或有排队任务，请停止或等待后再重新发送。' }
 const notFound = (turnId: string): EncounterError => ({ code: 'copilot-turn-not-found', message: `找不到临床助手的第 ${turnId} 轮` })
+const nothingToCompact: EncounterError = {
+  code: 'copilot-nothing-to-compact',
+  message: '没有可压缩的对话历史：还没有需要摘要的提问、回复或工具结果。',
+}
 
 // One per Encounter (addressed by its id). It reads the workspace only through `readForCopilot`, the read-only
 // projection of what the doctor can see; it never imports the Golden Case pack and has no tool that writes.
 export class ClinicalCopilotDO extends DurableObject<Env> {
   private readonly runtime: DurableAgentRuntime
+  private readonly read: ReadWorkspace
+  private readonly toolSpecs: ToolSpec[]
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    const read = <R extends CopilotRead>(request: R): Promise<CopilotReadResult<R['kind']>> =>
+    this.read = <R extends CopilotRead>(request: R): Promise<CopilotReadResult<R['kind']>> =>
       env.CLINIC_WORKSPACE.getByName(WORKSPACE_NAME).readForCopilot(this.encounterId(), request) as Promise<CopilotReadResult<R['kind']>>
-    const tools = copilotTools(read)
+    const tools = copilotTools(this.read)
+    this.toolSpecs = Object.values(tools).map((tool) => tool.spec)
+    const toolSpecs = this.toolSpecs
     const agent: AgentDefinition = {
       kind: 'copilot',
       streamThinking: true,
       traceSteps: true,
       tools,
       buildContext: async ({ messages }) => {
-        const state = await read({ kind: 'encounter-state' })
+        const state = await this.read({ kind: 'encounter-state' })
         // A frozen Encounter takes no more analysis: whatever is still running or queued stops.
         if (!state.ok || state.data.status !== 'active') throw new RunHalted('encounter-ended')
         return {
           messages: [{ role: 'system', content: `${COPILOT_SYSTEM_PROMPT}\n\n${encounterOverview(state.data)}` }, ...messages],
-          tools: Object.values(tools).map((tool) => tool.spec),
+          tools: toolSpecs,
         }
       },
+      // #13: itemize exactly what each outbound request carries. The system message is the prompt plus the
+      // re-injected 就诊概况 (HIS state) and 问诊记录 (consultation), split back by the same boundary; the
+      // durable messages are the rolling doctor prompts, replies/thinking and tool results.
+      account: ({ messages }) => requestItems({ messages, tools: toolSpecs }),
     }
     this.runtime = new DurableAgentRuntime(ctx, env as unknown as LlmEnv, agent)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -72,6 +106,95 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
         applyMigrations(ctx.storage.sql, 'agent_schema_migration', COPILOT_MIGRATIONS, 'copilot')
       })
     })
+  }
+
+  // The 上下文 view (#13): what the next request would carry, the per-request timeline reconciled with the
+  // provider's reported usage, the compaction markers, and the Case Truth row that is always zero. Reads need
+  // only the Encounter to exist and work while it is frozen, like the session snapshot.
+  async contextView(encounterId: string): Promise<CopilotContextView> {
+    this.bind(encounterId)
+    const state = await this.read({ kind: 'encounter-state' })
+    const config = resolveLlmConfig(this.env as unknown as LlmEnv, 'copilot')
+    return buildContextView(
+      {
+        systemContent: state.ok ? `${COPILOT_SYSTEM_PROMPT}\n\n${encounterOverview(state.data)}` : COPILOT_SYSTEM_PROMPT,
+        messages: this.runtime.activeContextMessages(),
+        tools: this.toolSpecs,
+        modelWindow: config.contextWindow,
+      },
+      this.ctx.storage.sql,
+    )
+  }
+
+  // Manual compaction (#13): summarizes the rolling doctor prompts, replies/thinking and tool results into one
+  // persisted summary message, marks the originals compacted, and leaves a marker. The 就诊概况 and 问诊记录
+  // live in the system context rebuilt before every request, so compaction never drops live clinic or
+  // consultation data. The summary is generated before the atomic write, so a crash anywhere simply loses the
+  // attempt and the doctor retries; the write itself re-checks that nothing started running meanwhile.
+  async compact(encounterId: string): Promise<CopilotResult<CopilotCompactResponse>> {
+    this.bind(encounterId)
+    const sql = this.ctx.storage.sql
+    if (this.hasUnfinishedRun()) return { ok: false, error: busy }
+    const rolling = rollingMessages(sql)
+    if (rolling.length === 0) return { ok: false, error: nothingToCompact }
+    const llm = resolveLlmProvider(this.env as unknown as LlmEnv, 'copilot', this.runtime.sessionConfig())
+    if (!llm.ok) return { ok: false, error: { code: 'copilot-llm-unavailable', message: '未配置大模型接口（LLM_API_KEY），无法生成摘要。' } }
+    const transcript = summarizeTranscript(rolling)
+    const tokensBefore = rolling.reduce((sum, entry) => sum + entry.tokens, 0)
+    let summary = ''
+    let providerInput: number | null = null
+    const controller = new AbortController()
+    try {
+      const stream = llm.provider.stream(
+        {
+          model: llm.model,
+          effort: llm.effort,
+          messages: [
+            { role: 'system', content: COMPACTION_SYSTEM_PROMPT },
+            { role: 'user', content: `以下是临床助手本会话的对话历史，请输出摘要：\n\n${transcript}` },
+          ],
+          tools: [],
+        },
+        controller.signal,
+      )
+      for await (const event of stream) {
+        if (event.type === 'text.delta') summary += event.text
+        else if (event.type === 'usage') providerInput = event.input
+      }
+    } catch (error) {
+      return { ok: false, error: { code: 'copilot-llm-unavailable', message: `生成摘要失败：${error instanceof Error ? error.message : String(error)}` } }
+    }
+    if (summary.trim() === '') return { ok: false, error: { code: 'copilot-llm-unavailable', message: '模型没有返回摘要，未做任何修改。' } }
+    const tokensAfter = estimateTokens(summary)
+    const written = this.ctx.storage.transactionSync((): CopilotCompactResponse | null => {
+      const sql = this.ctx.storage.sql
+      // A prompt enqueued while the summary streamed must not lose its context to a racing compaction.
+      if (this.hasUnfinishedRun()) return null
+      const stillThere = new Set(rollingMessages(sql).map((entry) => entry.seq))
+      const compacted = rolling.filter((entry) => stillThere.has(entry.seq))
+      if (compacted.length === 0) return null
+      const now = Date.now()
+      sql.exec(
+        `INSERT INTO agent_message (run_id, role, content_json, origin_ref, state, created_at) VALUES (NULL, 'assistant', ?, ?, 'active', ?)`,
+        JSON.stringify({ role: 'assistant', content: summary.trim() } satisfies LlmMessage),
+        `compaction:${crypto.randomUUID()}`, now,
+      )
+      for (const entry of compacted) sql.exec(`UPDATE agent_message SET state = 'compacted' WHERE seq = ? AND state = 'active'`, entry.seq)
+      const { markerId } = sql
+        .exec<{ markerId: number }>(
+          `INSERT INTO copilot_compaction (summarized_messages, tokens_before, tokens_after, summary, provider_input, created_at)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING id AS markerId`,
+          compacted.length, tokensBefore, tokensAfter, summary.trim(), providerInput, now,
+        )
+        .one()
+      this.runtime.announce({ type: 'session.updated', runId: null })
+      return { markerId, summarizedMessages: compacted.length, tokensBefore, tokensAfter }
+    })
+    return written === null ? { ok: false, error: busy } : { ok: true, value: written }
+  }
+
+  private hasUnfinishedRun(): boolean {
+    return this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_run WHERE status IN ('queued', 'running')`).one().n > 0
   }
 
   async snapshot(encounterId: string): Promise<CopilotSnapshot> {

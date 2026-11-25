@@ -167,6 +167,7 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'POST /api/encounters/:encounterId/consultation/doctor-turns': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/consultation/doctor-turns`, { clientTurnId: 'probe', text: '晚上睡得好吗？' }),
   'GET /api/encounters/:encounterId/copilot': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/copilot`),
+  'GET /api/encounters/:encounterId/copilot/context': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/copilot/context`),
   'GET /api/encounters/:encounterId/copilot/socket': ({ encounterId }) => copilotSocketFrames(encounterId),
   'POST /api/encounters/:encounterId/copilot/prompts': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/copilot/prompts`, {
@@ -186,6 +187,8 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     request('POST', `/api/encounters/${encounterId}/copilot/turns/${copilotTurnId}/feedback`, { value: 'up' }),
   'POST /api/encounters/:encounterId/copilot/config': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/copilot/config`, { model: 'glm-5.3-flash', effort: 'low' }),
+  'POST /api/encounters/:encounterId/copilot/compact': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/copilot/compact`),
   'POST /api/encounters/:encounterId/abandonment': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/abandonment`),
 }

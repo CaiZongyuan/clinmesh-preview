@@ -9,6 +9,7 @@ import type {
   CopilotTurnStatus,
 } from '../../shared/copilot-turn'
 import type { RunUsage } from '../durable-agent/runtime'
+import type { CopilotCompactionEntry } from '../../shared/copilot-context'
 
 // What a Copilot run was asked, as recorded in its trigger.
 export interface CopilotTrigger {
@@ -57,7 +58,7 @@ function parseArgs(json: string): unknown {
 
 // The Copilot session as the doctor sees it, projected from the runtime's durable tables in one synchronous read,
 // so it matches the event log up to `seq`. A running step's thinking and text come from its streamed deltas.
-export function readSession(sql: SqlStorage): { turns: CopilotTurn[]; queued: CopilotQueuedItem[]; checkpoint: number } {
+export function readSession(sql: SqlStorage): { turns: CopilotTurn[]; queued: CopilotQueuedItem[]; checkpoint: number; compactions: CopilotCompactionEntry[] } {
   const runs = sql
     .exec<RunRow>(
       `SELECT run_id, status, trigger_json, error, stop_reason, usage_json, started_at, finished_at, superseded_by, copilot_feedback.value AS feedback
@@ -143,7 +144,20 @@ export function readSession(sql: SqlStorage): { turns: CopilotTurn[]; queued: Co
   const checkpoint =
     sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_step WHERE status != 'running'`).one().n +
     sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_tool_call WHERE status != 'dispatched'`).one().n
-  return { turns, queued, checkpoint }
+  const compactions: CopilotCompactionEntry[] = sql
+    .exec<{ id: number; created_at: number; summarized_messages: number; tokens_before: number; tokens_after: number; summary: string }>(
+      'SELECT id, created_at, summarized_messages, tokens_before, tokens_after, summary FROM copilot_compaction ORDER BY id DESC LIMIT 20',
+    )
+    .toArray()
+    .map((row) => ({
+      markerId: row.id,
+      at: new Date(row.created_at).toISOString(),
+      summarizedMessages: row.summarized_messages,
+      tokensBefore: row.tokens_before,
+      tokensAfter: row.tokens_after,
+      summary: row.summary,
+    }))
+  return { turns, queued, checkpoint, compactions }
 }
 
 // What the running step has streamed so far: the deltas since its `step.started`.
