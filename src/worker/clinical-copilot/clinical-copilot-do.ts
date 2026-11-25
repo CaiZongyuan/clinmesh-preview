@@ -22,7 +22,7 @@ import { WORKSPACE_NAME } from '../workspace-name'
 import { COPILOT_SYSTEM_PROMPT, encounterOverview, promptContent } from './copilot-context'
 import { COMPACTION_SYSTEM_PROMPT, buildContextView, compactionItems, requestItems, rollingMessages, summarizeTranscript } from './copilot-accounting'
 import { estimateTokens } from '../durable-agent/context'
-import type { CopilotRead, CopilotReadResult } from './copilot-reads'
+import type { CopilotNoteMention, CopilotRead, CopilotReadResult } from './copilot-reads'
 type ReadWorkspace = <R extends CopilotRead>(request: R) => Promise<CopilotReadResult<R['kind']>>
 import { readSession, type CopilotTrigger } from './copilot-session'
 import { copilotTools } from './copilot-tools'
@@ -88,6 +88,7 @@ export type CopilotResult<T> = { ok: true; value: T } | { ok: false; error: Enco
 // Who sent a command, as the workspace authorized it.
 export interface CopilotCommandContext {
   practitionerId: string
+  noteMentions: CopilotNoteMention[]
 }
 
 const busy: EncounterError = { code: 'copilot-busy', message: '临床助手正在运行或有排队任务，请停止或等待后再重新发送。' }
@@ -489,7 +490,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   async prompt(encounterId: string, request: CopilotPromptRequest, context: CopilotCommandContext): Promise<CopilotPromptResponse> {
     this.bind(encounterId)
     const trigger: CopilotTrigger = { kind: 'doctor', text: request.text, mentions: request.mentions, practitionerId: context.practitionerId }
-    const content = promptContent(request.text, request.mentions)
+    const content = promptContent(request.text, request.mentions, context.noteMentions)
     if (request.mode === 'steer') {
       const steered = await this.runtime.steer(request.clientPromptId, content, trigger, 'prompt')
       return { kind: steered.kind, turnId: steered.runId }

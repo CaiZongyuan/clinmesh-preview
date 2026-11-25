@@ -124,6 +124,31 @@ describe('Clinical Copilot panel', () => {
     expect(api.copilot.snapshot(ENCOUNTER).turns[1].trigger.text).toBe('第一版问题（改）')
   })
 
+  it('keeps the selected note references when editing and resending a turn', async () => {
+    const api = openEncounter()
+    const path = `/api/encounters/${ENCOUNTER}/copilot`
+    const mentions = [
+      { kind: 'note-section', id: 'revision-1:chief-complaint', label: '主诉（已签署）' },
+      { kind: 'draft', id: 'chief-complaint', label: '主诉（草稿）' },
+    ]
+    const seeded = await api.handle(`${path}/prompts`, {
+      method: 'POST',
+      body: JSON.stringify({ text: '@主诉（已签署） @主诉（草稿） 请对照。', mentions, mode: 'queue' }),
+    })
+    expect(seeded.status).toBe(201)
+    const { turnId } = await seeded.json() as { turnId: string }
+    api.copilot.answer(ENCOUNTER, '原回答。')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '编辑并重发 · 第 1 轮' }))
+    await user.type(await composer(), '补充说明。')
+    await user.click(screen.getByRole('button', { name: '发送给临床助手' }))
+    const route = `${path}/turns/${turnId}/resend`
+    await waitFor(() => {
+      const body = requestsTo('POST', route).at(-1)?.[1]?.body
+      expect(JSON.parse(String(body))).toMatchObject({ mentions, text: '@主诉（已签署） @主诉（草稿） 请对照。补充说明。' })
+    })
+  })
+
   it('changes model and effort with the chips', async () => {
     const api = openEncounter()
     await panel()

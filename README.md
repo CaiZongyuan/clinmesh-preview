@@ -17,7 +17,7 @@ pnpm dev         # Vite + Cloudflare Workers runtime: http://localhost:5173
 
 ### Model configuration
 
-The Simulated Patient calls an OpenAI-compatible `/chat/completions` endpoint (default model `glm-5.3-flash`, `low` reasoning effort). Non-secret defaults are `vars` in `wrangler.jsonc`; the key is a secret. Put it in `.dev.vars` (gitignored, never committed):
+The Simulated Patient and Clinical Copilot call an OpenAI-compatible `/chat/completions` endpoint (default model `glm-5.3-flash`, `low` reasoning effort). Non-secret defaults are `vars` in `wrangler.jsonc`; the key is a secret. Put it in `.dev.vars` (gitignored, never committed):
 
 ```sh
 # .dev.vars
@@ -32,7 +32,7 @@ LLM_API_KEY=<your key>
 # PATIENT_TURN_EXPIRY_GRACE_MS=5000       # extra wait before the workspace itself fails an unsettled reply
 ```
 
-Without `LLM_API_KEY` the workbench still runs: each patient reply fails at once with `llm-not-configured`, visibly, with a retry button. The GLM endpoint facts (base URL, reasoning field, effort mapping) are not yet verified against a live key.
+Without `LLM_API_KEY` the workbench still runs: each patient reply fails at once with `llm-not-configured`, visibly, with a retry button. Use the API base URL that matches your credential. Z.ai Coding Plan credentials use `https://open.bigmodel.cn/api/coding/paas/v4`. The Clinical Copilot shows a failed turn when the model is unconfigured.
 
 ### Voice configuration
 
@@ -99,11 +99,11 @@ Run one seam with `pnpm test --project worker` or `pnpm test --project web`.
 ## Layout
 
 - `src/worker/` Hono app (`app.ts`), Worker entry (`index.ts`), `ClinicWorkspaceDO`, and repositories over its SQLite store.
-  - `durable-agent/` The in-repo durable agent runtime (our `pi-durable`): runs queued by commands and executed by the Durable Object alarm, LLM steps checkpointed in the agent's SQLite, crash recovery on the next alarm, per-run deadlines, an event log replayed to hibernatable WebSockets, and an outbox that delivers a run's outcome to the workspace at least once. Domain-agnostic; agents plug in through `AgentDefinition`.
+  - `durable-agent/` The in-repo durable agent runtime: runs queued by commands and executed by the Durable Object alarm, LLM steps checkpointed in the agent's SQLite, crash recovery on the next alarm, per-run deadlines, an event log replayed to hibernatable WebSockets, and an outbox that delivers a run's outcome to the workspace at least once. Domain-agnostic; agents plug in through `AgentDefinition`.
   - `llm/` Provider-neutral LLM types, the OpenAI-compatible streaming adapter, per-agent configuration, and the scripted-provider hook the Worker-seam tests install (`LLM_PROVIDER=scripted`).
   - `simulated-patient/` `SimulatedPatientDO` (one per Encounter) and its context: Patient Persona, doctor utterances and its own settled replies, nothing else. It never imports the Golden Case pack.
 - `src/web/` React app: TanStack Router routes (`router.tsx`), workbench components, styles and tokens.
 - `src/shared/` Types shared by the API and the browser.
 - `data/` Pinned data snapshots. `data/provenance.json` records each snapshot's source paths and reference commit.
-- `test/worker/`, `test/web/` The two test seams; `test/fixtures/` holds what both seams expect of Golden Case 1.
+- `test/worker/`, `test/web/` The two test seams. `test/fixtures/` holds shared Golden Case expectations.
 - `prototypes/copilot-workbench/` Reference prototype, not production code.

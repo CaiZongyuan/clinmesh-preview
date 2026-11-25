@@ -448,9 +448,9 @@ app.post('/encounters/:encounterId/copilot/prompts', async (c) => {
   const request: CopilotPromptRequest = {
     clientPromptId: body.clientPromptId, text: body.text, mentions: listed, mode: body.mode,
   } satisfies CopilotPromptRequest
-  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'), listed)
   if (!allowed.ok) return refuse(c, allowed.error)
-  const response: CopilotPromptResponse = await copilot(c).prompt(c.req.param('encounterId'), request, { practitionerId: allowed.practitionerId })
+  const response: CopilotPromptResponse = await copilot(c).prompt(c.req.param('encounterId'), request, allowed)
   const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompted', body.text.slice(0, 80))
   if (!audited.ok) return refuse(c, audited.error)
   return c.json<CopilotPromptResponse>(response, 201)
@@ -466,9 +466,9 @@ app.post('/encounters/:encounterId/copilot/turns/:turnId/resend', async (c) => {
     return refuse(c, { code: 'invalid-request', message: `请求体须为 { clientPromptId, text（1-${MAX_PROMPT_LENGTH} 字）, mentions }` })
   }
   const request: CopilotResendRequest = { clientPromptId: body.clientPromptId, text: body.text, mentions: listed }
-  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'), listed)
   if (!allowed.ok) return refuse(c, allowed.error)
-  const result = await copilot(c).resend(c.req.param('encounterId'), c.req.param('turnId'), request, { practitionerId: allowed.practitionerId })
+  const result = await copilot(c).resend(c.req.param('encounterId'), c.req.param('turnId'), request, allowed)
   if (!result.ok) return refuse(c, result.error)
   const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompt-resent', body.text.slice(0, 80))
   if (!audited.ok) return refuse(c, audited.error)

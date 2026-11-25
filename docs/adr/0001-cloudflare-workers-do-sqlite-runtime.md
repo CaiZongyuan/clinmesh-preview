@@ -4,7 +4,7 @@ status: accepted
 
 # Unified Cloudflare Workers and Durable Objects SQLite Runtime
 
-We run the entire backend—Hono HTTP/WebSocket routing, HIS clinical persistence, `pi-durable` agent sessions, and Cloudflare `agents/voice` speech pipelines—on a single Cloudflare Workers + Durable Objects runtime using embedded Durable Object SQLite (`ClinicWorkspaceDO` for HIS clinical records, plus per-encounter `ClinicalCopilotDO` and `SimulatedPatientDO`), instead of splitting a local Node/Bun SQLite server from a separate Cloudflare Worker for voice or introducing D1 for clinical tables. This eliminates cross-runtime glue, guarantees single-transaction atomic clinical commands alongside durable agent checkpoints, and works out of the box locally via `wrangler` / `@cloudflare/vite-plugin`.
+We run the entire backend—Hono HTTP/WebSocket routing, HIS clinical persistence, in-repo durable agent sessions, and Cloudflare `agents/voice` speech pipelines—on a single Cloudflare Workers + Durable Objects runtime using embedded Durable Object SQLite (`ClinicWorkspaceDO` for HIS clinical records, plus per-Encounter `ClinicalCopilotDO`, `SimulatedPatientDO` and `ConsultationVoiceAgent`), instead of splitting a local Node/Bun SQLite server from a separate Cloudflare Worker for voice or introducing D1 for clinical tables. This eliminates cross-runtime glue, guarantees single-transaction atomic clinical commands alongside durable agent checkpoints, and works out of the box locally via `wrangler` / `@cloudflare/vite-plugin`.
 
 ## Considered Options
 

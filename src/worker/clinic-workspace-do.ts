@@ -4,11 +4,11 @@ import { DurableObject } from 'cloudflare:workers'
 import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
 import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
 import type { AuditEventType, EncounterError, EncounterView } from '../shared/encounter'
-import type { CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
+import type { CopilotNoteMention, CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
 import { CopilotReadModel } from './copilot-read-model'
 import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
 import { BODY_SYSTEM_NAME, type BodySystem } from '../shared/physical-examination'
-import type { CopilotAnalysisEvent } from '../shared/copilot-turn'
+import type { CopilotAnalysisEvent, CopilotMention } from '../shared/copilot-turn'
 import type { DraftAuthor, NoteSection, NoteSections } from '../shared/clinical-note'
 import { DiagnosisRepository, type DiagnosisResult } from './diagnosis-repository'
 import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
@@ -71,7 +71,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     this.diagnosis = new DiagnosisRepository(ctx.storage.sql, this.encounters)
     this.prescriptions = new PrescriptionRepository(ctx.storage.sql, this.encounters)
     this.draftAssistance = new DraftAssistanceRepository(ctx.storage.sql, this.completion, this.diagnosis, this.clinicalNote, this.prescriptions)
-    this.copilotReads = new CopilotReadModel(this.encounters, this.examinations, this.investigations, this.consultation)
+    this.copilotReads = new CopilotReadModel(this.encounters, this.examinations, this.investigations, this.consultation, this.clinicalNote)
     this.turnTimeoutMs = millis(env.PATIENT_TURN_TIMEOUT_MS, 30_000)
     this.expiryGraceMs = millis(env.PATIENT_TURN_EXPIRY_GRACE_MS, 5_000)
     ctx.blockConcurrencyWhile(async () => {
@@ -487,9 +487,15 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   // Copilot commands are writes on the Encounter's session: refused once it is frozen, and audited once done.
-  authorizeCopilotCommand(encounterId: string): { ok: true; practitionerId: string } | Refusal {
-    const active = this.encounters.requireActive(encounterId)
-    return active.ok ? { ok: true, practitionerId: DEMO_PRACTITIONER_ID } : active
+  authorizeCopilotCommand(
+    encounterId: string,
+    mentions: readonly CopilotMention[] = [],
+  ): { ok: true; practitionerId: string; noteMentions: CopilotNoteMention[] } | Refusal {
+    return this.ctx.storage.transactionSync(() => {
+      const active = this.encounters.requireActive(encounterId)
+      if (!active.ok) return active
+      return { ok: true, practitionerId: DEMO_PRACTITIONER_ID, noteMentions: this.copilotReads.noteMentions(encounterId, mentions) }
+    })
   }
 
   // Returns the refusal when the Encounter froze before the audit landed, so a caller that answers 201 on
