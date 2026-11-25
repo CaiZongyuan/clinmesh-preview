@@ -17,6 +17,7 @@ interface ClinicalNoteContextValue {
   changes: Partial<Record<DraftAction['module'], DraftChange>>
   pending: boolean
   assistanceLoaded: boolean
+  refreshAssistance(): Promise<void>
   propose(action: DraftAction, protect?: boolean): void
   acceptSuggestion(suggestion: DraftSuggestion): void
   dismissSuggestion(id: string): void
@@ -84,6 +85,15 @@ export function ClinicalNoteProvider({ encounter, children }: { encounter: Encou
     return current.finally(() => setPendingCount((count) => count - 1))
   }
 
+  const refreshAssistance = () => {
+    if (!encounter) return Promise.resolve()
+    const refreshed = mutations.current.then(async () => {
+      setAssistance(await fetchDraftAssistance(encounter.encounterId))
+    })
+    mutations.current = refreshed.catch(() => {})
+    return refreshed
+  }
+
   const propose = (action: DraftAction, protect = false) => {
     const focusedModule = document.activeElement?.closest('[data-draft-module]')?.getAttribute('data-draft-module')
     const id = crypto.randomUUID()
@@ -115,7 +125,7 @@ export function ClinicalNoteProvider({ encounter, children }: { encounter: Encou
       } })
     }).catch((error: unknown) => toaster.error(error instanceof Error ? error.message : '建议处理失败。'))
   }
-  const value = { note, writable, quote, assistance, changes, pending: pendingCount > 0, assistanceLoaded, propose, dismissSuggestion, acceptSuggestion }
+  const value = { note, writable, quote, assistance, changes, pending: pendingCount > 0, assistanceLoaded, refreshAssistance, propose, dismissSuggestion, acceptSuggestion }
   return (
     <ClinicalNoteContext.Provider value={value}>
       {children}

@@ -15,7 +15,8 @@ export function useClinicalDrafts(encounterId: string) {
   const jobs = useRef(Promise.resolve())
   const revision = useRef(0)
   const failures = useRef(new Set<DraftKind>())
-  const incoming = useClinicalNoteContext()?.changes
+  const assistance = useClinicalNoteContext()
+  const incoming = assistance?.changes
   const investigations = incoming?.investigations
   const prescriptions = incoming?.prescriptions
   useEffect(() => {
@@ -56,6 +57,7 @@ export function useClinicalDrafts(encounterId: string) {
       try {
         await saveClinicalDraft(encounterId, kind, entries)
         failures.current.delete(kind)
+        await assistance?.refreshAssistance().catch(() => {})
       } catch {
         failures.current.add(kind)
       } finally {

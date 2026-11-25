@@ -14,7 +14,7 @@ import { medication } from './medication-catalog'
 import type { PrescriptionRepository } from './prescription-repository'
 
 type Status = 'pending' | 'applied' | 'accepted' | 'dismissed'
-type ProposalRow = { id: string; run_id: string | null; action_json: string; label: string; status: Status; undo_json: string | null }
+type ProposalRow = { id: string; run_id: string | null; action_json: string; label: string; status: Status; undo_json: string | null; assistant_attribution: number }
 type Undo = { note: string } | { entry: string }
 type Refusal = { ok: false; error: EncounterError }
 export type DraftAssistanceResult = { ok: true; result: DraftAssistanceResponse } | Refusal
@@ -44,13 +44,26 @@ export class DraftAssistanceRepository {
     return Object.fromEntries(rows.map((row) => [row.run_id, row.count]))
   }
 
+  stopRun(encounterId: string, runId: string): void {
+    this.sql.exec('INSERT OR IGNORE INTO copilot_draft_stop (encounter_id, run_id) VALUES (?, ?)', encounterId, runId)
+  }
+
+  removeAttribution(encounterId: string, module: DraftModule, itemIds: string[]): void {
+    if (!itemIds.length) return
+    this.sql.exec(
+      `UPDATE copilot_draft_proposal SET assistant_attribution = 0 WHERE encounter_id = ? AND assistant_attribution = 1
+       AND json_extract(action_json, '$.module') = ? AND json_extract(action_json, '$.itemId') IN (SELECT value FROM json_each(?))`,
+      encounterId, module, JSON.stringify(itemIds),
+    )
+  }
+
   touch(encounterId: string, module: DraftModule): void {
     this.sql.exec('INSERT OR IGNORE INTO doctor_draft_touch (encounter_id, module) VALUES (?, ?)', encounterId, module)
   }
 
   view(encounterId: string): DraftAssistance {
     const rows = this.sql.exec<ProposalRow>(
-      "SELECT id, run_id, action_json, label, status, undo_json FROM copilot_draft_proposal WHERE encounter_id = ? AND status IN ('pending', 'applied') ORDER BY rowid",
+      "SELECT id, run_id, action_json, label, status, undo_json, assistant_attribution FROM copilot_draft_proposal WHERE encounter_id = ? AND (status = 'pending' OR assistant_attribution = 1) ORDER BY rowid",
       encounterId,
     ).toArray()
     const suggestions: DraftSuggestion[] = []
@@ -58,7 +71,7 @@ export class DraftAssistanceRepository {
     for (const row of rows) {
       const action = JSON.parse(row.action_json) as DraftAction
       if (row.status === 'pending') suggestions.push({ id: row.id, runId: row.run_id, action, label: row.label })
-      else if (action.module !== 'note' && !assistantItems[action.module].includes(action.itemId)) assistantItems[action.module].push(action.itemId)
+      else if (row.assistant_attribution && action.module !== 'note' && !assistantItems[action.module].includes(action.itemId)) assistantItems[action.module].push(action.itemId)
     }
     const touched = this.sql.exec<{ module: DraftModule }>('SELECT module FROM doctor_draft_touch WHERE encounter_id = ?', encounterId)
       .toArray().map((row) => row.module)
@@ -70,13 +83,18 @@ export class DraftAssistanceRepository {
     const encounterId = encounter.encounterId
     const row = this.find(encounterId, command.id)
     if (command.command === 'propose') {
+      if (command.runId !== null && this.sql.exec(
+        'SELECT 1 FROM copilot_draft_stop WHERE encounter_id = ? AND run_id = ?', encounterId, command.runId,
+      ).toArray().length) {
+        return { ok: false, error: { code: 'copilot-run-stopped', message: '该轮临床助手已停止，未继续写入草稿。' } }
+      }
       if (row) return this.response(encounterId, row.status === 'pending' ? 'suggestion' : 'unchanged')
       const { action } = command
       const label = this.label(action)
       if (!label) return unavailable()
       const protectedDraft = action.module === 'note'
         ? this.currentNote(encounterId, action.section)?.lastEditedBy === 'doctor'
-        : this.view(encounterId).touched.includes(action.module)
+        : this.doctorTouched(encounterId, action.module)
       if (command.protect || protectedDraft) {
         this.insert(encounterId, command, label, 'pending')
         return this.response(encounterId, 'suggestion')
@@ -114,6 +132,19 @@ export class DraftAssistanceRepository {
       case 'diagnosis': return ICD_CATALOG.find((item) => item.code === action.itemId)?.name
       case 'prescriptions': return medication(action.itemId)?.name
     }
+  }
+
+  private doctorTouched(encounterId: string, module: DraftModule): boolean {
+    const assistance = this.view(encounterId)
+    if (assistance.touched.includes(module)) return true
+    if (module === 'diagnosis') {
+      const view = this.diagnosis.view(encounterId)
+      return view.ok && view.diagnosis.draft.some((entry) => entry.source === 'doctor')
+    }
+    const ids = module === 'investigations'
+      ? this.drafts.draft(encounterId, module)
+      : this.drafts.draft(encounterId, module).map((entry) => entry.drugId)
+    return ids.some((id) => !assistance.assistantItems[module].includes(id))
   }
 
   private currentNote(encounterId: string, section: Extract<DraftAction, { module: 'note' }>['section']) {
@@ -190,7 +221,7 @@ export class DraftAssistanceRepository {
 
   private find(encounterId: string, id: string): ProposalRow | undefined {
     return this.sql.exec<ProposalRow>(
-      'SELECT id, run_id, action_json, label, status, undo_json FROM copilot_draft_proposal WHERE encounter_id = ? AND id = ?',
+      'SELECT id, run_id, action_json, label, status, undo_json, assistant_attribution FROM copilot_draft_proposal WHERE encounter_id = ? AND id = ?',
       encounterId, id,
     ).toArray()[0]
   }
@@ -202,8 +233,8 @@ export class DraftAssistanceRepository {
 
   private insert(encounterId: string, c: Extract<DraftAssistanceCommand, { command: 'propose' }>, label: string, status: Status) {
     this.sql.exec(
-      'INSERT INTO copilot_draft_proposal (encounter_id, id, run_id, action_json, label, status) VALUES (?, ?, ?, ?, ?, ?)',
-      encounterId, c.id, c.runId, JSON.stringify(c.action), label, status,
+      'INSERT INTO copilot_draft_proposal (encounter_id, id, run_id, action_json, label, status, assistant_attribution) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      encounterId, c.id, c.runId, JSON.stringify(c.action), label, status, status === 'applied' && c.action.module !== 'note' ? 1 : 0,
     )
   }
 

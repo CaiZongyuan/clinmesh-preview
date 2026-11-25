@@ -66,6 +66,7 @@ const STATUS: Record<EncounterError['code'], number> = {
   'copilot-nothing-to-compact': 409,
   'copilot-llm-unavailable': 503,
   'copilot-bridge-required': 409,
+  'copilot-run-stopped': 409,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })
@@ -287,6 +288,16 @@ export function createFakeClinicApi({
       if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
       assistance.touch(encounterId, action === 'investigations/draft' ? 'investigations' : 'prescriptions')
       const next = { ...drafts, [action.split('/')[0]]: (body as { entries: unknown }).entries }
+      const assistant = assistance.view(encounterId).assistantItems
+      if (action === 'investigations/draft') {
+        assistant.investigations = assistant.investigations.filter((id) => next.investigations.includes(id))
+      } else {
+        assistant.prescriptions = assistant.prescriptions.filter((drugId) => {
+          const before = drafts.prescriptions.find((line) => line.drugId === drugId)
+          const after = next.prescriptions.find((line) => line.drugId === drugId)
+          return before && after && JSON.stringify(before) === JSON.stringify(after)
+        })
+      }
       draftsByEncounter.set(encounterId, next)
       return Response.json({ drafts: next })
     }

@@ -172,6 +172,7 @@ export type EncounterErrorCode =
   | 'copilot-nothing-to-compact'
   | 'copilot-llm-unavailable'
   | 'copilot-bridge-required'
+  | 'copilot-run-stopped'
 
 export interface EncounterError {
   code: EncounterErrorCode

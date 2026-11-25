@@ -211,6 +211,7 @@ const MIGRATIONS: readonly string[] = [
      label TEXT NOT NULL,
      status TEXT NOT NULL CHECK (status IN ('pending', 'applied', 'accepted', 'dismissed')),
      undo_json TEXT,
+     assistant_attribution INTEGER NOT NULL DEFAULT 0,
      PRIMARY KEY (encounter_id, id)
    );
    CREATE INDEX copilot_draft_proposal_by_run ON copilot_draft_proposal (encounter_id, run_id, status);
@@ -218,6 +219,15 @@ const MIGRATIONS: readonly string[] = [
      encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
      module TEXT NOT NULL,
      PRIMARY KEY (encounter_id, module)
+   );
+   INSERT INTO doctor_draft_touch (encounter_id, module)
+     SELECT encounter_id, kind FROM encounter_draft WHERE json_array_length(entries) > 0;
+   INSERT INTO doctor_draft_touch (encounter_id, module)
+     SELECT encounter_id, 'diagnosis' FROM diagnosis_draft WHERE json_array_length(entries) > 0;
+   CREATE TABLE copilot_draft_stop (
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     run_id TEXT NOT NULL,
+     PRIMARY KEY (encounter_id, run_id)
    );`,
 ]
 

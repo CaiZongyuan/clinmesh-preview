@@ -89,6 +89,7 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'copilot-nothing-to-compact': 409,
   'copilot-llm-unavailable': 503,
   'copilot-bridge-required': 409,
+  'copilot-run-stopped': 409,
 }
 
 type AppContext = Context<{ Bindings: Env }>

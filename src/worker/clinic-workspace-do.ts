@@ -201,6 +201,8 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
         return { ok: false, error: { code: 'catalog-item-not-found', message: '检查目录中未找到草稿项目。' } }
       }
       this.draftAssistance.touch(encounterId, 'investigations')
+      const removed = this.completion.draft(encounterId, 'investigations').filter((id) => !entries.includes(id))
+      this.draftAssistance.removeAttribution(encounterId, 'investigations', removed)
       this.completion.saveDraft(encounterId, 'investigations', entries)
       return { ok: true, drafts: this.completion.drafts(encounterId) }
     })
@@ -215,6 +217,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
         return { ok: false, error: { code: 'catalog-item-not-found', message: '药品目录中未找到处方草稿项目。' } }
       }
       this.draftAssistance.touch(encounterId, 'prescriptions')
+      const edited = this.completion.draft(encounterId, 'prescriptions').filter((previous) =>
+        !entries.some((entry) => entry.drugId === previous.drugId && entry.dose === previous.dose &&
+          entry.route === previous.route && entry.frequency === previous.frequency && entry.days === previous.days),
+      ).map((entry) => entry.drugId)
+      this.draftAssistance.removeAttribution(encounterId, 'prescriptions', edited)
       this.completion.saveDraft(encounterId, 'prescriptions', entries)
       return { ok: true, drafts: this.completion.drafts(encounterId) }
     })
@@ -275,7 +282,10 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   issueInvestigations(encounterId: string, catalogItemIds: string[]): InvestigationsResult {
     const result = this.ctx.storage.transactionSync(() => {
       const issued = this.investigations.issue(encounterId, catalogItemIds, DEMO_PRACTITIONER_ID, Date.now())
-      if (issued.ok) this.completion.issuedInvestigations(encounterId, catalogItemIds)
+      if (issued.ok) {
+        this.completion.issuedInvestigations(encounterId, catalogItemIds)
+        this.draftAssistance.removeAttribution(encounterId, 'investigations', catalogItemIds)
+      }
       return issued
     })
     if (result.ok) this.wakeReportAnalysis()
@@ -377,7 +387,10 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   issuePrescription(encounterId: string, lines: PrescriptionLineRequest[]): PrescriptionsResult {
     return this.ctx.storage.transactionSync(() => {
       const issued = this.prescriptions.issue(encounterId, lines, DEMO_PRACTITIONER_ID, new Date().toISOString())
-      if (issued.ok) this.completion.issuedPrescriptions(encounterId, lines)
+      if (issued.ok) {
+        this.completion.issuedPrescriptions(encounterId, lines)
+        this.draftAssistance.removeAttribution(encounterId, 'prescriptions', lines.map((line) => line.drugId))
+      }
       return issued
     })
   }
@@ -485,6 +498,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return this.ctx.storage.transactionSync(() => {
       const active = this.encounters.requireActive(encounterId)
       if (!active.ok) return active
+      if (eventType === 'copilot-stopped') this.draftAssistance.stopRun(encounterId, subject)
       this.encounters.audit(encounterId, eventType, DEMO_PRACTITIONER_ID, new Date().toISOString(), subject)
       return { ok: true, value: null }
     })
