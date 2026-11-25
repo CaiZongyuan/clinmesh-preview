@@ -83,6 +83,7 @@ function EncounterWorkspace({
   const diagnosis = useDiagnosis(encounter)
   const prescriptions = usePrescriptions(encounter, drafts)
   const note = useClinicalNoteContext()?.note
+  const assistantSections = Object.values(note?.authors ?? {}).filter((author) => author === 'assistant').length
   const [selectedTab, selectTab] = useState<ClinicalTab>(debrief ? 'debrief' : 'note')
   const gates = completionGates(
     diagnosis.view, investigations.investigations, prescriptions.view, note?.revisions.at(-1), drafts.drafts,
@@ -110,8 +111,9 @@ function EncounterWorkspace({
       )}
       <Tabs value={selectedTab === 'debrief' && !debrief ? 'note' : selectedTab} onValueChange={(value) => selectTab(value as ClinicalTab)} className="flex min-h-0 flex-1 flex-col">
         <TabsList aria-label="病例页签" className="flex flex-none gap-1 border-b px-2">
-          <TabsTab value="note" className={tab}>
+          <TabsTab value="note" className={tab} data-agent-note-updated={assistantSections > 0 || undefined}>
             病历记录
+            {assistantSections > 0 && <span className={`${badge} bg-info/10 text-info`}>助手 {assistantSections}</span>}
           </TabsTab>
           <TabsTab value="investigations" className={tab}>
             检验检查

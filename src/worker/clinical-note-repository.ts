@@ -41,13 +41,16 @@ export class ClinicalNoteRepository {
   }
 
   // Writes only the sections whose text changed, so each section keeps who last actually changed it.
-  saveDraft(encounterId: string, sections: Partial<NoteSections>, author: DraftAuthor, now: string): ClinicalNoteResult {
+  saveDraft(encounterId: string, sections: Partial<NoteSections>, authors: Partial<Record<NoteSection, DraftAuthor>>, now: string): ClinicalNoteResult {
     const active = this.encounters.requireActive(encounterId)
     if (!active.ok) return active
-    const current = new Map(this.sectionRows(encounterId).map((row) => [row.section, row.content]))
+    const current = new Map(this.sectionRows(encounterId).map((row) => [row.section, row]))
     for (const section of NOTE_SECTIONS) {
       const content = sections[section]
-      if (content === undefined || content === (current.get(section) ?? '')) continue
+      const existing = current.get(section)
+      const author = authors[section] ?? 'doctor'
+      if (content === undefined || content === (existing?.content ?? '')) continue
+      if (author === 'assistant' && existing?.last_edited_by === 'doctor') continue
       this.sql.exec(
         `INSERT INTO clinical_note_section (encounter_id, section, content, last_edited_by, updated_at) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (encounter_id, section) DO UPDATE

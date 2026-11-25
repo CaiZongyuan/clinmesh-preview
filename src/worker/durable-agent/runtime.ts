@@ -49,12 +49,14 @@ export interface ToolResult {
   // What the call looked at, in a few words, for the doctor reading the step.
   subject: string
   result: string
+  // How a bridged ui act ended: refused (`denied`) or turned into a Suggestion (`approval`).
+  outcome?: 'denied' | 'approval'
 }
 
 // A tool the runtime executes itself. Every tool an agent has today only reads.
 export interface AgentTool {
   spec: ToolSpec
-  execute(args: unknown, signal: AbortSignal): Promise<ToolResult>
+  execute(args: unknown, signal: AbortSignal, runId: string): Promise<ToolResult>
 }
 
 // Thrown by an agent's context builder to end the run without an error, e.g. once its Encounter has ended.
@@ -83,6 +85,10 @@ export interface AgentDefinition {
   // summarized messages compacted and writes its marker here). Called only when a run completed; the
   // returned events are appended to the log with the run's own closing event.
   settle?: (run: AgentRun, outcome: Extract<RunOutcome, { status: 'done' }>) => AgentEvent[]
+  // The earliest future time the host wants waking for (e.g. a pending ambient trigger countdown), folded
+  // into the runtime's own alarm schedule.
+  wakeHint?: () => number | null
+  startTool?: (run: AgentRun) => string | undefined
   // A run whose outcome another Durable Object must accept. Its reply stays `unsettled` (out of the context)
   // until `deliver` resolves true, and turns `void` when refused.
   settlement?: {
@@ -189,9 +195,14 @@ export class DurableAgentRuntime {
   ) {
     this.sql = ctx.storage.sql
     this.events = new EventLog(this.sql)
-    this.sockets = new SocketHub(ctx, this.events)
+    this.sockets = new SocketHub(ctx, this.events, () => void this.pump().catch(() => {}))
     this.outbox = new Outbox(this.sql)
     this.stallMs = positive(env.AGENT_STALL_TIMEOUT_MS, DEFAULT_STALL_MS)
+  }
+
+  // Runs whatever is claimable now (a bridge joining or a host wake can end a waiting period early).
+  wake(): Promise<void> {
+    return this.pump()
   }
 
   // Call inside the host's constructor transaction, before the agent's own migrations.
@@ -340,8 +351,12 @@ export class DurableAgentRuntime {
   }
 
   private nextWake(): number | null {
+    const hint = this.agent.wakeHint?.() ?? null
     const waiting = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_run WHERE status IN ('queued', 'running')`).one().n
-    return waiting > 0 ? Date.now() : this.outbox.nextAttemptAt()
+    const own = waiting > 0 ? Date.now() : this.outbox.nextAttemptAt()
+    if (own === null) return hint
+    if (hint === null) return own
+    return Math.min(own, hint)
   }
 
   private candidate(): RunRow | undefined {
@@ -463,6 +478,27 @@ export class DurableAgentRuntime {
       if (!llm.ok) {
         outcome = { status: 'failed', error: llm.reason, text: '' }
       } else {
+        const firstCallId = `start-${run.runId}`
+        const startTool = step === 0 ? this.agent.startTool?.(run) :
+          this.sql.exec<{ name: string }>(
+            'SELECT name FROM agent_tool_call WHERE run_id = ? AND call_id = ?', run.runId, firstCallId,
+          ).toArray()[0]?.name
+        if (step === 0 && startTool) {
+          this.beginStep(run.runId, step, null)
+          this.checkpointToolStep(run.runId, step++, {
+            text: '',
+            thinking: '',
+            toolCalls: [{ id: firstCallId, name: startTool, argumentsJson: '{}' }],
+            usage: { input: 0, output: 0 },
+          })
+        }
+        if (startTool) {
+          await this.runDispatchedTools(run.runId, signal)
+          const initialSnapshot = this.sql.exec<{ status: string }>(
+            'SELECT status FROM agent_tool_call WHERE run_id = ? AND call_id = ?', run.runId, firstCallId,
+          ).toArray()[0]
+          if (initialSnapshot?.status !== 'ok') throw new LlmError('protocol', 'The initial UI snapshot did not complete')
+        }
         outcome = { status: 'failed', error: 'too-many-steps', text: '' }
         for (; step < MAX_STEPS; step++) {
           await this.runDispatchedTools(run.runId, signal)
@@ -671,12 +707,12 @@ export class DurableAgentRuntime {
     for (const call of calls) {
       signal.throwIfAborted()
       if (this.agent.traceSteps) this.announce({ type: 'tool.started', runId, callId: call.call_id, name: call.name })
-      const outcome = await this.withIdleLimit(signal, (toolSignal) => this.executeTool(call, toolSignal))
+      const outcome = await this.withIdleLimit(signal, (toolSignal) => this.executeTool(runId, call, toolSignal))
       signal.throwIfAborted()
       const published = this.ctx.storage.transactionSync(() => {
         this.sql.exec(
-          `UPDATE agent_tool_call SET status = ?, subject = ?, result = ?, completed_at = ? WHERE id = ?`,
-          outcome.ok ? 'ok' : 'error', outcome.subject, outcome.result, Date.now(), call.id,
+          `UPDATE agent_tool_call SET status = ?, outcome = ?, subject = ?, result = ?, completed_at = ? WHERE id = ?`,
+          outcome.ok ? 'ok' : 'error', outcome.outcome ?? null, outcome.subject, outcome.result, Date.now(), call.id,
         )
         this.insertMessage(runId, { role: 'tool', toolCallId: call.call_id, content: outcome.result })
         return this.agent.traceSteps
@@ -702,7 +738,7 @@ export class DurableAgentRuntime {
     }
   }
 
-  private async executeTool(call: ToolCallRow, signal: AbortSignal): Promise<ToolResult> {
+  private async executeTool(runId: string, call: ToolCallRow, signal: AbortSignal): Promise<ToolResult> {
     const tool = this.agent.tools?.[call.name]
     if (!tool) return { ok: false, subject: call.name, result: `tool ${call.name} is not available` }
     let args: unknown
@@ -712,7 +748,7 @@ export class DurableAgentRuntime {
       return { ok: false, subject: call.name, result: `参数不是合法的 JSON：${call.arguments_json.slice(0, 200)}` }
     }
     try {
-      return await tool.execute(args, signal)
+      return await tool.execute(args, signal, runId)
     } catch (error) {
       if (signal.aborted) throw error
       console.error('tool failed', call.name, error)

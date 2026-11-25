@@ -39,6 +39,7 @@ type CallRow = {
   name: string
   arguments_json: string
   status: 'dispatched' | 'ok' | 'error' | 'cancelled'
+  outcome: 'denied' | 'approval' | null
   subject: string | null
   result: string | null
   dispatched_at: number
@@ -107,7 +108,9 @@ export function readSession(sql: SqlStorage): { turns: CopilotTurn[]; queued: Co
               subject: call.subject ?? call.name,
               args: parseArgs(call.arguments_json),
               result: call.result ?? (call.status === 'cancelled' ? '未执行：本轮已结束。' : ''),
-              state: call.status === 'dispatched' ? 'running' : call.status,
+              // A refused data-agent-confirm control shows as 被拦截; an act on a focused or doctor-edited
+              // target became a Suggestion awaiting the doctor's 采纳 / 不采用.
+              state: call.outcome ?? (call.status === 'dispatched' ? 'running' : call.status),
               dur: seconds(call.dispatched_at, call.completed_at),
             }),
           )

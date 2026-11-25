@@ -1,3 +1,4 @@
+import { NoteSuggestions } from './clinical-note/note-suggestions'
 import { Button } from '@ui-sdk/react/button'
 import { Dialog, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import { Select, SelectContent, SelectItem, SelectList, SelectTrigger, SelectValue } from '@ui-sdk/react/select'
@@ -188,6 +189,7 @@ function CopilotTurnView({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot
         </p>
       )}
       <TurnSteps turn={turn} />
+      <NoteSuggestions runId={turn.turnId} />
       {turn.steers.length > 0 && (
         <p className="m-0 text-xs text-muted-foreground">
           {turn.steers.map((steer) => `${steer.text}${steer.read ? '（已读）' : '（转为新一轮）'}`).join('、')}
@@ -557,6 +559,8 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-auto px-3.5 pt-3" role="log" aria-label="临床助手会话">
+            {encounter.status === 'active' && <AmbientCountdown copilot={copilot} />}
+            <div className="grid gap-2 empty:hidden mb-2"><NoteSuggestions /></div>
             {copilot.queued.length > 0 && (
               <p className="m-0 mb-2 text-xs text-muted-foreground">
                 排队中：{copilot.queued.map((item) => item.text).join('、')}
@@ -587,5 +591,27 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
         </>
       )}
     </aside>
+  )
+}
+
+function AmbientCountdown({ copilot }: { copilot: CopilotSession }) {
+  const countdown = copilot.countdown
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!countdown) return
+    const timer = setInterval(() => setNow(Date.now()), 100)
+    return () => clearInterval(timer)
+  }, [countdown])
+  if (!countdown) return null
+  const remaining = Math.min(1.2, Math.max(0, (Date.parse(countdown.fireAt) - now) / 1000))
+  return (
+    <section aria-label="自动分析倒计时" className="mb-2 rounded-md border border-info/40 bg-info/5 p-2 text-xs">
+      <div className="flex items-center gap-2">
+        <strong className="flex-1 text-info">即将分析 <span className="font-mono">{remaining.toFixed(1)}s</span></strong>
+        <Button className="h-7 px-2 text-xs" onClick={() => void copilot.flushCountdown(countdown.ref)}>立即</Button>
+        <Button className="h-7 px-2 text-xs" onClick={() => void copilot.skipCountdown(countdown.ref)}>跳过</Button>
+      </div>
+      <p className="m-0 text-muted-foreground">{countdown.text}</p>
+    </section>
   )
 }

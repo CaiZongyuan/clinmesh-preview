@@ -1,6 +1,7 @@
 import { BODY_SYSTEM_NAME, isBodySystem } from '../../shared/physical-examination'
 import type { AgentTool, ToolResult } from '../durable-agent/runtime'
 import type { CopilotRead, CopilotReadResult } from './copilot-reads'
+import { uiTools, type CopilotBridge, type ConfirmTargets } from './ui-bridge'
 
 export type ReadWorkspace = <R extends CopilotRead>(read: R) => Promise<CopilotReadResult<R['kind']>>
 
@@ -17,9 +18,11 @@ const text = (args: unknown, key: string): string | undefined => {
 }
 
 // The Clinical Copilot's whole tool set. Every tool reads what the doctor can see through the workspace's read
-// model; none reads Case Truth or changes a formal record. The UI bridge tools join in #14.
-export function copilotTools(read: ReadWorkspace): Record<string, AgentTool> {
+// model; none reads Case Truth or changes a formal record. ui_snapshot / ui_act run in the browser over the
+// ui-sdk bridge (#14) and stay subject to the same rules.
+export function copilotTools(read: ReadWorkspace, bridge?: CopilotBridge, confirm?: ConfirmTargets): Record<string, AgentTool> {
   return {
+    ...(bridge && confirm ? uiTools(bridge, confirm) : {}),
     read_encounter_state: {
       spec: {
         name: 'read_encounter_state',

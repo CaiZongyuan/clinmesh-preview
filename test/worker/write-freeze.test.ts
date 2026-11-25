@@ -87,6 +87,10 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
   'POST /api/encounters/:encounterId/copilot/config': ({ encounterId }) =>
     send('POST', `/api/encounters/${encounterId}/copilot/config`, { model: 'glm-5.3-flash', effort: 'low' }),
   'POST /api/encounters/:encounterId/copilot/compact': ({ encounterId }) => send('POST', `/api/encounters/${encounterId}/copilot/compact`),
+  'POST /api/encounters/:encounterId/copilot/triggers/:ref/flush': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/copilot/triggers/consultation:frozen/flush`),
+  'DELETE /api/encounters/:encounterId/copilot/triggers/:ref': ({ encounterId }) =>
+    send('DELETE', `/api/encounters/${encounterId}/copilot/triggers/consultation:frozen`),
 }
 
 // An Encounter with one released, unacknowledged Report, one pending Investigation, one failed patient reply

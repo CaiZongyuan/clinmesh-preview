@@ -53,6 +53,8 @@ export async function settled(encounterId: string, patientTurnId: string, timeou
 export interface PatientSocket {
   messages: ServerMessage[]
   raw: string[]
+  // The raw socket, for tests that answer the bridge role's calls.
+  ws: WebSocket
   waitFor(predicate: (messages: ServerMessage[]) => boolean, timeout?: number): Promise<void>
   close(): void
 }
@@ -72,6 +74,7 @@ export async function openPatientSocket(encounterId: string, afterSeq = 0): Prom
   const socket: PatientSocket = {
     messages,
     raw,
+    ws,
     waitFor: (predicate, timeout = 4000) =>
       vi.waitFor(() => expect(predicate(messages), JSON.stringify(messages)).toBe(true), { timeout, interval: 10 }),
     close: () => ws.close(),
@@ -85,7 +88,16 @@ export const eventsOf = (messages: ServerMessage[]) =>
 
 // The Clinical Copilot's socket speaks the same wire protocol as the patient's.
 export async function openCopilotSocket(encounterId: string, afterSeq = 0): Promise<PatientSocket> {
-  const response = await api(`/api/encounters/${encounterId}/copilot/socket`, { headers: { upgrade: 'websocket' } })
+  return openCopilotSocketAt(`/api/encounters/${encounterId}/copilot/socket`, afterSeq)
+}
+
+// The ui-sdk bridge socket: same DO, same wire, but the bridge role the ui tools' calls go to.
+export async function openCopilotBridgeSocket(encounterId: string): Promise<PatientSocket> {
+  return openCopilotSocketAt(`/api/encounters/${encounterId}/copilot/bridge`, 0)
+}
+
+async function openCopilotSocketAt(path: string, afterSeq: number): Promise<PatientSocket> {
+  const response = await api(path, { headers: { upgrade: 'websocket' } })
   expect(response.status).toBe(101)
   const ws = response.webSocket!
   const raw: string[] = []
@@ -99,6 +111,7 @@ export async function openCopilotSocket(encounterId: string, afterSeq = 0): Prom
   const socket: PatientSocket = {
     messages,
     raw,
+    ws,
     waitFor: (predicate, timeout = 4000) =>
       vi.waitFor(() => expect(predicate(messages), JSON.stringify(messages)).toBe(true), { timeout, interval: 10 }),
     close: () => ws.close(),

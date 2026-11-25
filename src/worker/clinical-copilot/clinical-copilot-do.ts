@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type { CopilotCompactResponse, CopilotContextView } from '../../shared/copilot-context'
 import type {
   CopilotConfigRequest,
+  CopilotCountdown,
   CopilotFeedback,
   CopilotModelSetting,
   CopilotPromptRequest,
@@ -24,6 +25,7 @@ import type { CopilotRead, CopilotReadResult } from './copilot-reads'
 type ReadWorkspace = <R extends CopilotRead>(request: R) => Promise<CopilotReadResult<R['kind']>>
 import { readSession, type CopilotTrigger } from './copilot-session'
 import { copilotTools } from './copilot-tools'
+import { type ConfirmTargets, confirmControls as uiConfirmControls } from './ui-bridge'
 
 // Append-only, recorded under component `copilot` in `agent_schema_migration`, after the runtime's own.
 const COPILOT_MIGRATIONS: readonly string[] = [
@@ -48,7 +50,27 @@ const COPILOT_MIGRATIONS: readonly string[] = [
      summary_seq INTEGER NOT NULL,
      created_at INTEGER NOT NULL
    );`,
+  // An ambient trigger counting down its debounce (~1.2s) before it becomes a run; a newer finalized turn
+  // flushes the pending one into the queue. Singleton, so only one countdown is ever visible.
+  `CREATE TABLE copilot_pending_trigger (
+     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+     ref TEXT NOT NULL,
+     text TEXT NOT NULL,
+     fire_at INTEGER NOT NULL
+   );
+   CREATE TABLE copilot_seen_trigger (ref TEXT PRIMARY KEY);
+   CREATE TABLE copilot_ended (singleton INTEGER PRIMARY KEY CHECK (singleton = 1));`,
+  // The formal (data-agent-confirm) controls from the latest ui_snapshot, so ui_act on one is refused here
+  // even after a recovery, before it can reach the browser.
+  `CREATE TABLE copilot_bridge_state (
+     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+     confirm_refs_json TEXT NOT NULL,
+     updated_at INTEGER NOT NULL
+   );`,
 ]
+
+// The ambient debounce between a finalized consultation turn and the automatic analysis.
+const COUNTDOWN_MS = 1_200
 
 export type CopilotResult<T> = { ok: true; value: T } | { ok: false; error: EncounterError }
 
@@ -75,7 +97,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     super(ctx, env)
     this.read = <R extends CopilotRead>(request: R): Promise<CopilotReadResult<R['kind']>> =>
       env.CLINIC_WORKSPACE.getByName(WORKSPACE_NAME).readForCopilot(this.encounterId(), request) as Promise<CopilotReadResult<R['kind']>>
-    const tools = copilotTools(this.read)
+    const tools = copilotTools(this.read, this.bridge(), this.confirmTargets())
     this.toolSpecs = Object.values(tools).map((tool) => tool.spec)
     const toolSpecs = this.toolSpecs
     const agent: AgentDefinition = {
@@ -139,6 +161,10 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
           summarized[0].seq, summarized[summarized.length - 1].seq, summarySeq, Date.now(),
         )
         return [{ type: 'session.updated', runId: null }]
+      },
+      wakeHint: () => this.pendingFireAt(),
+      startTool: (run) => {
+        if (run.kind !== 'compaction' && (run.kind === 'event' || this.runtime.sockets.bridgeConnected())) return 'ui_snapshot'
       },
     }
     this.runtime = new DurableAgentRuntime(ctx, env as unknown as LlmEnv, agent)
@@ -230,7 +256,135 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
 
   async snapshot(encounterId: string): Promise<CopilotSnapshot> {
     this.bind(encounterId)
-    return { seq: this.runtime.events.latestSeq(), model: this.modelSetting(), ...readSession(this.ctx.storage.sql) }
+    return {
+      seq: this.runtime.events.latestSeq(),
+      model: this.modelSetting(),
+      countdown: this.countdown(),
+      ...readSession(this.ctx.storage.sql),
+    }
+  }
+
+  // The workspace calls this when a consultation turn finalizes: the trigger waits ~1.2s (立即 / 跳过 in the
+  // session); a newer finalized turn flushes the pending one into the queue and replaces the countdown.
+  async triggerAnalysis(encounterId: string, trigger: { ref: string; text: string }): Promise<void> {
+    this.bind(encounterId)
+    // A frozen Encounter takes no ambient analysis; the workspace also stops any countdown at its freeze hook.
+    const state = await this.read({ kind: 'encounter-state' })
+    if (!state.ok || state.data.status !== 'active') return
+    const fireAt = Date.now() + COUNTDOWN_MS
+    const result = this.ctx.storage.transactionSync(() => {
+      const sql = this.ctx.storage.sql
+      if (sql.exec('SELECT 1 FROM copilot_ended').toArray().length) return null
+      const seen = sql.exec('INSERT OR IGNORE INTO copilot_seen_trigger (ref) VALUES (?)', trigger.ref).rowsWritten
+      if (!seen) return null
+      const pending = this.pending()
+      this.ctx.storage.sql.exec(
+        `INSERT INTO copilot_pending_trigger (singleton, ref, text, fire_at) VALUES (1, ?, ?, ?)
+         ON CONFLICT (singleton) DO UPDATE SET ref = excluded.ref, text = excluded.text, fire_at = excluded.fire_at`,
+        trigger.ref, trigger.text, fireAt,
+      )
+      return { previous: pending }
+    })
+    if (!result) return
+    this.runtime.announce({ type: 'session.updated', runId: null })
+    if (result.previous) await this.enqueueTrigger(result.previous)
+    else if (this.runtime.sockets.bridgeConnected()) {
+      const alarm = await this.ctx.storage.getAlarm()
+      if (alarm === null || alarm > fireAt) await this.ctx.storage.setAlarm(fireAt)
+    }
+  }
+
+  // 立即：the doctor pulls the countdown forward; idempotent once it has become a run.
+  async flushCountdown(encounterId: string, ref: string): Promise<CopilotResult<CopilotPromptResponse>> {
+    this.bind(encounterId)
+    const pending = this.ctx.storage.transactionSync(() => {
+      const row = this.pending()
+      if (!row || row.ref !== ref) return null
+      this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger')
+      return row
+    })
+    if (!pending) return { ok: true, value: { kind: 'run', turnId: '' } }
+    return this.enqueueTrigger(pending).then((response) => ({ ok: true as const, value: response }))
+  }
+
+  // 跳过：the trigger is discarded, not queued.
+  skipCountdown(encounterId: string, ref: string): CopilotResult<null> {
+    this.bind(encounterId)
+    const row = this.pending()
+    if (!row || row.ref !== ref) return { ok: false, error: notFound(ref) }
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger WHERE ref = ?', ref)
+      this.runtime.announce({ type: 'session.updated', runId: null })
+    })
+    return { ok: true, value: null }
+  }
+
+  // Fires due countdowns from the alarm: enqueues a run only when a bridge is connected, so no provider call
+  // is spent on a turn that cannot see the screen; otherwise the fire time slips until one joins.
+  async fireDueTriggers(): Promise<void> {
+    if (!this.runtime.sockets.bridgeConnected()) return
+    const due = this.ctx.storage.transactionSync(() => {
+      const row = this.pending()
+      if (!row || row.fire_at > Date.now()) return null
+      this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger')
+      return row
+    })
+    if (due) await this.enqueueTrigger(due)
+  }
+
+  private enqueueTrigger(trigger: { ref: string; text: string }): Promise<CopilotPromptResponse> {
+    const copilotTrigger: CopilotTrigger = { kind: 'event', text: trigger.text, mentions: [] }
+    return this.runtime
+      .enqueue({
+        kind: 'event',
+        externalRef: trigger.ref,
+        trigger: copilotTrigger,
+        deadlineAt: null,
+        subject: trigger.ref,
+        messages: [{ originRef: trigger.ref, message: { role: 'user', content: `${trigger.text}\n基于这一轮开始时的界面快照，把本次对话的信息更新到病历草稿中。可以使用 ui_act 写入草稿，医生正在编辑的字段会保留为建议。` } }],
+      })
+      .then(({ runId }) => ({ kind: 'run' as const, turnId: runId }))
+  }
+
+  private pending(): { ref: string; text: string; fire_at: number } | null {
+    return this.ctx.storage.sql
+      .exec<{ ref: string; text: string; fire_at: number }>('SELECT ref, text, fire_at FROM copilot_pending_trigger')
+      .toArray()[0] ?? null
+  }
+
+  private countdown(): CopilotCountdown | null {
+    const row = this.pending()
+    return row && { ref: row.ref, text: row.text, fireAt: new Date(row.fire_at).toISOString() }
+  }
+
+  private pendingFireAt(): number | null {
+    return this.runtime.sockets.bridgeConnected() ? this.pending()?.fire_at ?? null : null
+  }
+
+  private bridge() {
+    return {
+      connected: () => this.runtime.sockets.bridgeConnected(),
+      call: (tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal, runId: string) => this.runtime.sockets.callBridge(tool, args, signal, runId),
+    }
+  }
+
+  private confirmTargets(): ConfirmTargets {
+    const sql = () => this.ctx.storage.sql
+    return {
+      record(snapshotJson: string): number {
+        const controls = uiConfirmControls(snapshotJson)
+        sql().exec(
+          `INSERT INTO copilot_bridge_state (singleton, confirm_refs_json, updated_at) VALUES (1, ?, ?)
+           ON CONFLICT (singleton) DO UPDATE SET confirm_refs_json = excluded.confirm_refs_json, updated_at = excluded.updated_at`,
+          JSON.stringify(controls), Date.now(),
+        )
+        return controls.length
+      },
+      all() {
+        const row = sql().exec<{ confirm_refs_json: string }>('SELECT confirm_refs_json FROM copilot_bridge_state').toArray()[0]
+        return row ? (JSON.parse(row.confirm_refs_json) as { ref: string; label: string }[]) : []
+      },
+    }
   }
 
   // Queued after anything running, or, as a steer, read by the running turn before its next step.
@@ -290,6 +444,11 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   // A frozen Encounter takes no late analysis. Running and queued turns close stopped.
   freeze(encounterId: string): void {
     this.bind(encounterId)
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec('INSERT OR IGNORE INTO copilot_ended VALUES (1)')
+      this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger')
+      this.runtime.announce({ type: 'session.updated', runId: null })
+    })
     this.runtime.halt('encounter-ended')
   }
 
@@ -343,6 +502,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     await this.runtime.onAlarm()
+    await this.fireDueTriggers()
   }
 
   private bind(encounterId: string): void {

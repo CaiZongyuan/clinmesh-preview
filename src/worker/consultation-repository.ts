@@ -141,6 +141,12 @@ export class ConsultationRepository {
     return row && toTurn(row)
   }
 
+  // The doctor turn a patient reply answers, for the Copilot's ambient trigger.
+  doctorTurnOf(patientTurnId: string): ConsultationTurn | undefined {
+    const reply = this.find(patientTurnId)
+    return reply?.replyTo ? this.find(reply.replyTo) : undefined
+  }
+
   private insertReplyAttempt(encounterId: string, doctorTurnId: string, attempt: number, now: Date, deadline: Date): ConsultationTurn {
     const turnId = crypto.randomUUID()
     this.sql.exec(

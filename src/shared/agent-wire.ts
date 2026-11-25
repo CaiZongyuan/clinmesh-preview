@@ -28,7 +28,9 @@ export type AgentEvent =
   // Something about the session itself changed (e.g. its model, a reply's feedback, an edited prompt).
   | { type: 'session.updated'; runId: null }
 
-export type ClientMessage = { type: 'hello'; afterSeq: number }
+// Commands go over HTTP; a socket streams the agent's events (viewer) or serves the ui-sdk bridge (bridge).
+// A bridge socket receives `bridge.call` for the agent's ui_snapshot / ui_act tools and answers `bridge.result`.
+export type ClientMessage = { type: 'hello'; afterSeq: number } | { type: 'bridge.result'; callId: string; ok: boolean; result: string; outcome?: 'suggestion' | 'denied' }
 
 export type ServerMessage =
   | { type: 'event'; seq: number; event: AgentEvent }
@@ -36,3 +38,5 @@ export type ServerMessage =
   | { type: 'replay.done'; seq: number }
   // The client is ahead of the server's log (its state was reset): reload the snapshot and say hello from 0.
   | { type: 'resync' }
+  | { type: 'bridge.call'; callId: string; runId: string; tool: 'ui_snapshot' | 'ui_act'; args: unknown }
+  | { type: 'bridge.cancel'; callId: string }

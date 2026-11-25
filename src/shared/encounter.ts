@@ -121,6 +121,8 @@ export type AuditEventType =
   | 'copilot-feedback-given'
   | 'copilot-model-changed'
   | 'copilot-compacted'
+  | 'copilot-trigger-flushed'
+  | 'copilot-trigger-skipped'
 
 export interface AuditEvent {
   eventType: AuditEventType
