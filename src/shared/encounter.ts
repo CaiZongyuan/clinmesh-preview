@@ -107,6 +107,7 @@ export type AuditEventType =
   | 'consultation-question-asked'
   | 'patient-reply-retried'
   | 'clinical-note-signed'
+  | 'diagnosis-confirmed'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -140,6 +141,8 @@ export type EncounterErrorCode =
   | 'patient-turn-pending'
   | 'patient-turn-not-retryable'
   | 'clinical-note-incomplete'
+  | 'diagnosis-needs-primary'
+  | 'diagnosis-not-confirmed'
 
 export interface EncounterError {
   code: EncounterErrorCode

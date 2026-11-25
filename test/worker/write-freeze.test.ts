@@ -1,6 +1,7 @@
 import { exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 import type { ClinicalNoteResponse } from '../../src/shared/clinical-note'
+import type { DiagnosisResponse } from '../../src/shared/diagnosis'
 import type { AuditEventsResponse, EncounterResponse, ErrorResponse } from '../../src/shared/encounter'
 import type { InvestigationsResponse } from '../../src/shared/investigation'
 import type { PhysicalExaminationsResponse } from '../../src/shared/physical-examination'
@@ -53,6 +54,12 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
     send('PATCH', `/api/encounters/${encounterId}/clinical-note/draft`, { sections: { plan: '72 小时复诊。' } }),
   'POST /api/encounters/:encounterId/clinical-note/revisions': ({ encounterId }) =>
     send('POST', `/api/encounters/${encounterId}/clinical-note/revisions`, { sections: SIGNABLE_NOTE }),
+  'PUT /api/encounters/:encounterId/diagnosis/draft': ({ encounterId }) =>
+    send('PUT', `/api/encounters/${encounterId}/diagnosis/draft`, { entries: [{ code: 'I10', primary: true, source: 'doctor' }] }),
+  'POST /api/encounters/:encounterId/diagnosis/revisions': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/diagnosis/revisions`, { entries: [{ code: 'I10', primary: true, source: 'doctor' }] }),
+  'POST /api/encounters/:encounterId/diagnosis/reopen': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/diagnosis/reopen`),
 }
 
 // An Encounter with one released, unacknowledged Report, one pending Investigation, one failed patient reply
@@ -68,6 +75,13 @@ async function frozenEncounter(): Promise<FrozenEncounter> {
   const failed = await settled(encounterId, (await asked(encounterId, '您哪里不舒服？')).patientTurn.turnId)
   await send('POST', `/api/encounters/${encounterId}/clinical-note/revisions`, { sections: SIGNABLE_NOTE })
   await send('PATCH', `/api/encounters/${encounterId}/clinical-note/draft`, { sections: { assessment: '待查。' } })
+  await send('POST', `/api/encounters/${encounterId}/diagnosis/revisions`, {
+    entries: [
+      { code: 'I10', primary: true, source: 'doctor' },
+      { code: 'E11.9', primary: false, source: 'doctor' },
+    ],
+  })
+  await send('POST', `/api/encounters/${encounterId}/diagnosis/reopen`)
   await send('POST', `/api/encounters/${encounterId}/abandonment`)
   return {
     encounterId,
@@ -99,12 +113,15 @@ describe('frozen Encounters', () => {
         .investigations,
       consultation: await transcript(encounterId),
       note: ((await (await api(`/api/encounters/${encounterId}/clinical-note`)).json()) as ClinicalNoteResponse).note,
+      diagnosis: ((await (await api(`/api/encounters/${encounterId}/diagnosis`)).json()) as DiagnosisResponse).diagnosis,
     })
     const frozen = await read()
     expect(frozen.encounter.status).toBe('abandoned')
     expect(frozen.investigations.map((i) => i.reports.length)).toEqual([1, 0])
     expect(frozen.note.revisions).toHaveLength(1)
     expect(frozen.note.draft.find((d) => d.section === 'assessment')?.content).toBe('待查。')
+    expect(frozen.diagnosis.draft).toHaveLength(2)
+    expect(frozen.diagnosis.revisions).toHaveLength(1)
 
     for (const [route, probe] of Object.entries(writeProbes)) {
       const response = await probe(frozenIds)
