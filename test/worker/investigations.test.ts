@@ -491,7 +491,9 @@ describe('Report Acknowledgement', () => {
 })
 
 describe('Report amendments', () => {
-  const amendment = (catalogItem: string) => casePack.cases[0].reportAmendments.find((a) => a.catalogItem === catalogItem)!
+  type PackAmendment = { reason: string; textOverride?: { findings: string; impression: string } }
+  const amendment = (catalogItem: string) =>
+    casePack.cases[0].reportAmendments.find((a) => a.catalogItem === catalogItem) as PackAmendment
 
   it('publishes a scripted amendment as a new version with its correction reason at its scripted time', async () => {
     const encounterId = await startEncounter()

@@ -2,7 +2,7 @@
   "id": "clinmesh-preview-outpatient-golden-cases",
   "name": "ClinMesh Preview 门诊 Golden Case",
   "nameEn": "ClinMesh Preview outpatient Golden Cases",
-  "version": "2026-11-25.1",
+  "version": "2026-11-25.2",
   "cases": [
     {
       "id": "golden-case-01",
@@ -48,7 +48,14 @@
         }
       ],
       "chronicConditions": [
-        { "id": "htn", "system": "http://hl7.org/fhir/sid/icd-10", "code": "I10", "display": "原发性高血压", "onset": "2014", "status": "规律服药，控制可" }
+        {
+          "id": "htn",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "I10",
+          "display": "原发性高血压",
+          "onset": "2014",
+          "status": "规律服药，控制可"
+        }
       ],
       "visibleHistory": [
         {
@@ -57,10 +64,22 @@
           "department": "全科医学科",
           "reasonText": "高血压复诊",
           "conditions": [
-            { "id": "htn", "system": "http://hl7.org/fhir/sid/icd-10", "code": "I10", "display": "原发性高血压", "note": "2014 年起病，规律服药，控制可。" }
+            {
+              "id": "htn",
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "I10",
+              "display": "原发性高血压",
+              "note": "2014 年起病，规律服药，控制可。"
+            }
           ],
           "medications": [
-            { "id": "amlodipine", "system": "urn:clinmesh:reference:drug-concept", "code": "CM-DRUG-AMLODIPINE-5MG-ORAL-TABLET", "display": "苯磺酸氨氯地平片", "dosageText": "5 mg 每日一次 口服" }
+            {
+              "id": "amlodipine",
+              "system": "urn:clinmesh:reference:drug-concept",
+              "code": "CM-DRUG-AMLODIPINE-5MG-ORAL-TABLET",
+              "display": "苯磺酸氨氯地平片",
+              "dosageText": "5 mg 每日一次 口服"
+            }
           ],
           "observations": []
         },
@@ -70,7 +89,12 @@
           "department": "全科医学科",
           "reasonText": "咽痛流涕 2 天",
           "conditions": [
-            { "id": "urti", "system": "http://hl7.org/fhir/sid/icd-10", "code": "J06.9", "display": "急性上呼吸道感染" }
+            {
+              "id": "urti",
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "J06.9",
+              "display": "急性上呼吸道感染"
+            }
           ],
           "medications": [],
           "observations": []
@@ -81,7 +105,13 @@
           "department": "急诊科",
           "reasonText": "注射青霉素后呼吸困难、血压下降",
           "conditions": [
-            { "id": "drug-anaphylaxis", "system": "http://hl7.org/fhir/sid/icd-10", "code": "T88.6", "display": "药物过敏性休克", "note": "肾上腺素抢救后好转。" }
+            {
+              "id": "drug-anaphylaxis",
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "T88.6",
+              "display": "药物过敏性休克",
+              "note": "肾上腺素抢救后好转。"
+            }
           ],
           "medications": [],
           "observations": []
@@ -104,9 +134,25 @@
         }
       },
       "indexConditions": [
-        { "id": "cap", "system": "http://hl7.org/fhir/sid/icd-10", "code": "J18.9", "display": "社区获得性肺炎", "note": "右下叶；CURB-65 0 分（尿素未测），可门诊治疗。" },
-        { "id": "htn", "system": "http://hl7.org/fhir/sid/icd-10", "code": "I10", "display": "原发性高血压" },
-        { "id": "penicillin-allergy", "system": "http://hl7.org/fhir/sid/icd-10", "code": "Z88.0", "display": "青霉素过敏个人史" }
+        {
+          "id": "cap",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "J18.9",
+          "display": "社区获得性肺炎",
+          "note": "右下叶；CURB-65 0 分（尿素未测），可门诊治疗。"
+        },
+        {
+          "id": "htn",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "I10",
+          "display": "原发性高血压"
+        },
+        {
+          "id": "penicillin-allergy",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "Z88.0",
+          "display": "青霉素过敏个人史"
+        }
       ],
       "physicalExamination": {
         "vitals": {
@@ -126,74 +172,203 @@
       },
       "laboratories": [
         {
-          "id": "cbc-wbc", "catalogItem": "cbc",
+          "id": "cbc-wbc",
+          "catalogItem": "cbc",
           "codings": [
-            { "code": "0100101A", "display": "白细胞计数", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
-            { "code": "6690-2", "display": "Leukocytes [#/volume] in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" }
+            {
+              "code": "0100101A",
+              "display": "白细胞计数",
+              "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026",
+              "version": "2026"
+            },
+            {
+              "code": "6690-2",
+              "display": "Leukocytes [#/volume] in Blood by Automated count",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
           ],
-          "value": 14.2, "unit": "10*9/L", "unitDisplay": "×10⁹/L", "interpretation": "H",
-          "referenceRange": { "low": 3.5, "high": 9.5, "text": "3.5–9.5" }
+          "value": 14.2,
+          "unit": "10*9/L",
+          "unitDisplay": "×10⁹/L",
+          "interpretation": "H",
+          "referenceRange": {
+            "low": 3.5,
+            "high": 9.5,
+            "text": "3.5–9.5"
+          }
         },
         {
-          "id": "cbc-neut-pct", "catalogItem": "cbc",
-          "codings": [ { "code": "770-8", "display": "Neutrophils/100 leukocytes in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" } ],
-          "value": 86.1, "unit": "%", "interpretation": "H",
-          "referenceRange": { "low": 40, "high": 75, "text": "40–75" }
-        },
-        {
-          "id": "cbc-lym-pct", "catalogItem": "cbc",
-          "codings": [ { "code": "736-9", "display": "Lymphocytes/100 leukocytes in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" } ],
-          "value": 9.2, "unit": "%", "interpretation": "L",
-          "referenceRange": { "low": 20, "high": 50, "text": "20–50" }
-        },
-        {
-          "id": "cbc-rbc", "catalogItem": "cbc",
+          "id": "cbc-neut-pct",
+          "catalogItem": "cbc",
           "codings": [
-            { "code": "0100201A", "display": "红细胞计数", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
-            { "code": "789-8", "display": "Erythrocytes [#/volume] in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" }
+            {
+              "code": "770-8",
+              "display": "Neutrophils/100 leukocytes in Blood by Automated count",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
           ],
-          "value": 4.82, "unit": "10*12/L", "unitDisplay": "×10¹²/L", "interpretation": "N",
-          "referenceRange": { "low": 4.3, "high": 5.8, "text": "4.3–5.8" }
+          "value": 86.1,
+          "unit": "%",
+          "interpretation": "H",
+          "referenceRange": {
+            "low": 40,
+            "high": 75,
+            "text": "40–75"
+          }
         },
         {
-          "id": "cbc-hgb", "catalogItem": "cbc",
+          "id": "cbc-lym-pct",
+          "catalogItem": "cbc",
           "codings": [
-            { "code": "0100401A", "display": "血红蛋白测定", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
-            { "code": "718-7", "display": "Hemoglobin [Mass/volume] in Blood", "system": "http://loinc.org", "version": "2.83" }
+            {
+              "code": "736-9",
+              "display": "Lymphocytes/100 leukocytes in Blood by Automated count",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
           ],
-          "value": 142, "unit": "g/L", "interpretation": "N",
-          "referenceRange": { "low": 130, "high": 175, "text": "130–175" }
+          "value": 9.2,
+          "unit": "%",
+          "interpretation": "L",
+          "referenceRange": {
+            "low": 20,
+            "high": 50,
+            "text": "20–50"
+          }
         },
         {
-          "id": "cbc-plt", "catalogItem": "cbc",
+          "id": "cbc-rbc",
+          "catalogItem": "cbc",
           "codings": [
-            { "code": "0100301A", "display": "血小板计数", "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026", "version": "2026" },
-            { "code": "777-3", "display": "Platelets [#/volume] in Blood by Automated count", "system": "http://loinc.org", "version": "2.83" }
+            {
+              "code": "0100201A",
+              "display": "红细胞计数",
+              "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026",
+              "version": "2026"
+            },
+            {
+              "code": "789-8",
+              "display": "Erythrocytes [#/volume] in Blood by Automated count",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
           ],
-          "value": 236, "unit": "10*9/L", "unitDisplay": "×10⁹/L", "interpretation": "N",
-          "referenceRange": { "low": 125, "high": 350, "text": "125–350" }
+          "value": 4.82,
+          "unit": "10*12/L",
+          "unitDisplay": "×10¹²/L",
+          "interpretation": "N",
+          "referenceRange": {
+            "low": 4.3,
+            "high": 5.8,
+            "text": "4.3–5.8"
+          }
         },
         {
-          "id": "crp", "catalogItem": "crp",
-          "codings": [ { "code": "1988-5", "display": "C reactive protein [Mass/volume] in Serum or Plasma", "system": "http://loinc.org", "version": "2.83" } ],
-          "value": 86, "unit": "mg/L", "interpretation": "H",
-          "referenceRange": { "low": 0, "high": 8, "text": "0–8" }
+          "id": "cbc-hgb",
+          "catalogItem": "cbc",
+          "codings": [
+            {
+              "code": "0100401A",
+              "display": "血红蛋白测定",
+              "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026",
+              "version": "2026"
+            },
+            {
+              "code": "718-7",
+              "display": "Hemoglobin [Mass/volume] in Blood",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": 142,
+          "unit": "g/L",
+          "interpretation": "N",
+          "referenceRange": {
+            "low": 130,
+            "high": 175,
+            "text": "130–175"
+          }
         },
         {
-          "id": "pct", "catalogItem": "pct",
-          "codings": [ { "code": "33959-8", "display": "Procalcitonin [Mass/volume] in Serum or Plasma", "system": "http://loinc.org", "version": "2.83" } ],
-          "value": 0.82, "unit": "ng/mL", "interpretation": "H",
-          "referenceRange": { "low": 0, "high": 0.05, "text": "0–0.05" }
+          "id": "cbc-plt",
+          "catalogItem": "cbc",
+          "codings": [
+            {
+              "code": "0100301A",
+              "display": "血小板计数",
+              "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026",
+              "version": "2026"
+            },
+            {
+              "code": "777-3",
+              "display": "Platelets [#/volume] in Blood by Automated count",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": 236,
+          "unit": "10*9/L",
+          "unitDisplay": "×10⁹/L",
+          "interpretation": "N",
+          "referenceRange": {
+            "low": 125,
+            "high": 350,
+            "text": "125–350"
+          }
+        },
+        {
+          "id": "crp",
+          "catalogItem": "crp",
+          "codings": [
+            {
+              "code": "1988-5",
+              "display": "C reactive protein [Mass/volume] in Serum or Plasma",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": 86,
+          "unit": "mg/L",
+          "interpretation": "H",
+          "referenceRange": {
+            "low": 0,
+            "high": 8,
+            "text": "0–8"
+          }
+        },
+        {
+          "id": "pct",
+          "catalogItem": "pct",
+          "codings": [
+            {
+              "code": "33959-8",
+              "display": "Procalcitonin [Mass/volume] in Serum or Plasma",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": 0.82,
+          "unit": "ng/mL",
+          "interpretation": "H",
+          "referenceRange": {
+            "low": 0,
+            "high": 0.05,
+            "text": "0–0.05"
+          }
         }
       ],
       "textResults": [
         {
-          "id": "cxr", "catalogItem": "cxr",
+          "id": "cxr",
+          "catalogItem": "cxr",
           "findings": "右肺下叶见斑片状实变影，边界模糊；左肺清晰；右肋膈角锐利，心影不大。",
           "impression": "右下肺炎。"
         },
         {
-          "id": "chest-ct", "catalogItem": "chest-ct",
+          "id": "chest-ct",
+          "catalogItem": "chest-ct",
           "findings": "右肺下叶后基底段大片状实变影，内见支气管充气征，周围少许磨玻璃影；纵隔淋巴结不大；双侧胸腔未见积液。",
           "impression": "右肺下叶肺炎。"
         }
@@ -204,16 +379,30 @@
           "releaseAfterSeconds": 120,
           "reason": "仪器复核后更正",
           "laboratoryOverrides": [
-            { "id": "cbc-wbc", "value": 15.0 },
-            { "id": "cbc-neut-pct", "value": 87.4 },
-            { "id": "cbc-lym-pct", "value": 8.8 }
+            {
+              "id": "cbc-wbc",
+              "value": 15.0
+            },
+            {
+              "id": "cbc-neut-pct",
+              "value": 87.4
+            },
+            {
+              "id": "cbc-lym-pct",
+              "value": 8.8
+            }
           ]
         },
         {
           "catalogItem": "crp",
           "releaseAfterSeconds": 150,
           "reason": "原标本溶血，复测更正",
-          "laboratoryOverrides": [ { "id": "crp", "value": 112 } ]
+          "laboratoryOverrides": [
+            {
+              "id": "crp",
+              "value": 112
+            }
+          ]
         },
         {
           "catalogItem": "cxr",
@@ -237,13 +426,222 @@
       }
     },
     {
+      "id": "golden-case-02",
+      "title": "病例② 急性胸痛（高危非 ST 段抬高型心肌梗死）",
+      "titleEn": "Case 2: Acute chest pain (high-risk NSTEMI)",
+      "recommendedEntry": "outpatient",
+      "indexDateTime": "2026-11-24T08:52:00+08:00",
+      "chiefComplaint": "间断胸骨后闷痛 6 小时，伴出汗、气促",
+      "patient": {
+        "id": "golden-patient-02",
+        "name": "陈志远",
+        "birthDate": "1959-09-15",
+        "gender": "male"
+      },
+      "registration": {
+        "queueNumber": 8,
+        "outpatientNumber": "20261124-0008",
+        "registeredAt": "2026-11-24T08:52:00+08:00",
+        "visitKind": "first",
+        "department": "全科医学科门诊",
+        "insurance": "城镇职工医保"
+      },
+      "triage": {
+        "level": 2,
+        "measuredAt": "2026-11-24T08:41:00+08:00",
+        "vitals": {
+          "temperatureCelsius": 36.5,
+          "pulseBpm": 90,
+          "respiratoryRatePerMin": 18,
+          "systolicMmHg": 154,
+          "diastolicMmHg": 88,
+          "spo2Percent": 97
+        }
+      },
+      "allergies": [],
+      "chronicConditions": [
+        {
+          "id": "htn",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "I10",
+          "display": "原发性高血压",
+          "onset": "2018",
+          "status": "规律服药，控制一般"
+        },
+        {
+          "id": "dyslipidemia",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "E78.5",
+          "display": "血脂异常",
+          "onset": "2023",
+          "status": "未规律服药"
+        }
+      ],
+      "visibleHistory": [
+        {
+          "id": "htn-lipids-2025",
+          "encounterDateTime": "2025-10-12T09:30:00+08:00",
+          "department": "全科医学科",
+          "reasonText": "高血压、血脂异常复诊",
+          "conditions": [
+            {
+              "id": "htn",
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "I10",
+              "display": "原发性高血压",
+              "note": "病史 8 年，平素口服降压药，血压控制一般。"
+            },
+            {
+              "id": "dyslipidemia",
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "E78.5",
+              "display": "血脂异常",
+              "note": "低密度脂蛋白胆固醇偏高，未规律服用降脂药。"
+            }
+          ],
+          "medications": [
+            {
+              "id": "amlodipine",
+              "system": "urn:clinmesh:reference:drug-concept",
+              "code": "CM-DRUG-AMLODIPINE-5MG-ORAL-TABLET",
+              "display": "苯磺酸氨氯地平片",
+              "dosageText": "5 mg 每日一次 口服"
+            }
+          ],
+          "observations": []
+        }
+      ],
+      "persona": {
+        "version": "golden-case-02-persona-v1",
+        "content": {
+          "chiefComplaint": "从今天凌晨开始胸口一阵阵发闷发紧，到现在六个小时了，有时还出汗。",
+          "openingStatement": "医生，我今天凌晨起胸口一阵阵发闷、发紧，刚才走来医院又有点冒汗。",
+          "knownHistorySummary": "高血压八年，一直吃氨氯地平；血脂也偏高几年，降脂药老是忘吃。没有药物过敏。",
+          "symptomExperience": "胸口中间压榨样闷痛，每次持续十来分钟，左肩膀和后背隐隐地跟着酸，歇一会儿能轻一点，可过一阵又来。没有晕倒，也没有咳血。",
+          "medicationMemory": "每天早上吃一片氨氯地平；最近没吃阿司匹林，也没吃止痛药。",
+          "persona": {
+            "character": "略焦虑但配合",
+            "speechStyle": "条理清晰，回答简短",
+            "healthLiteracy": "普通",
+            "attitude": "希望尽快查明原因并配合诊治"
+          }
+        }
+      },
+      "indexConditions": [
+        {
+          "id": "nstemi",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "I21.4",
+          "display": "急性非ST段抬高型心肌梗死",
+          "note": "高危：前壁 ST 段压低伴高敏肌钙蛋白 I 明显升高并动态上升。"
+        },
+        {
+          "id": "cad",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "I25.103",
+          "display": "冠状动脉粥样硬化性心脏病"
+        },
+        {
+          "id": "htn",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "I10",
+          "display": "原发性高血压"
+        },
+        {
+          "id": "dyslipidemia",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "E78.5",
+          "display": "血脂异常"
+        }
+      ],
+      "physicalExamination": {
+        "vitals": {
+          "temperatureCelsius": 36.9,
+          "pulseBpm": 96,
+          "respiratoryRatePerMin": 21,
+          "systolicMmHg": 150,
+          "diastolicMmHg": 92,
+          "spo2Percent": 96,
+          "spo2Condition": "未吸氧"
+        },
+        "general": "神志清，面容略显焦虑，对答切题，出汗较多",
+        "pharynx": "咽部无充血，扁桃体不大",
+        "lungs": "双肺呼吸音清，未闻及干湿性啰音",
+        "heart": "心界不大，心率 96 次/分，心律齐，各瓣膜听诊区未闻及病理性杂音",
+        "abdomen": "腹软，无压痛及反跳痛，肝脾肋下未及"
+      },
+      "laboratories": [
+        {
+          "id": "hs-ctni",
+          "catalogItem": "hs-ctni",
+          "codings": [
+            {
+              "code": "2100404B",
+              "display": "高敏心肌肌钙蛋白I测定",
+              "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026",
+              "version": "2026"
+            },
+            {
+              "code": "89579-7",
+              "display": "Troponin I.cardiac [Mass/volume] High Sensitivity",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": 0.68,
+          "unit": "ng/mL",
+          "interpretation": "H",
+          "referenceRange": {
+            "high": 0.034,
+            "text": "≤0.034"
+          }
+        }
+      ],
+      "textResults": [
+        {
+          "id": "ecg-initial",
+          "catalogItem": "ecg",
+          "findings": "窦性心律，心室率 96 次/分；PR 间期 0.16 s，QRS 时限 0.09 s，QTc 0.43 s；V2–V5 导联 ST 段水平型压低 0.15–0.20 mV，伴 T 波倒置；未见 ST 段抬高。",
+          "impression": "窦性心律，前壁导联 ST 段压低伴 T 波倒置，考虑急性心肌缺血，未见 ST 段抬高。"
+        }
+      ],
+      "reportAmendments": [
+        {
+          "catalogItem": "hs-ctni",
+          "releaseAfterSeconds": 120,
+          "reason": "复检危急值复核更正",
+          "laboratoryOverrides": [
+            {
+              "id": "hs-ctni",
+              "value": 1.45
+            }
+          ]
+        }
+      ],
+      "debriefReference": {
+        "primaryDiagnosis": "I21.4 急性非 ST 段抬高型心肌梗死（前壁）",
+        "secondaryDiagnoses": "冠状动脉粥样硬化性心脏病；原发性高血压；血脂异常",
+        "keyInvestigations": "心电图与高敏肌钙蛋白动态复查",
+        "keyExamination": "心界不大，心律齐；双肺呼吸音清",
+        "medicationConclusion": "抗血小板与他汀等规范化药物治疗，住院评估血运重建",
+        "keyHistoryQuestions": "胸痛性质、持续时间与放射部位；高血压及血脂异常史",
+        "severityAssessment": "高危：前壁导联缺血样改变伴高敏肌钙蛋白 I 升高",
+        "disposition": "急转上级医院胸痛中心住院，收住 CCU 评估冠脉造影"
+      }
+    },
+    {
       "id": "golden-case-04",
       "title": "病例④ 病毒性上呼吸道感染（自限性）",
       "titleEn": "Case 4: Viral upper respiratory infection (self-limiting)",
       "recommendedEntry": "outpatient",
       "indexDateTime": "2026-11-24T09:12:00+08:00",
       "chiefComplaint": "鼻塞、流涕、咽痛 3 天",
-      "patient": { "id": "golden-patient-04", "name": "王雅琴", "birthDate": "1992-07-14", "gender": "female" },
+      "patient": {
+        "id": "golden-patient-04",
+        "name": "王雅琴",
+        "birthDate": "1992-07-14",
+        "gender": "female"
+      },
       "registration": {
         "queueNumber": 10,
         "outpatientNumber": "20261124-0010",
@@ -273,7 +671,12 @@
           "department": "全科医学科",
           "reasonText": "咽痛、流涕 2 天",
           "conditions": [
-            { "id": "urti", "system": "http://hl7.org/fhir/sid/icd-10", "code": "J06.9", "display": "急性上呼吸道感染" }
+            {
+              "id": "urti",
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "J06.9",
+              "display": "急性上呼吸道感染"
+            }
           ],
           "medications": [],
           "observations": []
@@ -287,7 +690,12 @@
           "knownHistorySummary": "平时身体不错，没有慢性病，也不过敏。前两天着凉了，办公室好几个同事都感冒了。",
           "symptomExperience": "鼻子堵得厉害，一直流清鼻涕，嗓子干疼，浑身有点酸。自己量体温，三十七度多一点。不喘，咳嗽也很少。",
           "medicationMemory": "这几天没吃药，就是多喝水、多休息，想着扛一扛。",
-          "persona": { "character": "开朗、话不多", "speechStyle": "口语化，回答简短", "healthLiteracy": "普通", "attitude": "配合，想知道要不要吃点药" }
+          "persona": {
+            "character": "开朗、话不多",
+            "speechStyle": "口语化，回答简短",
+            "healthLiteracy": "普通",
+            "attitude": "配合，想知道要不要吃点药"
+          }
         }
       },
       "indexConditions": [

@@ -24,6 +24,7 @@ const DIAGNOSIS_TOKENS: Record<string, readonly string[]> = {
   // ICD catalog and Case 1's visible history already carry them to the browser, and plain "病毒" appears
   // in the investigation catalog's influenza-antigen narrative, which is clinic reference data.
   'golden-case-04': ['病毒性', '自限'],
+  'golden-case-02': ['心肌梗死', '梗死', 'nstemi', 'i21'],
 }
 
 // Which catalog item a result belongs to is not Case Truth; the result is.

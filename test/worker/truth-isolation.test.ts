@@ -62,8 +62,9 @@ const releasedResults = (catalogItems: readonly string[]) => {
 }
 
 // The scripted amendments a released Report v2 legitimately shows for these catalog items of Golden Case 1.
+type PackAmendment = { reason: string; textOverride?: { findings: string; impression: string } }
 const releasedAmendments = (catalogItems: readonly string[]) =>
-  casePack.cases[0].reportAmendments.filter((a) => catalogItems.includes(a.catalogItem))
+  casePack.cases[0].reportAmendments.filter((a) => catalogItems.includes(a.catalogItem)) as PackAmendment[]
 
 const request = (method: string, path: string, body?: unknown) =>
   exports.default.fetch(`http://clinmesh.test${path}`, {
@@ -274,6 +275,7 @@ describe('Golden Case snapshot', () => {
   // Readings a case may legitimately share between triage and the vitals Physical Examination.
   const SAME_AT_TRIAGE_AND_EXAMINATION: Record<string, readonly string[]> = {
     'golden-case-01': [],
+    'golden-case-02': [],
   }
 
   // Triage is measured before the doctor examines the patient; reusing an examination reading would show

@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
-import { COMPLETION_GATE_LABELS, completionGates, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
+import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
 import type { AuditEventType, EncounterError, EncounterView } from '../shared/encounter'
 import type { CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
 import { CopilotReadModel } from './copilot-read-model'
@@ -178,6 +178,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
         investigations,
         examinations: examinations.examinations,
         prescriptions: prescriptions.prescriptions,
+        dispositionRecorded: dispositionRecorded(signedNote.sections.plan ?? ''),
       },
     }
   }

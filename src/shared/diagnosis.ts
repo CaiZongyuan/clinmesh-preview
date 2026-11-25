@@ -74,6 +74,8 @@ export const ICD_CATALOG: readonly IcdEntry[] = [
   { code: 'J03.9', name: '急性扁桃体炎', pinyin: ['jxbtty'] },
   { code: 'H10.9', name: '结膜炎', pinyin: ['jmy'] },
   { code: 'Z88.0', name: '青霉素过敏个人史', pinyin: ['qmsgm'] },
+  { code: 'I21.4', name: '急性非ST段抬高型心肌梗死', pinyin: ['jxfstdgtxxgs', 'xxgs', 'nstemi'] },
+  { code: 'I25.103', name: '冠状动脉粥样硬化性心脏病', pinyin: ['gzdmzyyhzxzb', 'gxb', 'xzb'] },
 ]
 
 // The diagnoses an outpatient clinic reaches for most; each adds in one click.

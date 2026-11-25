@@ -19,7 +19,7 @@ export const goldenCase1QueueEntry: GoldenCaseQueueEntry = {
 export const goldenCase1Chart = {
   caseId: 'golden-case-01',
   caseVersion: casePack.version,
-  personaVersion: casePack.cases[0].persona.version,
+  personaVersion: casePack.cases.find((c) => c.id === 'golden-case-01')!.persona.version,
   practitionerId: 'demo-practitioner',
   patient: {
     name: '李建国',
