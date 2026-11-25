@@ -252,6 +252,21 @@ export class DurableAgentRuntime {
     return { kind: 'run', runId }
   }
 
+  // Freezes the whole session: the running run stops with `reason` and every queued run closes stopped. The
+  // Encounter calls this once it ends (abandonment today; completion hooks in the same way), so no turn may
+  // still run or finish with a late reply after the Encounter is frozen.
+  halt(reason: StopReason): void {
+    const running = this.ctx.storage.transactionSync(() => {
+      const queued = this.sql.exec<RunRow>(`SELECT * FROM agent_run WHERE status = 'queued'`).toArray()
+      const published = queued.flatMap((row) => this.close(toRun(row), { status: 'stopped', reason, text: '' }, null))
+      const active = this.sql.exec<{ run_id: string }>(`SELECT run_id FROM agent_run WHERE status = 'running'`).toArray()[0]
+      if (active) this.requestStop(active.run_id, reason)
+      this.publish(published)
+      return active?.run_id ?? null
+    })
+    if (running) this.abortActive(running, reason)
+  }
+
   // Stops the running run: its remaining steps are cancelled, what it already did stays. Queued runs go on.
   stop(): string | null {
     const runId = this.ctx.storage.transactionSync(() => {
@@ -423,6 +438,15 @@ export class DurableAgentRuntime {
     const deltas = new DeltaBuffer(run.runId, (event) => this.publish([this.events.append(event)]))
     const usage: RunUsage = { input: 0, output: 0, reasoning: 0, cached: 0, estimatedInput: 0 }
     let step = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_step WHERE run_id = ?`, run.runId).one().n
+    // A run recovered after a crash restarts past its committed tool steps, whose usage is already durable; keep
+    // counting from there instead of from zero, or the closed run under-reports what its LLM calls cost.
+    for (const row of this.sql
+      .exec<{ usage_json: string }>(`SELECT usage_json FROM agent_step WHERE run_id = ? AND usage_json IS NOT NULL`, run.runId)
+      .toArray()) {
+      const committed = JSON.parse(row.usage_json) as { input: number; output: number }
+      usage.input += committed.input
+      usage.output += committed.output
+    }
     let text = ''
     let thinking = ''
     let outcome: RunOutcome

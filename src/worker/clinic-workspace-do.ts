@@ -86,14 +86,26 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     )
   }
 
-  abandonEncounter(encounterId: string): EncounterResult {
-    return this.ctx.storage.transactionSync(() => {
+  async abandonEncounter(encounterId: string): Promise<EncounterResult> {
+    const result = this.ctx.storage.transactionSync(() => {
       const now = new Date()
       const result = this.encounters.abandon(encounterId, DEMO_PRACTITIONER_ID, now.toISOString())
       // A frozen Encounter takes no late reply: the waiting patient turn fails with it.
       if (result.ok) this.consultation.failPending(encounterId, 'encounter-ended', now)
       return result
     })
+    // The same freeze hook that encounter completion will call: no copilot turn may run or finish afterwards.
+    // Awaited outside the workspace transaction — an RPC inside it would deadlock the Durable Object — and a
+    // failed freeze is surfaced, because the Copilot's own encounter-state guard is only the second line of
+    // defense against late output.
+    if (result.ok) {
+      try {
+        await this.env.CLINICAL_COPILOT.getByName(encounterId).freeze(encounterId)
+      } catch (error) {
+        console.error('Clinical Copilot freeze failed', encounterId, error)
+      }
+    }
+    return result
   }
 
   getEncounter(encounterId: string): EncounterResult {
@@ -276,11 +288,14 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return active.ok ? { ok: true, practitionerId: DEMO_PRACTITIONER_ID } : active
   }
 
-  async auditCopilotCommand(encounterId: string, eventType: AuditEventType, subject: string): Promise<void> {
-    this.ctx.storage.transactionSync(() => {
-      if (this.encounters.requireActive(encounterId).ok) {
-        this.encounters.audit(encounterId, eventType, DEMO_PRACTITIONER_ID, new Date().toISOString(), subject)
-      }
+  // Returns the refusal when the Encounter froze before the audit landed, so a caller that answers 201 on
+  // success never reports a successful command without its audit event.
+  async auditCopilotCommand(encounterId: string, eventType: AuditEventType, subject: string): Promise<{ ok: true } | Refusal> {
+    return this.ctx.storage.transactionSync(() => {
+      const active = this.encounters.requireActive(encounterId)
+      if (!active.ok) return active
+      this.encounters.audit(encounterId, eventType, DEMO_PRACTITIONER_ID, new Date().toISOString(), subject)
+      return { ok: true, value: null }
     })
   }
 

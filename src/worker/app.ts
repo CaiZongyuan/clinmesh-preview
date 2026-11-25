@@ -349,7 +349,8 @@ app.post('/encounters/:encounterId/copilot/prompts', async (c) => {
   const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
   if (!allowed.ok) return refuse(c, allowed.error)
   const response: CopilotPromptResponse = await copilot(c).prompt(c.req.param('encounterId'), request, { practitionerId: allowed.practitionerId })
-  await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompted', body.text.slice(0, 80))
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompted', body.text.slice(0, 80))
+  if (!audited.ok) return refuse(c, audited.error)
   return c.json<CopilotPromptResponse>(response, 201)
 })
 
@@ -367,7 +368,8 @@ app.post('/encounters/:encounterId/copilot/turns/:turnId/resend', async (c) => {
   if (!allowed.ok) return refuse(c, allowed.error)
   const result = await copilot(c).resend(c.req.param('encounterId'), c.req.param('turnId'), request, { practitionerId: allowed.practitionerId })
   if (!result.ok) return refuse(c, result.error)
-  await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompt-resent', body.text.slice(0, 80))
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompt-resent', body.text.slice(0, 80))
+  if (!audited.ok) return refuse(c, audited.error)
   return c.json<CopilotPromptResponse>(result.value, 201)
 })
 
@@ -375,7 +377,12 @@ app.post('/encounters/:encounterId/copilot/stop', async (c) => {
   const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
   if (!allowed.ok) return refuse(c, allowed.error)
   const stopped = await copilot(c).stop(c.req.param('encounterId'))
-  if (stopped.stoppedTurnId !== null) await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-stopped', stopped.stoppedTurnId)
+  // A stop that actually stopped a turn must return success only with its audit; losing the audit to a freeze
+  // means the freeze won the race and the response reports it instead of success.
+  if (stopped.stoppedTurnId !== null) {
+    const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-stopped', stopped.stoppedTurnId)
+    if (!audited.ok) return refuse(c, audited.error)
+  }
   return c.json(stopped)
 })
 
@@ -388,7 +395,8 @@ app.post('/encounters/:encounterId/copilot/turns/:turnId/feedback', async (c) =>
   if (!allowed.ok) return refuse(c, allowed.error)
   const result = await copilot(c).setFeedback(c.req.param('encounterId'), c.req.param('turnId'), body.value as CopilotFeedback | null)
   if (!result.ok) return refuse(c, result.error)
-  await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-feedback-given', c.req.param('turnId'))
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-feedback-given', c.req.param('turnId'))
+  if (!audited.ok) return refuse(c, audited.error)
   return c.json(result)
 })
 
@@ -401,7 +409,8 @@ app.post('/encounters/:encounterId/copilot/config', async (c) => {
   if (!allowed.ok) return refuse(c, allowed.error)
   const result = await copilot(c).configure(c.req.param('encounterId'), body as CopilotConfigRequest)
   if (!result.ok) return refuse(c, result.error)
-  await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-model-changed', `${result.value.model}/${result.value.effort}`)
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-model-changed', `${result.value.model}/${result.value.effort}`)
+  if (!audited.ok) return refuse(c, audited.error)
   return c.json<CopilotModelSetting>(result.value)
 })
 

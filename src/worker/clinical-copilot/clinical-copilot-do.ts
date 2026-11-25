@@ -127,6 +127,13 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     return { ok: true, value: prompted }
   }
 
+  // Freeze hook for the Encounter's end (abandonment today; encounter completion can call the same hook): a
+  // frozen Encounter takes no late analysis, so the running turn stops and every queued prompt closes stopped.
+  freeze(encounterId: string): void {
+    this.bind(encounterId)
+    this.runtime.halt('encounter-ended')
+  }
+
   stop(encounterId: string): CopilotStopResponse {
     this.bind(encounterId)
     return { stoppedTurnId: this.runtime.stop() }
