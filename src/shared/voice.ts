@@ -49,3 +49,11 @@ export type VoiceTurnMessage =
 
 // Push-to-talk captures shorter than this are discarded as accidental taps.
 export const MIN_HOLD_MS = 600
+
+// POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/speech: Sambert speech for one reply
+// chunk (a sentence or a whole replayed turn). Turn text is well under this; the cap keeps one task bounded.
+export const SAMBERT_MAX_TEXT = 1_000
+
+export interface PatientSpeechRequest {
+  text: string
+}

@@ -21,6 +21,28 @@ export function clearScriptedParaformer(): void {
   scripted = null
 }
 
+// Same seam for the Sambert TTS upstream: Worker-seam tests run with `BAILIAN_UPSTREAM=scripted` and install a
+// fake DashScope TTS service here.
+let scriptedTts: ConnectUpstream | null = null
+
+export function installScriptedSambert(connect: ConnectUpstream): void {
+  scriptedTts = connect
+}
+
+export function clearScriptedSambert(): void {
+  scriptedTts = null
+}
+
+export function sambertUpstream(env: VoiceEnv): { token: string; connect: ConnectUpstream } | null {
+  const token = tokenOf(env)
+  if (!token) return null
+  if (env.BAILIAN_UPSTREAM !== 'scripted') return { token, connect: connectDashScope }
+  return {
+    token,
+    connect: (t) => (scriptedTts ? scriptedTts(t) : Promise.reject(new Error('No scripted Sambert service is installed'))),
+  }
+}
+
 export function paraformerUpstream(env: VoiceEnv): { token: string; connect: ConnectUpstream } | null {
   const token = tokenOf(env)
   if (!token) return null

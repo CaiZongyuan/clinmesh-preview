@@ -48,7 +48,9 @@ import type {
 import { prescriptionLines, type PrescriptionsResult } from './prescription-repository'
 import { medicationCatalog } from './medication-catalog'
 import type { VoiceConfigResponse } from '../shared/voice'
-import { recognizerFor } from './voice/voice-config'
+import { recognizerFor, sambertUpstream } from './voice/voice-config'
+import { SambertTTSProvider } from './voice/sambert-tts-provider'
+import { SAMBERT_MAX_TEXT, type PatientSpeechRequest } from '../shared/voice'
 
 import { WORKSPACE_NAME } from './workspace-name'
 
@@ -335,6 +337,31 @@ app.post('/encounters/:encounterId/consultation/doctor-turns', async (c) => {
 app.post('/encounters/:encounterId/consultation/patient-turns/:turnId/retry', async (c) => {
   const result = await workspace(c).retryPatientTurn(c.req.param('encounterId'), c.req.param('turnId'))
   return result.ok ? c.json<RetryPatientTurnResponse>({ patientTurn: result.patientTurn }, 201) : refuse(c, result.error)
+})
+
+// Sambert speech for one patient reply (a streamed sentence or a replayed turn): the repaired WAV bytes. Only
+// live Encounters serve speech, so a frozen Encounter's stale audio jobs stop at the source; aborted requests
+// tear down the upstream task through the same signal.
+app.post('/encounters/:encounterId/consultation/patient-turns/:turnId/speech', async (c) => {
+  const found = await workspace(c).getEncounter(c.req.param('encounterId'))
+  if (!found.ok) return refuse(c, found.error)
+  if (found.encounter.status !== 'active') {
+    return refuse(c, { code: 'encounter-not-active', message: '该就诊已结束，不再合成语音。' })
+  }
+  const body = (await c.req.json().catch(() => null)) as PatientSpeechRequest | null
+  if (typeof body?.text !== 'string' || !body.text.trim() || body.text.length > SAMBERT_MAX_TEXT) {
+    return refuse(c, { code: 'invalid-request', message: `请求体须为 { "text": string }，1–${SAMBERT_MAX_TEXT} 字` })
+  }
+  const consultation = await workspace(c).getConsultation(c.req.param('encounterId'))
+  const turn = consultation.ok ? consultation.turns.find((t) => t.turnId === c.req.param('turnId')) : undefined
+  if (turn?.speaker !== 'patient' || turn.status !== 'final') {
+    return refuse(c, { code: 'invalid-request', message: '只有已回答的患者回复可以合成语音。' })
+  }
+  const upstream = sambertUpstream(c.env as unknown as Record<string, unknown>)
+  if (!upstream) return refuse(c, { code: 'invalid-request', message: '未配置语音合成（BAILIAN_TOKEN）。' })
+  const wav = await new SambertTTSProvider(upstream).synthesize(body.text, c.req.raw.signal)
+  if (!wav) return refuse(c, { code: 'invalid-request', message: '语音合成失败，请重试。' })
+  return new Response(wav, { headers: { 'content-type': 'audio/wav', 'cache-control': 'no-store' } })
 })
 
 // Streams the Simulated Patient's replies for one Encounter (see src/shared/agent-wire.ts).

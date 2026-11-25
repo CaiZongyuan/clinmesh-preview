@@ -59,6 +59,8 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
     send('POST', `/api/encounters/${encounterId}/consultation/doctor-turns`, { clientTurnId: 'frozen', text: '还有哪里不舒服？' }),
   'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry': ({ encounterId, failedPatientTurnId }) =>
     send('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/retry`),
+  'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/speech': ({ encounterId, failedPatientTurnId }) =>
+    send('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/speech`, { text: '您好。' }),
   'PATCH /api/encounters/:encounterId/clinical-note/draft': ({ encounterId }) =>
     send('PATCH', `/api/encounters/${encounterId}/clinical-note/draft`, { sections: { plan: '72 小时复诊。' } }),
   'POST /api/encounters/:encounterId/clinical-note/revisions': ({ encounterId }) =>
