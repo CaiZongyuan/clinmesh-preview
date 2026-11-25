@@ -484,7 +484,7 @@ export class DurableAgentRuntime {
             'SELECT name FROM agent_tool_call WHERE run_id = ? AND call_id = ?', run.runId, firstCallId,
           ).toArray()[0]?.name
         if (step === 0 && startTool) {
-          this.beginStep(run.runId, step)
+          this.beginStep(run.runId, step, null)
           this.checkpointToolStep(run.runId, step++, {
             text: '',
             thinking: '',

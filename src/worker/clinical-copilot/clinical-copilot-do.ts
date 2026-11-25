@@ -163,7 +163,9 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
         return [{ type: 'session.updated', runId: null }]
       },
       wakeHint: () => this.pendingFireAt(),
-      startTool: (run) => run.kind === 'event' || this.runtime.sockets.bridgeConnected() ? 'ui_snapshot' : undefined,
+      startTool: (run) => {
+        if (run.kind !== 'compaction' && (run.kind === 'event' || this.runtime.sockets.bridgeConnected())) return 'ui_snapshot'
+      },
     }
     this.runtime = new DurableAgentRuntime(ctx, env as unknown as LlmEnv, agent)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
