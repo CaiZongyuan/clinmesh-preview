@@ -21,8 +21,8 @@ interface ClinicalNoteContextValue {
   propose(action: DraftAction, protect?: boolean): void
   acceptSuggestion(suggestion: DraftSuggestion): void
   dismissSuggestion(id: string): void
-  // Quotes words from the Consultation into a section, with a toast that offers undo.
   quote(section: NoteSection, text: string): void
+  insertCommonPhrase(section: NoteSection, text: string): void
 }
 
 const ClinicalNoteContext = createContext<ClinicalNoteContextValue | null>(null)
@@ -54,15 +54,22 @@ export function ClinicalNoteProvider({ encounter, children }: { encounter: Encou
   const [toaster] = useState(() => createToaster())
   useEffect(() => () => void toaster.dismiss(), [toaster])
 
-  const quote = (section: NoteSection, text: string) => {
+  const appendWithUndo = (section: NoteSection, text: string, source: 'quote' | 'common-phrase') => {
+    if (!writable) return
     toaster.dismiss()
     const undo = note.append(section, text)
+    const name = NOTE_SECTION_NAME[section]
     if (!undo) {
-      toaster.error(`「${NOTE_SECTION_NAME[section]}」引用后将超过 ${MAX_NOTE_SECTION_LENGTH} 字，未引用`)
+      toaster.error(source === 'quote'
+        ? `「${name}」引用后将超过 ${MAX_NOTE_SECTION_LENGTH} 字，未引用`
+        : `「${name}」插入常用语后将超过 ${MAX_NOTE_SECTION_LENGTH} 字，未插入`)
       return
     }
-    toaster(`已引用到「${NOTE_SECTION_NAME[section]}」`, { action: { label: '撤销引用', onAction: undo } })
+    const message = source === 'quote' ? `已引用到「${name}」` : `已向「${name}」插入常用语`
+    toaster(message, { action: { label: source === 'quote' ? '撤销引用' : '撤销常用语', onAction: undo } })
   }
+  const quote = (section: NoteSection, text: string) => appendWithUndo(section, text, 'quote')
+  const insertCommonPhrase = (section: NoteSection, text: string) => appendWithUndo(section, text, 'common-phrase')
 
   const mutate = (command: DraftAssistanceCommand, action?: DraftAction, signal?: AbortSignal) => {
     const section = action?.module === 'note' ? action.section : undefined
@@ -125,7 +132,7 @@ export function ClinicalNoteProvider({ encounter, children }: { encounter: Encou
       } })
     }).catch((error: unknown) => toaster.error(error instanceof Error ? error.message : '建议处理失败。'))
   }
-  const value = { note, writable, quote, assistance, changes, pending: pendingCount > 0, assistanceLoaded, refreshAssistance, propose, dismissSuggestion, acceptSuggestion }
+  const value = { note, writable, quote, insertCommonPhrase, assistance, changes, pending: pendingCount > 0, assistanceLoaded, refreshAssistance, propose, dismissSuggestion, acceptSuggestion }
   return (
     <ClinicalNoteContext.Provider value={value}>
       {children}

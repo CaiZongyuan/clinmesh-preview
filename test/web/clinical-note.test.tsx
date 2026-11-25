@@ -87,6 +87,23 @@ describe('Clinical Note Draft', () => {
     expect(field('既往史与过敏史')).toHaveValue('自述青霉素过敏；否认手术、外伤、输血史。')
   })
 
+  it('undoes an inserted common phrase and keeps the doctor’s other edits', async () => {
+    const { api, user } = await openNote()
+    const history = field('既往史与过敏史')
+    await user.type(history, '自述青霉素过敏')
+    await user.click(screen.getByRole('button', { name: '常用语：既往史与过敏史' }))
+    await user.click(await screen.findByRole('menuitem', { name: '否认手术、外伤、输血史。' }))
+    expect(history).toHaveValue('自述青霉素过敏；否认手术、外伤、输血史。')
+    const undo = await screen.findByRole('button', { name: '撤销常用语' })
+    expect(screen.getByText('已向「既往史与过敏史」插入常用语')).toBeInTheDocument()
+    await user.type(history, '另自述季节性鼻炎。')
+    await user.click(undo)
+    expect(history).toHaveValue('自述青霉素过敏另自述季节性鼻炎。')
+    await autosaved()
+    expect(api.note(ENCOUNTER).draft.find(({ section }) => section === 'past-history')?.content)
+      .toBe('自述青霉素过敏另自述季节性鼻炎。')
+  })
+
   it('autosaves after a pause with a visible 保存中 / 已自动保存 state, sending only changed sections, and survives a refresh', async () => {
     const { api, rendered, view, user } = await openNote()
     expect(saveStatus()).toHaveTextContent('')

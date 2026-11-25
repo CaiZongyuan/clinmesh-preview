@@ -68,7 +68,14 @@ export function ClinicalNoteTab({ encounter, diagnosisSeq }: { encounter: Encoun
           </p>
         )}
         {NOTE_SECTIONS.map((section) => (
-          <NoteSectionField key={section} section={section} note={note} writable={writable} propose={context.propose} />
+          <NoteSectionField
+            key={section}
+            section={section}
+            note={note}
+            writable={writable}
+            propose={context.propose}
+            insertCommonPhrase={context.insertCommonPhrase}
+          />
         ))}
       </section>
     </div>
@@ -102,8 +109,12 @@ function SaveStatus({ save, onRetry }: { save: SaveState; onRetry: () => void })
   )
 }
 
-function NoteSectionField({ section, note, writable, propose }: {
-  section: NoteSection; note: ClinicalNote; writable: boolean; propose: NonNullable<ReturnType<typeof useClinicalNoteContext>>['propose']
+function NoteSectionField({ section, note, writable, propose, insertCommonPhrase }: {
+  section: NoteSection
+  note: ClinicalNote
+  writable: boolean
+  propose: NonNullable<ReturnType<typeof useClinicalNoteContext>>['propose']
+  insertCommonPhrase(section: NoteSection, text: string): void
 }) {
   const name = NOTE_SECTION_NAME[section]
   const required = REQUIRED_NOTE_SECTIONS.includes(section)
@@ -146,7 +157,7 @@ function NoteSectionField({ section, note, writable, propose }: {
         className="w-full resize-y text-[13px] leading-relaxed"
       />
       <div className="flex items-center justify-between gap-2">
-        <Menu onAction={(phrase) => note.append(section, phrase)}>
+        <Menu onAction={(phrase) => insertCommonPhrase(section, phrase)}>
           <MenuTrigger
             aria-label={`常用语：${name}`}
             disabled={!writable}
