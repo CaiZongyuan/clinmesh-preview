@@ -2,7 +2,7 @@ import type { TranscriberSessionOptions } from 'agents/voice'
 import { describe, expect, it, vi } from 'vitest'
 import type { CaptureMode } from '../../src/shared/voice'
 import { ParaformerTranscriber, type RecognizedSpeech } from '../../src/worker/voice/paraformer-transcriber'
-import { pcm, sentence, serviceEvent, type RunTask } from './support/fake-paraformer'
+import { pcm, sentence, serviceEvent, wireBytes, type RunTask } from './support/fake-paraformer'
 
 // The DashScope end of one recognition task, driven step by step by the test.
 function fakeService() {
@@ -10,7 +10,7 @@ function fakeService() {
   const received: (RunTask | number)[] = []
   service.accept()
   service.addEventListener('message', (event) =>
-    received.push(typeof event.data === 'string' ? (JSON.parse(event.data) as RunTask) : (event.data as ArrayBuffer).byteLength),
+    received.push(typeof event.data === 'string' ? (JSON.parse(event.data) as RunTask) : wireBytes(event.data)),
   )
   let clientClosed = false
   client.addEventListener('close', () => (clientClosed = true))

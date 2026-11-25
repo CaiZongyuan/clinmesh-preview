@@ -5,6 +5,9 @@ export const BYTES_PER_MS = 32
 // `ms` of 16 kHz mono PCM16 silence.
 export const pcm = (ms: number) => new Uint8Array(ms * BYTES_PER_MS).buffer
 
+// Over a WebSocketPair inside one isolate, binary frames arrive as a Blob, so the byte count lives in `size`.
+export const wireBytes = (data: unknown) => (typeof data === 'string' ? 0 : ((data as Blob).size ?? 0))
+
 export interface ServiceEvent {
   header: { event: string; task_id?: string; error_code?: string; error_message?: string; attributes?: object }
   payload?: { output?: { sentence: Record<string, unknown> } }
@@ -72,7 +75,7 @@ export function installFakeParaformer(script: FakeParaformerScript = {}): { task
     service.accept()
     service.addEventListener('message', (event) => {
       if (typeof event.data !== 'string') {
-        const bytes = (event.data as ArrayBuffer).byteLength
+        const bytes = wireBytes(event.data)
         if (record.finished) record.audioAfterFinish += bytes
         else if (!started) record.audioBeforeStart += bytes
         record.audioBytes += bytes

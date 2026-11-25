@@ -129,12 +129,12 @@ class ParaformerSession implements TranscriberSession {
   }
 
   // Ends the task with `finish-task` and stops reporting; the socket closes once the service says the task finished.
+  // While still connecting, `started()` finishes the task once the service accepts it.
   close(): void {
     if (this.closed) return
     this.closed = true
     this.settleReady(new Error('The speech recognition session was closed'))
     if (this.state === 'started') this.finishTask()
-    else if (this.state !== 'finishing') this.disconnect()
   }
 
   private async open() {
@@ -189,7 +189,7 @@ class ParaformerSession implements TranscriberSession {
   }
 
   private started() {
-    if (this.state !== 'connecting') return
+    if (this.state !== 'connecting' || !this.socket) return
     clearTimeout(this.timer)
     this.state = 'started'
     for (const chunk of this.unsent) this.socket!.send(chunk)

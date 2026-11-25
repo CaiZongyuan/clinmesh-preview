@@ -38,6 +38,20 @@ async function copilotSocketFrames(encounterId: string): Promise<Response> {
   return new Response(socket.raw.join('\n'))
 }
 
+// The voice socket's own handshake frames (welcome, status, agent identity), which is all it sends unprompted.
+// After the Encounter ends the upgrade is refused, so the refusal body stands in for the frames.
+async function voiceSocketFrames(encounterId: string): Promise<Response> {
+  const response = await exports.default.fetch(`http://clinmesh.test/api/encounters/${encounterId}/voice`, { headers: { upgrade: 'websocket' } })
+  const ws = response.webSocket
+  if (!ws) return new Response(await response.text())
+  const frames: string[] = []
+  ws.addEventListener('message', (event) => frames.push(String(event.data)))
+  ws.accept()
+  await vi.waitFor(() => expect(frames.some((f) => f.includes('welcome'))).toBe(true))
+  ws.close()
+  return new Response(frames.join('\n'))
+}
+
 // The Case Truth results a released Report v1 legitimately shows for these catalog items of Golden Case 1.
 const releasedResults = (catalogItems: readonly string[]) => {
   const { laboratories, textResults } = casePack.cases[0]
@@ -107,6 +121,8 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'POST /api/encounters/:encounterId/report-acknowledgements': ({ encounterId, releasedReportId }) =>
     request('POST', `/api/encounters/${encounterId}/report-acknowledgements`, { reportIds: [releasedReportId] }),
   'GET /api/encounters/:encounterId/consultation': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/consultation`),
+  'GET /api/voice': () => request('GET', '/api/voice'),
+  'GET /api/encounters/:encounterId/voice': ({ encounterId }) => voiceSocketFrames(encounterId),
   'GET /api/encounters/:encounterId/patient/socket': ({ encounterId }) => patientSocketFrames(encounterId),
   'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry': ({ encounterId, failedPatientTurnId }) =>
     request('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/retry`),
