@@ -189,6 +189,7 @@ function CopilotTurnView({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot
         </p>
       )}
       <TurnSteps turn={turn} />
+      <NoteSuggestions runId={turn.turnId} />
       {turn.steers.length > 0 && (
         <p className="m-0 text-xs text-muted-foreground">
           {turn.steers.map((steer) => `${steer.text}${steer.read ? '（已读）' : '（转为新一轮）'}`).join('、')}

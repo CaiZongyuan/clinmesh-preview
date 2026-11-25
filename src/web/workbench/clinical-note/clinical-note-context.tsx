@@ -43,8 +43,8 @@ export function ClinicalNoteProvider({ encounter, children }: { encounter: Encou
   const dismissSuggestion = (id: string) => setSuggestions((list) => list.filter((item) => item.id !== id))
   const suggest = (section: NoteSection, text: string) => {
     const id = crypto.randomUUID()
-    setSuggestions((list) => [...list, { id, section, text }])
-    recordSuggestion(id)
+    const runId = recordSuggestion(id)
+    setSuggestions((list) => [...list, { id, section, text, runId }])
   }
   const acceptSuggestion = (suggestion: NoteSuggestion) => {
     if (!writable) return

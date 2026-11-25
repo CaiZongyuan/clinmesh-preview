@@ -4,14 +4,15 @@ import { useClinicalNoteContext } from './clinical-note-context'
 
 export interface NoteSuggestion {
   id: string
+  runId?: string
   section: NoteSection
   text: string
 }
 
-export function NoteSuggestions({ section }: { section?: NoteSection }) {
+export function NoteSuggestions({ section, runId }: { section?: NoteSection; runId?: string }) {
   const context = useClinicalNoteContext()
   if (!context?.writable) return null
-  const suggestions = context.suggestions.filter((suggestion) => section === undefined || suggestion.section === section)
+  const suggestions = context.suggestions.filter((suggestion) => section === undefined ? suggestion.runId === runId : suggestion.section === section)
   return suggestions.map((suggestion) => (
     <section key={suggestion.id} aria-label={`${section ? '字段' : '会话'}建议：${NOTE_SECTION_NAME[suggestion.section]}`}
       className="grid gap-1.5 rounded-md border border-dashed border-info/55 bg-info/5 p-2 text-xs">

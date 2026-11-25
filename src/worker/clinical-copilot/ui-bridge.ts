@@ -1,9 +1,9 @@
-import type { ToolResult } from '../durable-agent/runtime'
+import type { AgentTool } from '../durable-agent/runtime'
 import type { BridgeResult } from '../durable-agent/socket-hub'
 
 export interface CopilotBridge {
   connected(): boolean
-  call(tool: string, args: unknown, signal: AbortSignal): Promise<BridgeResult>
+  call(tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal, runId: string): Promise<BridgeResult>
 }
 
 // Where the latest ui_snapshot's formal (data-agent-confirm) controls are kept, so ui_act on one is refused
@@ -42,7 +42,7 @@ const DENIED = '被拦截：该按钮需要医生本人的临床确认（Clinica
 
 // The two bridged tools. Everything else the Copilot reads stays local; these are executed by the browser
 // through its ui-sdk bridge, and every call is checkpointed by the runtime like any other tool.
-export function uiTools(bridge: CopilotBridge, confirm: ConfirmTargets): Record<string, ToolSpecHolder> {
+export function uiTools(bridge: CopilotBridge, confirm: ConfirmTargets): Record<string, AgentTool> {
   return {
     ui_snapshot: {
       spec: {
@@ -51,8 +51,8 @@ export function uiTools(bridge: CopilotBridge, confirm: ConfirmTargets): Record<
           '读取医生当前界面上可操作组件的快照（含各组件的 ref、label、value 与可用操作，以及需医生本人确认的按钮）。每次写入草稿前必须先读取。',
         parameters: { type: 'object', properties: {}, additionalProperties: false },
       },
-      execute: async (_args, signal) => {
-        const res = await bridge.call('ui_snapshot', {}, signal)
+      execute: async (_args, signal, runId) => {
+        const res = await bridge.call('ui_snapshot', {}, signal, runId)
         if (!res.ok) return { ok: false, subject: '界面快照', result: res.result }
         const formal = confirm.record(res.result)
         return { ok: true, subject: `界面快照 · ${formal} 个正式按钮`, result: res.result }
@@ -79,12 +79,12 @@ export function uiTools(bridge: CopilotBridge, confirm: ConfirmTargets): Record<
           additionalProperties: false,
         },
       },
-      execute: async (args, signal) => {
+      execute: async (args, signal, runId) => {
         const targets = targetRefs(args)
         const formal = confirm.all()
         const blocked = targets.find((ref) => formal.some((c) => c.ref === ref || c.label === ref))
         if (blocked) return { ok: false, outcome: 'denied', subject: '被拦截（正式操作）', result: DENIED }
-        const res = await bridge.call('ui_act', args, signal)
+        const res = await bridge.call('ui_act', args, signal, runId)
         if (res.outcome === 'suggestion') return { ok: true, outcome: 'approval', subject: '转为建议（待医生采纳）', result: res.result }
         if (res.outcome === 'denied') return { ok: false, outcome: 'denied', subject: '被拦截（正式操作）', result: res.result }
         if (!res.ok) return { ok: false, subject: '界面操作', result: res.result }
@@ -93,5 +93,3 @@ export function uiTools(bridge: CopilotBridge, confirm: ConfirmTargets): Record<
     },
   }
 }
-
-type ToolSpecHolder = { spec: import('../llm/types').ToolSpec; execute(args: unknown, signal: AbortSignal): Promise<ToolResult> }

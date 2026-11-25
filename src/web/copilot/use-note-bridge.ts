@@ -44,7 +44,7 @@ function view(agent: Agent) {
 }
 
 export function useNoteBridge(encounterId: string | null) {
-  const active = useRef<{ suggestionIds: string[] } | null>(null)
+  const active = useRef<{ suggestionIds: string[]; runId: string | undefined } | null>(null)
 
   useEffect(() => {
     if (!encounterId) return
@@ -92,7 +92,7 @@ export function useNoteBridge(encounterId: string | null) {
         respond({ ok: false, outcome: 'denied', result: '被拦截：该操作需要医生本人的临床确认。' })
         return
       }
-      const recorded = { suggestionIds: [] as string[] }
+      const recorded = { suggestionIds: [] as string[], runId: message.runId }
       active.current = recorded
       denied = false
       try {
@@ -139,5 +139,8 @@ export function useNoteBridge(encounterId: string | null) {
     }
   }, [encounterId])
 
-  return (suggestionId: string) => active.current?.suggestionIds.push(suggestionId)
+  return (suggestionId: string) => {
+    active.current?.suggestionIds.push(suggestionId)
+    return active.current?.runId
+  }
 }

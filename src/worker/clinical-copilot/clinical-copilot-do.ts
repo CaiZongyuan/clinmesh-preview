@@ -57,7 +57,9 @@ const COPILOT_MIGRATIONS: readonly string[] = [
      ref TEXT NOT NULL,
      text TEXT NOT NULL,
      fire_at INTEGER NOT NULL
-   );`,
+   );
+   CREATE TABLE copilot_seen_trigger (ref TEXT PRIMARY KEY);
+   CREATE TABLE copilot_ended (singleton INTEGER PRIMARY KEY CHECK (singleton = 1));`,
   // The formal (data-agent-confirm) controls from the latest ui_snapshot, so ui_act on one is refused here
   // even after a recovery, before it can reach the browser.
   `CREATE TABLE copilot_bridge_state (
@@ -161,7 +163,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
         return [{ type: 'session.updated', runId: null }]
       },
       wakeHint: () => this.pendingFireAt(),
-      startTool: (run) => run.kind === 'event' ? 'ui_snapshot' : undefined,
+      startTool: (run) => run.kind === 'event' || this.runtime.sockets.bridgeConnected() ? 'ui_snapshot' : undefined,
     }
     this.runtime = new DurableAgentRuntime(ctx, env as unknown as LlmEnv, agent)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -268,18 +270,22 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     const state = await this.read({ kind: 'encounter-state' })
     if (!state.ok || state.data.status !== 'active') return
     const fireAt = Date.now() + COUNTDOWN_MS
-    const previous = this.ctx.storage.transactionSync(() => {
+    const result = this.ctx.storage.transactionSync(() => {
+      const sql = this.ctx.storage.sql
+      if (sql.exec('SELECT 1 FROM copilot_ended').toArray().length) return null
+      const seen = sql.exec('INSERT OR IGNORE INTO copilot_seen_trigger (ref) VALUES (?)', trigger.ref).rowsWritten
+      if (!seen) return null
       const pending = this.pending()
-      if (pending?.ref === trigger.ref) return null
       this.ctx.storage.sql.exec(
         `INSERT INTO copilot_pending_trigger (singleton, ref, text, fire_at) VALUES (1, ?, ?, ?)
          ON CONFLICT (singleton) DO UPDATE SET ref = excluded.ref, text = excluded.text, fire_at = excluded.fire_at`,
         trigger.ref, trigger.text, fireAt,
       )
-      return pending
+      return { previous: pending }
     })
+    if (!result) return
     this.runtime.announce({ type: 'session.updated', runId: null })
-    if (previous) await this.enqueueTrigger(previous)
+    if (result.previous) await this.enqueueTrigger(result.previous)
     else if (this.runtime.sockets.bridgeConnected()) {
       const alarm = await this.ctx.storage.getAlarm()
       if (alarm === null || alarm > fireAt) await this.ctx.storage.setAlarm(fireAt)
@@ -356,7 +362,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   private bridge() {
     return {
       connected: () => this.runtime.sockets.bridgeConnected(),
-      call: (tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal) => this.runtime.sockets.callBridge(tool, args, signal),
+      call: (tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal, runId: string) => this.runtime.sockets.callBridge(tool, args, signal, runId),
     }
   }
 
@@ -437,6 +443,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   freeze(encounterId: string): void {
     this.bind(encounterId)
     this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec('INSERT OR IGNORE INTO copilot_ended VALUES (1)')
       this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger')
       this.runtime.announce({ type: 'session.updated', runId: null })
     })

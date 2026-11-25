@@ -224,7 +224,7 @@
   opacity: 0.55;
 }
 
-[data-agent-draft] textarea {
+[data-agent-note-updated], [data-agent-draft] textarea {
   outline: 1px solid var(--info);
   outline-offset: 1px;
   animation: note-draft-halo 1.3s ease-out;
@@ -236,5 +236,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-agent-draft] textarea { animation: none; }
+  [data-agent-note-updated], [data-agent-draft] textarea { animation: none; }
 }

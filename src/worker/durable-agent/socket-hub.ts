@@ -56,7 +56,7 @@ export class SocketHub {
     return Boolean(this.bridge())
   }
 
-  callBridge(tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal): Promise<BridgeResult> {
+  callBridge(tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal, runId: string): Promise<BridgeResult> {
     const socket = this.bridge()
     if (!socket) return Promise.resolve({ ok: false, result: '助手界面未连接，请稍后重试或直接给出文字回答。' })
     if (signal.aborted) return Promise.resolve({ ok: false, result: '未执行：本轮已结束。' })
@@ -75,7 +75,7 @@ export class SocketHub {
       }), BRIDGE_CALL_TIMEOUT_MS)
       signal.addEventListener('abort', onAbort, { once: true })
       this.pending.set(callId, { socket, finish })
-      send(socket, { type: 'bridge.call', callId, tool, args })
+      send(socket, { type: 'bridge.call', callId, runId, tool, args })
     })
   }
 

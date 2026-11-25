@@ -56,7 +56,7 @@ export interface ToolResult {
 // A tool the runtime executes itself. Every tool an agent has today only reads.
 export interface AgentTool {
   spec: ToolSpec
-  execute(args: unknown, signal: AbortSignal): Promise<ToolResult>
+  execute(args: unknown, signal: AbortSignal, runId: string): Promise<ToolResult>
 }
 
 // Thrown by an agent's context builder to end the run without an error, e.g. once its Encounter has ended.
@@ -478,20 +478,24 @@ export class DurableAgentRuntime {
       if (!llm.ok) {
         outcome = { status: 'failed', error: llm.reason, text: '' }
       } else {
-        const startTool = this.agent.startTool?.(run)
+        const firstCallId = `start-${run.runId}`
+        const startTool = step === 0 ? this.agent.startTool?.(run) :
+          this.sql.exec<{ name: string }>(
+            'SELECT name FROM agent_tool_call WHERE run_id = ? AND call_id = ?', run.runId, firstCallId,
+          ).toArray()[0]?.name
         if (step === 0 && startTool) {
           this.beginStep(run.runId, step)
           this.checkpointToolStep(run.runId, step++, {
             text: '',
             thinking: '',
-            toolCalls: [{ id: crypto.randomUUID(), name: startTool, argumentsJson: '{}' }],
+            toolCalls: [{ id: firstCallId, name: startTool, argumentsJson: '{}' }],
             usage: { input: 0, output: 0 },
           })
         }
         if (startTool) {
           await this.runDispatchedTools(run.runId, signal)
           const initialSnapshot = this.sql.exec<{ status: string }>(
-            'SELECT status FROM agent_tool_call WHERE run_id = ? AND step = 0 AND name = ?', run.runId, startTool,
+            'SELECT status FROM agent_tool_call WHERE run_id = ? AND call_id = ?', run.runId, firstCallId,
           ).toArray()[0]
           if (initialSnapshot?.status !== 'ok') throw new LlmError('protocol', 'The initial UI snapshot did not complete')
         }
@@ -703,7 +707,7 @@ export class DurableAgentRuntime {
     for (const call of calls) {
       signal.throwIfAborted()
       if (this.agent.traceSteps) this.announce({ type: 'tool.started', runId, callId: call.call_id, name: call.name })
-      const outcome = await this.withIdleLimit(signal, (toolSignal) => this.executeTool(call, toolSignal))
+      const outcome = await this.withIdleLimit(signal, (toolSignal) => this.executeTool(runId, call, toolSignal))
       signal.throwIfAborted()
       const published = this.ctx.storage.transactionSync(() => {
         this.sql.exec(
@@ -734,7 +738,7 @@ export class DurableAgentRuntime {
     }
   }
 
-  private async executeTool(call: ToolCallRow, signal: AbortSignal): Promise<ToolResult> {
+  private async executeTool(runId: string, call: ToolCallRow, signal: AbortSignal): Promise<ToolResult> {
     const tool = this.agent.tools?.[call.name]
     if (!tool) return { ok: false, subject: call.name, result: `tool ${call.name} is not available` }
     let args: unknown
@@ -744,7 +748,7 @@ export class DurableAgentRuntime {
       return { ok: false, subject: call.name, result: `参数不是合法的 JSON：${call.arguments_json.slice(0, 200)}` }
     }
     try {
-      return await tool.execute(args, signal)
+      return await tool.execute(args, signal, runId)
     } catch (error) {
       if (signal.aborted) throw error
       console.error('tool failed', call.name, error)

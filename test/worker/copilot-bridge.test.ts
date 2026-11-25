@@ -113,7 +113,7 @@ describe('ui-sdk bridge (#14)', () => {
 
   it('ui_snapshot reaches the browser over the bridge and its result is recorded as a tool step', async () => {
     const encounterId = await withConsultation('one')
-    installScripted('copilot').toolCall('ui_snapshot', {}).reply('已读取界面。')
+    installScripted('copilot').reply('已读取界面。')
     const bridge = await serveBridge(encounterId, (tool) => {
       expect(tool).toBe('ui_snapshot')
       return { ok: true, result: snapshotWithConfirm() }
@@ -129,7 +129,6 @@ describe('ui-sdk bridge (#14)', () => {
   it('ui_act on a data-agent-confirm control is refused server-side (被拦截) and never reaches the browser', async () => {
     const encounterId = await withConsultation('one')
     installScripted('copilot')
-      .toolCall('ui_snapshot', {})
       .toolCall('ui_act', { steps: [{ ref: 'c2', action: 'press', args: [] }] })
       .reply('好的，我不按正式按钮。')
     const bridge = await serveBridge(encounterId, () => ({ ok: true, result: snapshotWithConfirm() }))
@@ -147,7 +146,6 @@ describe('ui-sdk bridge (#14)', () => {
   it('ui_act on a focused or doctor-edited target becomes a Suggestion (approval) recorded in the session', async () => {
     const encounterId = await withConsultation('one')
     installScripted('copilot')
-      .toolCall('ui_snapshot', {})
       .toolCall('ui_act', { steps: [{ ref: '主诉', action: 'setValue', args: ['发热、咳嗽 3 天。'] }] })
       .reply('已把内容保存为建议。')
     const bridge = await serveBridge(encounterId, (tool, args) => {

@@ -38,7 +38,7 @@ export function ClinicalNoteTab({ encounter, diagnosisSeq }: { encounter: Encoun
   const last = note.revisions.at(-1)
   return (
     <div className="flex flex-col gap-3 p-3">
-      <section aria-labelledby="clinical-note-heading" className={card}>
+      <section aria-labelledby="clinical-note-heading" className={card} data-agent-note-updated={Object.values(note.authors).includes('assistant') || undefined}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h3 id="clinical-note-heading" className="m-0 text-sm font-semibold">
