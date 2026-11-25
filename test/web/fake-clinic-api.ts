@@ -36,6 +36,8 @@ const STATUS: Record<EncounterError['code'], number> = {
   MEDICATION_ALLERGY_CONFLICT: 409,
   'medication-override-required': 422,
   'no-medication-conflict': 409,
+  'copilot-busy': 409,
+  'copilot-turn-not-found': 404,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })

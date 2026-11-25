@@ -63,6 +63,8 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   MEDICATION_ALLERGY_CONFLICT: 409,
   'medication-override-required': 422,
   'no-medication-conflict': 409,
+  'copilot-busy': 409,
+  'copilot-turn-not-found': 404,
 }
 
 type AppContext = Context<{ Bindings: Env }>

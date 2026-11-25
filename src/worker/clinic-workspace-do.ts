@@ -1,6 +1,8 @@
 import { DurableObject } from 'cloudflare:workers'
 import { MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
-import type { EncounterError, EncounterView } from '../shared/encounter'
+import type { AuditEventType, EncounterError, EncounterView } from '../shared/encounter'
+import type { CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
+import { CopilotReadModel } from './copilot-read-model'
 import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
 import type { BodySystem } from '../shared/physical-examination'
 import type { NoteSections } from '../shared/clinical-note'
@@ -44,6 +46,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   private readonly clinicalNote: ClinicalNoteRepository
   private readonly diagnosis: DiagnosisRepository
   private readonly prescriptions: PrescriptionRepository
+  private readonly copilotReads: CopilotReadModel
   // How long the Simulated Patient has to answer, and how much longer the workspace waits for it to say so.
   private readonly turnTimeoutMs: number
   private readonly expiryGraceMs: number
@@ -58,6 +61,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     this.clinicalNote = new ClinicalNoteRepository(ctx.storage.sql, this.encounters)
     this.diagnosis = new DiagnosisRepository(ctx.storage.sql, this.encounters)
     this.prescriptions = new PrescriptionRepository(ctx.storage.sql, this.encounters)
+    this.copilotReads = new CopilotReadModel(this.encounters, this.examinations, this.investigations, this.consultation)
     this.turnTimeoutMs = millis(env.PATIENT_TURN_TIMEOUT_MS, 30_000)
     this.expiryGraceMs = millis(env.PATIENT_TURN_EXPIRY_GRACE_MS, 5_000)
     ctx.blockConcurrencyWhile(async () => {
@@ -221,7 +225,9 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       const ready = this.readyToAsk(encounterId)
       if (!ready.ok) return ready
       const resent = this.consultation.exchangeFor(encounterId, question.clientTurnId)
-      if (resent) return { ok: true, exchange: resent }
+      // A resent question whose reply still waits is dispatched again: the first dispatch may never have left
+      // (a crash between recording and dispatch), and the Simulated Patient takes each reply once.
+      if (resent) return { ok: true, exchange: resent, persona: resent.patientTurn.status === 'pending' ? ready.persona : undefined }
       if (this.consultation.pending(encounterId)) {
         return { ok: false, error: { code: 'patient-turn-pending', message: '患者还在回答上一个问题，请稍候再问。' } }
       }
@@ -257,6 +263,25 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       this.consultation.settle(settlement.encounterId, settlement.patientTurnId, settlement.outcome, new Date(), this.expiryGraceMs),
     )
     return { accepted }
+  }
+
+  // The Clinical Copilot's only way into the workspace: read-only projections of what the doctor can see.
+  readForCopilot<R extends CopilotRead>(encounterId: string, read: R): CopilotReadResult<R['kind']> {
+    return this.copilotReads.read(encounterId, read, Date.now())
+  }
+
+  // Copilot commands are writes on the Encounter's session: refused once it is frozen, and audited once done.
+  authorizeCopilotCommand(encounterId: string): { ok: true; practitionerId: string } | Refusal {
+    const active = this.encounters.requireActive(encounterId)
+    return active.ok ? { ok: true, practitionerId: DEMO_PRACTITIONER_ID } : active
+  }
+
+  auditCopilotCommand(encounterId: string, eventType: AuditEventType, subject: string): void {
+    this.ctx.storage.transactionSync(() => {
+      if (this.encounters.requireActive(encounterId).ok) {
+        this.encounters.audit(encounterId, eventType, DEMO_PRACTITIONER_ID, new Date().toISOString(), subject)
+      }
+    })
   }
 
   // The Encounter is active and its Patient Persona version still exists; an overdue reply has released the lock.

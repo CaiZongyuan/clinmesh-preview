@@ -31,6 +31,7 @@ type ReplyTrigger = { encounterId: string; doctorTurnId: string; attempt: number
 
 const FAILURE: Record<RunError, PatientTurnFailure> = {
   timeout: 'timeout',
+  stalled: 'timeout',
   'llm-not-configured': 'llm-not-configured',
   'llm-error': 'llm-error',
   'too-many-steps': 'llm-error',
@@ -44,7 +45,8 @@ function settlementOf(trigger: ReplyTrigger, patientTurnId: string, outcome: Run
     outcome:
       outcome.status === 'done'
         ? { status: 'final', text: outcome.text }
-        : { status: 'failed', failure: FAILURE[outcome.error], text: outcome.text },
+        : // A stopped reply was superseded by a newer attempt at the same doctor turn; the workspace has moved on.
+          { status: 'failed', failure: outcome.status === 'failed' ? FAILURE[outcome.error] : 'timeout', text: outcome.text },
   }
 }
 
@@ -80,6 +82,7 @@ export class SimulatedPatientDO extends DurableObject<Env> {
   }
 
   // Returns once the reply is durably queued; the alarm streams it and settles the patient turn in the workspace.
+  // Idempotent per patient turn, so the workspace may dispatch the same reply again.
   async beginReply(request: PatientReplyRequest): Promise<void> {
     if (!this.runtime.bindSession(request.encounterId, request.persona)) {
       throw new Error(`Simulated Patient ${this.ctx.id} is bound to another Encounter`)
@@ -89,6 +92,8 @@ export class SimulatedPatientDO extends DurableObject<Env> {
       externalRef: request.patientTurnId,
       trigger: { encounterId: request.encounterId, doctorTurnId: request.doctorTurnId, attempt: request.attempt } satisfies ReplyTrigger,
       deadlineAt: Date.parse(request.deadlineAt),
+      // A new attempt at the same doctor turn supersedes an older one still queued or running here.
+      subject: request.doctorTurnId,
       messages: [{ originRef: request.doctorTurnId, message: { role: 'user', content: request.doctorText } }],
     })
   }

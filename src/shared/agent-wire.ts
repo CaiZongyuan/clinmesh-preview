@@ -3,6 +3,8 @@
 
 export type RunStatus = 'done' | 'failed' | 'stopped'
 
+export type ToolCallStatus = 'ok' | 'error' | 'cancelled'
+
 export type AgentEvent =
   // `ref` is what the run answers, e.g. the patient turn it replies as.
   | { type: 'run.started'; runId: string; ref: string | null }
@@ -14,6 +16,17 @@ export type AgentEvent =
   // For an agent whose outcome another Durable Object must accept: delivered, and accepted or refused there.
   // The record (e.g. the Consultation) is up to date once this arrives.
   | { type: 'run.settled'; runId: string; ref: string | null; accepted: boolean }
+  // Agents that trace their steps (the Clinical Copilot) also announce their structure; the deltas between a
+  // `step.started` and its `step.finished` belong to that step. After any of these, the snapshot is up to date.
+  | { type: 'run.queued'; runId: string; ref: string | null }
+  | { type: 'step.started'; runId: string; step: number }
+  | { type: 'step.finished'; runId: string; step: number }
+  | { type: 'tool.started'; runId: string; callId: string; name: string }
+  | { type: 'tool.finished'; runId: string; callId: string; status: ToolCallStatus }
+  | { type: 'steer.added'; runId: string }
+  | { type: 'steer.consumed'; runId: string }
+  // Something about the session itself changed (e.g. its model, a reply's feedback, an edited prompt).
+  | { type: 'session.updated'; runId: null }
 
 export type ClientMessage = { type: 'hello'; afterSeq: number }
 

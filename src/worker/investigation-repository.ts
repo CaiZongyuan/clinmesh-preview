@@ -158,6 +158,12 @@ export class InvestigationRepository {
   // due at or before it ended: a past fact, not a write after the freeze.
   list(encounter: EncounterView, now: number): InvestigationView[] {
     this.settle(encounter, now)
+    return this.view(encounter, now)
+  }
+
+  // What is recorded, without releasing anything that has come due: a pure read, for readers that must not write
+  // (the Clinical Copilot). A due Report appears once the doctor's own next read or command releases it.
+  view(encounter: EncounterView, now: number): InvestigationView[] {
     const clock = clockOf(encounter, now)
     const released = this.releasedReports(encounter, now)
     return this.rows(encounter.encounterId).map((row): InvestigationView => {

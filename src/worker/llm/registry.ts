@@ -1,4 +1,4 @@
-import { resolveLlmConfig, type LlmEnv } from './config'
+import { resolveLlmConfig, type LlmEnv, type LlmOverride } from './config'
 import { createOpenAiCompatibleProvider } from './openai-compatible'
 import type { AgentKind, LlmProvider, ReasoningEffort } from './types'
 
@@ -18,8 +18,14 @@ export function clearScriptedLlm(): void {
   scripted.clear()
 }
 
-export function resolveLlmProvider(env: LlmEnv, kind: AgentKind): ResolvedLlm {
-  const config = resolveLlmConfig(env, kind)
+// A session override applies only to a model the environment offers, so a stale choice falls back to the default.
+export function resolveLlmProvider(env: LlmEnv, kind: AgentKind, override: LlmOverride = {}): ResolvedLlm {
+  const base = resolveLlmConfig(env, kind)
+  const config = {
+    ...base,
+    model: override.model && base.modelOptions.includes(override.model) ? override.model : base.model,
+    effort: override.effort ?? base.effort,
+  }
   if (config.provider === 'scripted') {
     const provider = scripted.get(kind)
     return provider

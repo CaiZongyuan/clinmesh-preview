@@ -55,4 +55,49 @@ export const AGENT_RUNTIME_MIGRATIONS: readonly string[] = [
      done_at INTEGER,
      last_error TEXT
    );`,
+  // Runs that read (the Clinical Copilot): each LLM step and each tool call is a durable checkpoint, and a doctor can
+  // steer a running run (read before its next step). A run's inputs join the context only once it starts, so a
+  // queued prompt never lands between a running step's tool calls and their results. `subject` names what a run
+  // answers (e.g. a doctor turn), so a newer run for the same subject supersedes it. `superseded_by` marks runs an
+  // edited or regenerated prompt replaced: their messages are void.
+  `ALTER TABLE agent_run ADD COLUMN subject TEXT;
+   ALTER TABLE agent_run ADD COLUMN input_json TEXT;
+   ALTER TABLE agent_run ADD COLUMN stop_reason TEXT;
+   ALTER TABLE agent_run ADD COLUMN superseded_by TEXT;
+   CREATE INDEX agent_run_by_subject ON agent_run (subject);
+   CREATE TABLE agent_step (
+     run_id TEXT NOT NULL,
+     step INTEGER NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('running', 'done', 'stopped', 'failed')),
+     thinking TEXT NOT NULL DEFAULT '',
+     text TEXT NOT NULL DEFAULT '',
+     usage_json TEXT,
+     started_at INTEGER NOT NULL,
+     finished_at INTEGER,
+     PRIMARY KEY (run_id, step)
+   );
+   CREATE TABLE agent_tool_call (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     run_id TEXT NOT NULL,
+     step INTEGER NOT NULL,
+     call_id TEXT NOT NULL,
+     name TEXT NOT NULL,
+     arguments_json TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('dispatched', 'ok', 'error', 'cancelled')),
+     subject TEXT,
+     result TEXT,
+     dispatched_at INTEGER NOT NULL,
+     completed_at INTEGER,
+     UNIQUE (run_id, step, call_id)
+   );
+   CREATE TABLE agent_steer (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     run_id TEXT NOT NULL,
+     client_ref TEXT NOT NULL UNIQUE,
+     content TEXT NOT NULL,
+     trigger_json TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     consumed_at INTEGER,
+     requeued_as TEXT
+   );`,
 ]

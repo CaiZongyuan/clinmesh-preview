@@ -1,6 +1,8 @@
-export type AgentKind = 'patient' | 'copilot'
+import type { ReasoningEffort } from '../../shared/reasoning-effort'
 
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high'
+export type { ReasoningEffort }
+
+export type AgentKind = 'patient' | 'copilot'
 
 export interface ToolSpec {
   name: string
