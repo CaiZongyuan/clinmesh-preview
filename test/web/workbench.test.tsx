@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { createAgent } from '@ui-sdk/react/agent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppRouter } from '../../src/web/router'
-import { createFakeClinicApi } from './fake-clinic-api'
+import { createFakeClinicApi, encounterFor } from './fake-clinic-api'
 
 const fetchStub = vi.fn<typeof fetch>()
 const agent = createAgent()
@@ -57,7 +57,7 @@ describe('outpatient workbench', () => {
     renderWorkbench()
     await screen.findByRole('navigation', { name: '候诊队列' })
     expect(screen.getByRole('separator', { name: '调整问诊记录宽度' })).toBeInTheDocument()
-    expect(screen.getByRole('separator', { name: '调整临床助手宽度' })).toBeInTheDocument()
+    expect(screen.getByRole('separator', { name: '调整病例工作区宽度' })).toBeInTheDocument()
 
     const components = agent.snapshot().filter((entry) => !entry.offPage && entry.component !== 'more')
     for (const entry of components) {
@@ -103,9 +103,10 @@ describe('outpatient workbench', () => {
   it('resizes the Clinical Copilot panel from its separator: arrow keys and double-click reset', async () => {
     const user = userEvent.setup()
     renderWorkbench()
-    const handle = await screen.findByRole('separator', { name: '调整临床助手宽度' })
+    const handle = await screen.findByRole('separator', { name: '调整病例工作区宽度' })
     expect(handle).toHaveAttribute('aria-valuemin')
     expect(handle).toHaveAttribute('aria-valuemax')
+    expect(handle).toHaveAttribute('aria-controls', 'case-workspace')
 
     const start = valueOf(handle)
     handle.focus()
@@ -113,6 +114,50 @@ describe('outpatient workbench', () => {
     expect(valueOf(handle)).toBeLessThan(start)
     await user.dblClick(handle)
     expect(valueOf(handle)).toBe(start)
+  })
+
+  it('applies the selected color scheme and font size from the appearance controls', async () => {
+    const user = userEvent.setup()
+    renderWorkbench()
+    await user.click(await screen.findByRole('button', { name: '工作台外观' }))
+    const theme = screen.getByRole('radiogroup', { name: '主题' })
+    const font = screen.getByRole('radiogroup', { name: '字号' })
+    await user.click(within(theme).getByRole('radio', { name: '深色' }))
+    await user.click(within(font).getByRole('radio', { name: '特大' }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    expect(document.documentElement).toHaveAttribute('data-font-scale', 'extra-large')
+    await user.click(within(theme).getByRole('radio', { name: '浅色' }))
+    await user.click(within(font).getByRole('radio', { name: '大' }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(document.documentElement).toHaveAttribute('data-font-scale', 'large')
+    await user.click(within(theme).getByRole('radio', { name: '跟随系统' }))
+    await user.click(within(font).getByRole('radio', { name: '标准' }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'system')
+    expect(document.documentElement).toHaveAttribute('data-font-scale', 'standard')
+  })
+
+  it('lists the implemented shortcuts and focuses the case tab selected by Alt plus its number', async () => {
+    const user = userEvent.setup()
+    fetchStub.mockImplementation(createFakeClinicApi({ encounters: [encounterFor()] }).handle)
+    render(<RouterProvider router={createAppRouter({
+      history: createMemoryHistory({ initialEntries: ['/encounters/encounter-1'] }),
+    })} />)
+    const trigger = await screen.findByRole('button', { name: '快捷键' })
+    await user.click(trigger)
+    const listing = await screen.findByRole('dialog', { name: '快捷键' })
+    expect(listing).toHaveTextContent('按住 Space')
+    expect(listing).toHaveTextContent('暂停或恢复收音')
+    expect(listing).toHaveTextContent('Alt + 1–4')
+    expect(listing).toHaveTextContent('Ctrl + /')
+    expect(listing).toHaveTextContent('Esc')
+    await user.keyboard('{Escape}')
+    const tabs = await screen.findByRole('tablist', { name: '病例页签' })
+    for (const [index, name] of ['病历记录', '检验检查', '诊断', '处方'].entries()) {
+      await user.keyboard(`{Alt>}${index + 1}{/Alt}`)
+      const selected = within(tabs).getByRole('tab', { name })
+      expect(selected).toHaveAttribute('aria-selected', 'true')
+      expect(selected).toHaveFocus()
+    }
   })
 
   it('remembers keyboard-set widths and a collapsed Consultation column across reloads', async () => {

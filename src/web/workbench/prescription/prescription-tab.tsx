@@ -74,7 +74,7 @@ export function PrescriptionTab({ encounter, state }: { encounter: EncounterView
           <div role="group" aria-label="用药结论" className="flex items-center gap-1">
             {(
               [
-                ['rx', '处方'],
+                ['rx', '使用处方'],
                 ['nomed', '无需用药'],
               ] as const
             ).map(([value, label]) => (

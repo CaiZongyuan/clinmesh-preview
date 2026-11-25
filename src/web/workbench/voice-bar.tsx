@@ -4,6 +4,7 @@ import { useEffect, useRef, type Ref, type RefObject } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import type { VoiceCaptureController } from '../voice/use-voice-capture'
 import { badge } from './pane-styles'
+import { workbenchOwnsShortcut } from './workbench-shortcuts'
 
 const ASR_LABEL: Record<VoiceCaptureController['asr'], string> = {
   off: '未连接',
@@ -119,10 +120,12 @@ function useBlurCancel(voice: VoiceCaptureController, active: boolean) {
 // The doctor's voice capture bar: hands-free listening, push-to-talk, and the pause that guarantees privacy.
 // Hands-free is toggled (or M); push-to-talk is held with the pointer or Space, and sliding up while holding
 // cancels. While paused a persistent banner says nothing is being heard or transcribed.
-export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice: VoiceCaptureController }) {
+export function VoiceBar({ encounter, voice, holdButton }: {
+  encounter: EncounterView
+  voice: VoiceCaptureController
+  holdButton: RefObject<HTMLButtonElement | null>
+}) {
   const active = encounter.status === 'active'
-  const holdButton = useRef<HTMLButtonElement>(null)
-  useVoiceKeys(voice, active, holdButton)
   useBlurCancel(voice, active)
   const hold = useHoldControls(voice, active)
   const pointer = usePointerCapture(voice, active, hold)
@@ -167,17 +170,16 @@ export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice
               >
                 <MicIcon aria-hidden="true" size={13} />
                 {voice.capturing ? '停止收音' : '持续收音'}
-                <kbd className="font-mono text-[10px] opacity-60">M</kbd>
               </Button>
               <HoldButton voice={voice} buttonRef={holdButton} />
-              <Button aria-label="暂停收音" aria-pressed={false} className="h-8 gap-1.5 px-2.5 text-xs" onClick={voice.togglePause}>
+              <Button aria-keyshortcuts="M" aria-label="暂停收音" aria-pressed={false} className="h-8 gap-1.5 px-2.5 text-xs" onClick={voice.togglePause}>
                 <MicOffIcon aria-hidden="true" size={13} />
                 暂停
               </Button>
             </>
           )
         ) : (
-          <Button aria-label="恢复收音" data-variant="solid" className="h-8 gap-1.5 px-3 text-xs" onClick={voice.togglePause} disabled={!voice.paused}>
+          <Button aria-keyshortcuts="M" aria-label="恢复收音" data-variant="solid" className="h-8 gap-1.5 px-3 text-xs" onClick={voice.togglePause} disabled={!voice.paused}>
             <MicIcon aria-hidden="true" size={13} />
             恢复收音
           </Button>
@@ -214,7 +216,7 @@ export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice
 // Hold-to-talk: press and hold (pointer or Space), with the elapsed time and a live level meter. Sliding up
 // arms cancellation; releasing under 600 ms discards the tap. The press and release are the browser's only
 // signals in this mode, so both arrive through the same button.
-function useVoiceKeys(voice: VoiceCaptureController, active: boolean, holdButton: RefObject<HTMLButtonElement | null>) {
+export function useVoiceKeys(voice: VoiceCaptureController, active: boolean, holdButton: RefObject<HTMLButtonElement | null>) {
   const ref = useRef(voice)
   ref.current = voice
   useEffect(() => {
@@ -228,8 +230,13 @@ function useVoiceKeys(voice: VoiceCaptureController, active: boolean, holdButton
         event.preventDefault()
         return
       }
-      if (event.defaultPrevented || event.repeat || capture.paused) return
-      if (event.code === 'KeyM' && !typing(event.target)) capture.toggle()
+      if (!workbenchOwnsShortcut(event) || event.ctrlKey || event.altKey || event.metaKey) return
+      if (event.code === 'KeyM' && !typing(event.target) && !capture.holding) {
+        event.preventDefault()
+        capture.togglePause()
+        return
+      }
+      if (capture.paused) return
       const isHoldTarget = event.target === holdButton.current ||
         event.target === document.body || event.target === document
       if (event.code !== 'Space' || !isHoldTarget || capture.capturing) return
@@ -258,6 +265,7 @@ function HoldButton({ voice, buttonRef }: { voice: VoiceCaptureController; butto
       ref={buttonRef}
       type="button"
       data-hold-button
+      aria-keyshortcuts="Space"
       aria-label={voice.holding ? (voice.cancelArmed ? '松开以取消' : '正在录音，松开结束') : '按住说话'}
       data-holding={voice.holding || undefined}
       data-cancel={voice.cancelArmed || undefined}

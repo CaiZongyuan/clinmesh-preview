@@ -2,7 +2,7 @@ import { completionGates, type CaseDebrief } from '../../shared/completion'
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@ui-sdk/react/button'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@ui-sdk/react/tabs'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
@@ -23,6 +23,7 @@ import { usePrescriptions } from './prescription/use-prescriptions'
 import { badge, pane, paneBody, paneFooter, paneHeader } from './pane-styles'
 import { PatientBanner } from './patient-banner'
 import type { CaseFocus } from './workbench'
+import { workbenchOwnsShortcut } from './workbench-shortcuts'
 
 export function CaseWorkspace({ focus }: { focus: CaseFocus }) {
   if (focus.kind === 'encounter') return <EncounterWorkspace key={focus.encounter.encounterId} encounter={focus.encounter} examinations={focus.examinations} debrief={focus.debrief} />
@@ -75,6 +76,8 @@ function Registration({ entry }: { entry: GoldenCaseQueueEntry }) {
 const tab =
   'h-9 gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 text-[13px] data-[selected]:border-foreground data-[selected]:font-semibold'
 
+const primaryTabs = ['note', 'investigations', 'diagnosis', 'prescription'] as const
+
 function EncounterWorkspace({
   encounter, examinations, debrief,
 }: { encounter: EncounterView; examinations: PhysicalExaminationView[]; debrief?: CaseDebrief }) {
@@ -91,6 +94,20 @@ function EncounterWorkspace({
   const assistantPrescriptions = drafts.drafts.prescriptions.filter((entry) => assistantItems?.prescriptions.includes(entry.drugId)).length
   const assistantSections = Object.values(note?.authors ?? {}).filter((author) => author === 'assistant').length
   const [selectedTab, selectTab] = useState<ClinicalTab>(debrief ? 'debrief' : 'note')
+  const tabList = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !workbenchOwnsShortcut(event)) return
+      const digit = /^[1-4]$/.test(event.key) ? event.key : /^Digit([1-4])$/.exec(event.code)?.[1]
+      if (!digit) return
+      event.preventDefault()
+      selectTab(primaryTabs[Number(digit) - 1])
+      tabList.current?.querySelector<HTMLElement>(`[aria-keyshortcuts="Alt+${digit}"]`)?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const gates = completionGates(
     diagnosis.view, investigations.investigations, prescriptions.view, note?.revisions.at(-1), drafts.drafts, suggestions.length,
   )
@@ -117,21 +134,21 @@ function EncounterWorkspace({
         </p>
       )}
       <Tabs value={selectedTab === 'debrief' && !debrief ? 'note' : selectedTab} onValueChange={(value) => selectTab(value as ClinicalTab)} className="flex min-h-0 flex-1 flex-col">
-        <TabsList aria-label="病例页签" className="flex flex-none gap-1 border-b px-2">
-          <TabsTab value="note" className={tab} data-agent-note-updated={assistantSections > 0 || undefined}>
+        <TabsList ref={tabList} aria-label="病例页签" className="flex flex-none gap-1 border-b px-2">
+          <TabsTab aria-keyshortcuts="Alt+1" value="note" className={tab} data-agent-note-updated={assistantSections > 0 || undefined}>
             病历记录
             {assistantSections > 0 && <span className={`${badge} bg-info/10 text-info`}>助手 {assistantSections}</span>}
           </TabsTab>
-          <TabsTab value="investigations" className={tab} data-agent-note-updated={assistantInvestigations > 0 || undefined}>
+          <TabsTab aria-keyshortcuts="Alt+2" value="investigations" className={tab} data-agent-note-updated={assistantInvestigations > 0 || undefined}>
             检验检查
             <PendingCount count={investigations.pendingCount} />
             <AssistantCount count={assistantInvestigations} />
           </TabsTab>
-          <TabsTab value="diagnosis" className={tab} data-agent-note-updated={assistantDiagnoses > 0 || undefined}>
+          <TabsTab aria-keyshortcuts="Alt+3" value="diagnosis" className={tab} data-agent-note-updated={assistantDiagnoses > 0 || undefined}>
             诊断
             <AssistantCount count={assistantDiagnoses} />
           </TabsTab>
-          <TabsTab value="prescription" className={tab} data-agent-note-updated={assistantPrescriptions > 0 || undefined}>
+          <TabsTab aria-keyshortcuts="Alt+4" value="prescription" className={tab} data-agent-note-updated={assistantPrescriptions > 0 || undefined}>
             处方
             <AssistantCount count={assistantPrescriptions} />
           </TabsTab>
