@@ -64,7 +64,7 @@ export function encounterChart(caseId: string): EncounterChart | undefined {
         diagnoses: visit.conditions.map((c) => ({ code: c.code, display: c.display })),
         medications: visit.medications.map(medication),
       })),
-      allergies: goldenCase.allergies.map((a) => ({ agent: a.agent, reaction: a.reaction, onset: a.onset, source: a.source })),
+      allergies: goldenCase.allergies.map((a) => ({ agent: a.agent, drugClass: (a as { drugClass?: string }).drugClass, reaction: a.reaction, onset: a.onset, source: a.source })),
       chronicConditions: goldenCase.chronicConditions.map((c) => ({ code: c.code, display: c.display, onset: c.onset, status: c.status })),
       priorMedications: medications.filter((m, i) => medications.findIndex((o) => o.id === m.id) === i).map(medication),
     },

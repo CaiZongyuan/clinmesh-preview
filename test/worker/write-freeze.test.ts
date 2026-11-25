@@ -4,6 +4,7 @@ import type { ClinicalNoteResponse } from '../../src/shared/clinical-note'
 import type { DiagnosisResponse } from '../../src/shared/diagnosis'
 import type { AuditEventsResponse, EncounterResponse, ErrorResponse } from '../../src/shared/encounter'
 import type { InvestigationsResponse } from '../../src/shared/investigation'
+import type { PrescriptionsResponse } from '../../src/shared/medication'
 import type { PhysicalExaminationsResponse } from '../../src/shared/physical-examination'
 import { app } from '../../src/worker/app'
 import { asked, settled, transcript } from './support/clinic'
@@ -60,6 +61,12 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
     send('POST', `/api/encounters/${encounterId}/diagnosis/revisions`, { entries: [{ code: 'I10', primary: true, source: 'doctor' }] }),
   'POST /api/encounters/:encounterId/diagnosis/reopen': ({ encounterId }) =>
     send('POST', `/api/encounters/${encounterId}/diagnosis/reopen`),
+  'POST /api/encounters/:encounterId/prescriptions': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/prescriptions`, {
+      lines: [{ drugId: 'doxycycline', dose: 1, route: '口服', frequency: 'BID', days: 7 }],
+    }),
+  'POST /api/encounters/:encounterId/no-medication': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/no-medication`),
 }
 
 // An Encounter with one released, unacknowledged Report, one pending Investigation, one failed patient reply
@@ -114,6 +121,8 @@ describe('frozen Encounters', () => {
       consultation: await transcript(encounterId),
       note: ((await (await api(`/api/encounters/${encounterId}/clinical-note`)).json()) as ClinicalNoteResponse).note,
       diagnosis: ((await (await api(`/api/encounters/${encounterId}/diagnosis`)).json()) as DiagnosisResponse).diagnosis,
+      prescriptions: ((await (await api(`/api/encounters/${encounterId}/prescriptions`)).json()) as PrescriptionsResponse)
+        .prescriptions,
     })
     const frozen = await read()
     expect(frozen.encounter.status).toBe('abandoned')

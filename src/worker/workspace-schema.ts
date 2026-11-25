@@ -156,6 +156,38 @@ const MIGRATIONS: readonly string[] = [
    BEGIN SELECT RAISE(ABORT, 'confirmed Diagnosis revisions are immutable'); END;
    CREATE TRIGGER diagnosis_revision_no_delete BEFORE DELETE ON diagnosis_revision
    BEGIN SELECT RAISE(ABORT, 'confirmed Diagnosis revisions are immutable'); END;`,
+  // The Prescription: issued lines as immutable rows (there is no cancellation), each carrying the total
+  // quantity the server computed, and a No Medication conclusion as one row per Encounter. The two are
+  // mutually exclusive; the repositories enforce that inside the caller's transaction.
+  `CREATE TABLE prescription_line (
+     line_id TEXT PRIMARY KEY,
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     drug_id TEXT NOT NULL,
+     drug_name TEXT NOT NULL,
+     spec TEXT NOT NULL,
+     dose REAL NOT NULL,
+     dose_unit TEXT NOT NULL,
+     route TEXT NOT NULL,
+     frequency TEXT NOT NULL,
+     days INTEGER NOT NULL,
+     total_quantity TEXT NOT NULL,
+     drug_class TEXT NOT NULL,
+     drug_class_name TEXT NOT NULL,
+     override_reason TEXT,
+     override_note TEXT,
+     practitioner_id TEXT NOT NULL,
+     issued_at TEXT NOT NULL
+   );
+   CREATE INDEX prescription_line_by_encounter ON prescription_line (encounter_id);
+   CREATE TRIGGER prescription_line_no_update BEFORE UPDATE ON prescription_line
+   BEGIN SELECT RAISE(ABORT, 'issued prescription lines are immutable'); END;
+   CREATE TRIGGER prescription_line_no_delete BEFORE DELETE ON prescription_line
+   BEGIN SELECT RAISE(ABORT, 'issued prescription lines are immutable'); END;
+   CREATE TABLE no_medication (
+     encounter_id TEXT PRIMARY KEY REFERENCES encounter (encounter_id),
+     practitioner_id TEXT NOT NULL,
+     recorded_at TEXT NOT NULL
+   );`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

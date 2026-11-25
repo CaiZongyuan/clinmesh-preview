@@ -21,6 +21,13 @@ import type {
 
 import type { ClinicalNoteResponse, ClinicalNoteView, NoteSections } from '../shared/clinical-note'
 import type { DiagnosisDraftEntry, DiagnosisResponse, DiagnosisView } from '../shared/diagnosis'
+import type {
+  IssuePrescriptionRequest,
+  MedicationCatalogResponse,
+  MedicationCatalogItemView,
+  PrescriptionsResponse,
+  PrescriptionsView,
+} from '../shared/medication'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
@@ -144,6 +151,24 @@ export async function confirmDiagnosis(encounterId: string, entries: DiagnosisDr
 
 export async function reopenDiagnosis(encounterId: string): Promise<DiagnosisView> {
   return (await request<DiagnosisResponse>(`${diagnosisPath(encounterId)}/reopen`, post())).diagnosis
+}
+
+export async function fetchMedicationCatalog(): Promise<MedicationCatalogItemView[]> {
+  return (await request<MedicationCatalogResponse>('/api/medication-catalog')).items
+}
+
+const prescriptionsPath = (encounterId: string) => `${encounterPath(encounterId)}/prescriptions`
+
+export async function fetchPrescriptions(encounterId: string): Promise<PrescriptionsView> {
+  return (await request<PrescriptionsResponse>(prescriptionsPath(encounterId))).prescriptions
+}
+
+export async function issuePrescription(encounterId: string, lines: IssuePrescriptionRequest['lines']): Promise<PrescriptionsView> {
+  return (await request<PrescriptionsResponse>(prescriptionsPath(encounterId), post({ lines }))).prescriptions
+}
+
+export async function recordNoMedication(encounterId: string): Promise<PrescriptionsView> {
+  return (await request<PrescriptionsResponse>(`${encounterPath(encounterId)}/no-medication`, post())).prescriptions
 }
 
 export function openPatientSocket(encounterId: string): WebSocket {

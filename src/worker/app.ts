@@ -28,6 +28,13 @@ import {
 import type { ClinicalNoteResult } from './clinical-note-repository'
 import { diagnosisEntries, type DiagnosisResult } from './diagnosis-repository'
 import type { DiagnosisResponse } from '../shared/diagnosis'
+import type {
+  MedicationCatalogResponse,
+  PrescriptionsResponse,
+  PrescriptionLineRequest,
+} from '../shared/medication'
+import { prescriptionLines, type PrescriptionsResult } from './prescription-repository'
+import { medicationCatalog } from './medication-catalog'
 
 import { WORKSPACE_NAME } from './workspace-name'
 
@@ -53,6 +60,9 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'clinical-note-incomplete': 422,
   'diagnosis-needs-primary': 422,
   'diagnosis-not-confirmed': 409,
+  MEDICATION_ALLERGY_CONFLICT: 409,
+  'medication-override-required': 422,
+  'no-medication-conflict': 409,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -91,6 +101,16 @@ const noteShape = (which: string) =>
 
 const diagnosisOr = (c: AppContext, result: DiagnosisResult, status: ContentfulStatusCode = 200) =>
   result.ok ? c.json<DiagnosisResponse>({ diagnosis: result.diagnosis }, status) : refuse(c, result.error)
+
+const prescriptionsOr = (c: AppContext, result: PrescriptionsResult, status: ContentfulStatusCode = 200) =>
+  result.ok ? c.json<PrescriptionsResponse>({ prescriptions: result.prescriptions }, status) : refuse(c, result.error)
+
+// Line list under `lines` in the body, or null when malformed.
+async function prescriptionRequest(c: AppContext): Promise<PrescriptionLineRequest[] | null> {
+  const body: unknown = await c.req.json().catch(() => null)
+  const lines = (body as Record<string, unknown> | null)?.lines
+  return lines === undefined ? null : prescriptionLines(lines)
+}
 
 // Entry list under `entries` in the body, or null when malformed.
 async function diagnosisDraftEntries(c: AppContext): Promise<ReturnType<typeof diagnosisEntries> | null> {
@@ -215,6 +235,27 @@ app.post('/encounters/:encounterId/diagnosis/revisions', async (c) => {
 
 app.post('/encounters/:encounterId/diagnosis/reopen', async (c) =>
   diagnosisOr(c, await workspace(c).reopenDiagnosis(c.req.param('encounterId'))),
+)
+
+app.get('/medication-catalog', (c) => c.json<MedicationCatalogResponse>(medicationCatalog()))
+
+app.get('/encounters/:encounterId/prescriptions', async (c) =>
+  prescriptionsOr(c, await workspace(c).getPrescriptions(c.req.param('encounterId'))),
+)
+
+app.post('/encounters/:encounterId/prescriptions', async (c) => {
+  const lines = await prescriptionRequest(c)
+  if (!lines) {
+    return refuse(c, {
+      code: 'invalid-request',
+      message: '请求体须为 { "lines": [{ drugId, dose, route, frequency, days }] }，药品不重复、单次剂量大于 0、天数 1–30',
+    })
+  }
+  return prescriptionsOr(c, await workspace(c).issuePrescription(c.req.param('encounterId'), lines), 201)
+})
+
+app.post('/encounters/:encounterId/no-medication', async (c) =>
+  prescriptionsOr(c, await workspace(c).recordNoMedication(c.req.param('encounterId')), 201),
 )
 
 app.get('/encounters/:encounterId/consultation', async (c) => {

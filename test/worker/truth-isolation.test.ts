@@ -6,6 +6,7 @@ import type { InvestigationsResponse } from '../../src/shared/investigation'
 import { app } from '../../src/worker/app'
 import { goldenCase1Chart } from '../fixtures/golden-case-1'
 import { expectNoCaseTruth, goldenCaseDenylists } from './case-truth'
+import rawMedicationCatalog from '../../data/clinic-catalog/medication-catalog.json'
 import { asked, openPatientSocket, settled } from './support/clinic'
 import { installScripted } from './support/scripted-llm'
 
@@ -66,6 +67,25 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'GET /api/encounters/:encounterId/physical-examinations': ({ encounterId }) =>
     request('GET', `/api/encounters/${encounterId}/physical-examinations`),
   'GET /api/investigation-catalog': () => request('GET', '/api/investigation-catalog'),
+  'GET /api/medication-catalog': ({ revealed }) => {
+    // Package-insert summaries are pinned catalog content that predates the Encounter; any Case Truth word
+    // they happen to contain (e.g. a diagnosis name in an indication) is clinic text, not a leak. Each text
+    // is recorded once, so repeat probe phases don't inflate `revealed`.
+    revealed.push(
+      ...rawMedicationCatalog.items
+        .flatMap((item) => [item.insert.indications, item.insert.contraindications, item.insert.notes])
+        .filter((text) => !revealed.includes(text)),
+    )
+    return request('GET', '/api/medication-catalog')
+  },
+  'GET /api/encounters/:encounterId/prescriptions': ({ encounterId }) =>
+    request('GET', `/api/encounters/${encounterId}/prescriptions`),
+  'POST /api/encounters/:encounterId/prescriptions': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/prescriptions`, {
+      lines: [{ drugId: 'doxycycline', dose: 1, route: '口服', frequency: 'BID', days: 7 }],
+    }),
+  'POST /api/encounters/:encounterId/no-medication': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/no-medication`),
   'GET /api/encounters/:encounterId/investigations': ({ encounterId }) =>
     request('GET', `/api/encounters/${encounterId}/investigations`),
   'POST /api/encounters/:encounterId/investigations': ({ encounterId }) =>
@@ -259,7 +279,17 @@ describe('Case Truth isolation over HTTP', () => {
       pendingInvestigationId: crp.investigationId,
     }
     await probeEveryRoute(ctx, 'Report version 1 released', { keepActive: true })
-    expect(ctx.revealed, 'the Physical Examination probe examined the vitals').toHaveLength(3)
+    // The pinned catalog insert texts (revealed once, legitimately) don't count; only the three vitals
+    // findings the Physical Examination probe uncovered do.
+    const clinicCatalogTexts = rawMedicationCatalog.items.flatMap((item) => [
+      item.insert.indications,
+      item.insert.contraindications,
+      item.insert.notes,
+    ])
+    expect(
+      ctx.revealed.filter((entry) => !clinicCatalogTexts.includes(entry as never)),
+      'the Physical Examination probe examined the vitals',
+    ).toHaveLength(3)
 
     // Only the CBC amendment is out at 150 s: the chest X-ray one stays hidden on every route until it publishes.
     vi.setSystemTime(T0 + 150_000)

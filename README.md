@@ -2,6 +2,8 @@
 
 Agentic Mini HIS for single-doctor outpatient Encounters. See `GLOSSARY.md` for domain terms and `docs/adr/` for architecture decisions.
 
+After confirming a Diagnosis, the 处方 tab searches the formulary by name, pinyin or class — every hit is tagged 与过敏史冲突 or 交叉过敏风险 before it can be added — and issues with Clinical Confirmation. Allergy rules match by drug class: a penicillin-class drug for a penicillin-allergic patient is refused whole server-side (`MEDICATION_ALLERGY_CONFLICT`, 药事安全红线拦截， no override); a cephalosporin needs a reason from a fixed list plus a ≥4-character note, stored on the issued line and in the audit log. Self-limiting visits record 无需用药 instead, mutually exclusive with issued prescriptions both ways.
+
 ## Run it
 
 Requires Node 24+ and pnpm 12.
@@ -47,6 +49,11 @@ Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "
 | `GET /api/encounters/:encounterId/consultation` | The Consultation transcript: doctor and patient turns in order (speaker, source, attribution, status, failure) |
 | `POST /api/encounters/:encounterId/consultation/doctor-turns` `{ clientTurnId, text }` | Records a typed question and a pending patient turn, and asks the Simulated Patient (201); idempotent per `clientTurnId`; `409 patient-turn-pending` while the previous reply is pending |
 | `POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry` | A new reply attempt to the latest, failed patient turn (201); the failed one stays; `409 patient-turn-not-retryable` otherwise |
+| `GET /api/investigation-catalog` | The investigation catalog for search (no results, only display fields) |
+| `GET /api/medication-catalog` | The formulary: name, class, pinyin, package, defaults and package-insert summary |
+| `GET /api/encounters/:encounterId/prescriptions` | Issued prescription lines and the No Medication conclusion, if any |
+| `POST /api/encounters/:encounterId/prescriptions` `{ lines }` | Issues the whole prescription atomically after a confirmed Diagnosis (201). A penicillin-class line for a penicillin-allergic patient: `409 MEDICATION_ALLERGY_CONFLICT`, nothing issued, no override. A cephalosporin needs `override { reason, note ≥4 chars }` per line (`422 medication-override-required`). `409 no-medication-conflict` against a recorded 无需用药 |
+| `POST /api/encounters/:encounterId/no-medication` | Records 无需用药 (201); requires a confirmed Diagnosis and refuses while prescriptions exist (`409 no-medication-conflict`) |
 | `GET /api/encounters/:encounterId/patient/socket` | WebSocket: the Simulated Patient's reply stream (`src/shared/agent-wire.ts`). Send `{ "type": "hello", "afterSeq": n }`; the server replays events after `n`, sends `replay.done`, then live events; `run.settled` follows once the workspace has the reply. `426` without an upgrade |
 
 Two Worker-seam tests enumerate the Hono app's routes and fail until a new route is listed:
