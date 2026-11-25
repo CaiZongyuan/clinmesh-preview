@@ -44,3 +44,9 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 }
+
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-font-scale="large"] { zoom: 1.125; }
+:root[data-font-scale="extra-large"] { zoom: 1.25; }

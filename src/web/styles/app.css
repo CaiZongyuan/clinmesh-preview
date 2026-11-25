@@ -238,3 +238,78 @@
 @media (prefers-reduced-motion: reduce) {
   [data-agent-note-updated], [data-agent-draft] textarea { animation: none; }
 }
+
+
+/* The Resizable parts supply their desktop axis and flex bases as inline styles. */
+@media (max-width: 1180px) {
+  .workbench-columns > [data-copilot-separator] {
+    display: none;
+  }
+
+  .workbench-columns > #consultation {
+    flex: 0 0 min(var(--consultation-width), 38vw) !important;
+  }
+
+  .workbench-columns > #consultation[data-collapsed] {
+    flex-basis: 48px !important;
+  }
+
+  .workbench-columns > #case-workspace {
+    flex: 1 1 0 !important;
+  }
+
+  .workbench-columns > #clinical-copilot {
+    position: fixed;
+    inset: 60px 12px 12px auto;
+    z-index: 30;
+    width: min(420px, calc(100% - 24px));
+    border-radius: var(--radius);
+    box-shadow: 0 8px 36px rgb(0 0 0 / 20%);
+  }
+}
+
+@media (max-width: 860px) {
+  body {
+    overflow: auto;
+  }
+
+  .workbench-shell {
+    min-height: 100dvh;
+    height: auto;
+  }
+
+  .workbench-body {
+    flex-direction: column;
+  }
+
+  .workbench-columns[data-slot="resizable"] {
+    flex-direction: column !important;
+  }
+
+  .workbench-body > nav {
+    flex-direction: row;
+    width: auto;
+  }
+
+  .workbench-columns > [data-slot="resizable-handle"] {
+    display: none;
+  }
+
+  .workbench-columns > #consultation,
+  .workbench-columns > #case-workspace {
+    flex: none !important;
+    width: 100%;
+  }
+
+  .workbench-columns > #consultation {
+    height: 540px;
+  }
+
+  .workbench-columns > #consultation[data-collapsed] {
+    height: auto;
+  }
+
+  .workbench-columns > #case-workspace {
+    min-height: 640px;
+  }
+}
