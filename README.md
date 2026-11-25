@@ -34,6 +34,17 @@ LLM_API_KEY=<your key>
 
 Without `LLM_API_KEY` the workbench still runs: each patient reply fails at once with `llm-not-configured`, visibly, with a retry button. The GLM endpoint facts (base URL, reasoning field, effort mapping) are not yet verified against a live key.
 
+### Voice configuration
+
+The doctor can speak instead of type (持续收音 hands-free with recognizer VAD, or 按住说话 push-to-talk). With a Bailian token the Worker streams the microphone to `paraformer-realtime-v2` over the DashScope duplex WebSocket (ADR-0003); without one, the browser's own Web Speech API recognizes speech and the text goes over HTTP. `GET /api/voice` reports which:
+
+```
+# .dev.vars
+BAILIAN_TOKEN=...   # secret; enables the Worker-side Paraformer recognizer
+```
+
+A Paraformer-recognized turn carries `voice: { recognizer, durationMs, confidence: null }` (Paraformer reports no confidence score). The voice socket `/api/encounters/:encounterId/voice` speaks the Cloudflare `agents/voice` protocol plus ClinMesh messages (`src/shared/voice.ts`); it is refused once the Encounter is frozen.
+
 ### HTTP API
 
 Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "code", "message" } }`.
@@ -55,6 +66,8 @@ Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "
 | `POST /api/encounters/:encounterId/prescriptions` `{ lines }` | Issues the whole prescription atomically after a confirmed Diagnosis (201). A penicillin-class line for a penicillin-allergic patient: `409 MEDICATION_ALLERGY_CONFLICT`, nothing issued, no override. A cephalosporin needs `override { reason, note ≥4 chars }` per line (`422 medication-override-required`). `409 no-medication-conflict` against a recorded 无需用药 |
 | `POST /api/encounters/:encounterId/no-medication` | Records 无需用药 (201); requires a confirmed Diagnosis and refuses while prescriptions exist (`409 no-medication-conflict`) |
 | `GET /api/encounters/:encounterId/patient/socket` | WebSocket: the Simulated Patient's reply stream (`src/shared/agent-wire.ts`). Send `{ "type": "hello", "afterSeq": n }`; the server replays events after `n`, sends `replay.done`, then live events; `run.settled` follows once the workspace has the reply. `426` without an upgrade |
+| `GET /api/voice` | Which recognizer turns speech into questions: `paraformer-realtime-v2` with a `BAILIAN_TOKEN`, else the browser's Web Speech API |
+| `GET /api/encounters/:encounterId/voice` | WebSocket: the doctor's voice capture for an active Encounter (`src/shared/voice.ts`, the `agents/voice` protocol); `426` without an upgrade, `409 encounter-not-active` once frozen |
 
 Two Worker-seam tests enumerate the Hono app's routes and fail until a new route is listed:
 
