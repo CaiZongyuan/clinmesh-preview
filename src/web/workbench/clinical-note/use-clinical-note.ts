@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   MAX_NOTE_SECTION_LENGTH,
   NOTE_SECTIONS,
+  type ClinicalNoteView,
   type DraftAuthor,
   type NoteSection,
   type NoteSections,
@@ -147,6 +148,17 @@ export function useClinicalNote(encounter: EncounterView | null) {
     setRevisions((await signing).revisions)
   }, [encounterId, flush])
 
+  const receiveDraft = (section: NoteSection, note: ClinicalNoteView) => {
+    const draft = note.draft.find((item) => item.section === section)
+    if (!draft) return
+    dirty.current.delete(section)
+    latest.current = { ...latest.current, [section]: draft.content }
+    latestAuthors.current = { ...latestAuthors.current, [section]: draft.lastEditedBy ?? undefined }
+    setSections(latest.current)
+    setAuthors(latestAuthors.current)
+    if (dirty.current.size === 0) setSave({ kind: 'saved', at: draft.updatedAt ?? new Date().toISOString() })
+  }
+
   const lastRevision = revisions.at(-1)
   return {
     loaded,
@@ -159,6 +171,8 @@ export function useClinicalNote(encounter: EncounterView | null) {
     save,
     unsignedChanges: !!lastRevision && NOTE_SECTIONS.some((section) => lastRevision.sections[section] !== sections[section]),
     edit,
+    receiveDraft,
+    flushDraft: flush,
     append,
     retrySave: () => void flush(),
     sign,

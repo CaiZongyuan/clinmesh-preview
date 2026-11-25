@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ClinicalDrafts } from '../../shared/completion'
+import { useClinicalNoteContext } from './clinical-note/clinical-note-context'
 import { fetchClinicalDrafts, saveClinicalDraft } from '../api'
 
 type DraftKind = keyof ClinicalDrafts
@@ -14,6 +15,19 @@ export function useClinicalDrafts(encounterId: string) {
   const jobs = useRef(Promise.resolve())
   const revision = useRef(0)
   const failures = useRef(new Set<DraftKind>())
+  const incoming = useClinicalNoteContext()?.changes
+  const investigations = incoming?.investigations
+  const prescriptions = incoming?.prescriptions
+  useEffect(() => {
+    if (investigations?.module !== 'investigations') return
+    current.current = { ...current.current, investigations: investigations.drafts.investigations }
+    setDrafts(current.current)
+  }, [investigations])
+  useEffect(() => {
+    if (prescriptions?.module !== 'prescriptions') return
+    current.current = { ...current.current, prescriptions: prescriptions.drafts.prescriptions }
+    setDrafts(current.current)
+  }, [prescriptions])
 
   useEffect(() => {
     let mounted = true

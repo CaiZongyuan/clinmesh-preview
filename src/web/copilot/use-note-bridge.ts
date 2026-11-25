@@ -2,6 +2,7 @@ import { createAgent } from '@ui-sdk/react/agent'
 import { useEffect, useRef } from 'react'
 import type { ClientMessage, ServerMessage } from '../../shared/agent-wire'
 import { MAX_NOTE_SECTION_LENGTH, NOTE_SECTIONS, NOTE_SECTION_NAME } from '../../shared/clinical-note'
+import { DRAFT_MODULE_LABEL, type DraftAssistanceResponse } from '../../shared/draft-assistance'
 import { openCopilotSocket } from '../api'
 
 type Agent = ReturnType<typeof createAgent>
@@ -9,6 +10,9 @@ type Step = Parameters<Agent['act']>[0]['steps'][number]
 type Answer = Extract<ClientMessage, { type: 'bridge.result' }>
 
 const noteLabels = new Set<string>(NOTE_SECTIONS.map((section) => NOTE_SECTION_NAME[section]))
+const draftSearchLabels = new Set(['ICD-10 搜索', '搜索药品（本院药房）'])
+const draftButton = (label: string) => label.startsWith('加入待开立：') || label.startsWith('添加常用诊断 ')
+const draftTabs = new Set(['note', '病历记录', 'investigations', 'diagnosis', 'prescription', ...Object.values(DRAFT_MODULE_LABEL)])
 
 function bridgeSteps(args: unknown): Step[] | null {
   const steps = (args as { steps?: unknown } | null)?.steps
@@ -29,7 +33,8 @@ function formalControls() {
 function view(agent: Agent) {
   const focused = document.activeElement
   const snapshot = agent.snapshot().filter((entry) =>
-    !entry.offPage && (noteLabels.has(entry.label ?? '') || entry.label === '病例页签' || Boolean(entry.confirm)),
+    !entry.offPage && (noteLabels.has(entry.label ?? '') || entry.label === '病例页签' || Boolean(entry.confirm) ||
+      draftSearchLabels.has(entry.label ?? '') || draftButton(entry.label ?? '')),
   ).map((entry) => {
     const field = NOTE_SECTIONS.find((section) => NOTE_SECTION_NAME[section] === entry.label)
     if (!field) return entry
@@ -47,7 +52,7 @@ export function useNoteBridge(encounterId: string | null) {
   const active = useRef<{
     callId: string
     controller: AbortController
-    suggestionIds: string[]
+    proposals: Promise<{ id: string; response: DraftAssistanceResponse }>[]
     runId: string
   } | null>(null)
 
@@ -66,7 +71,11 @@ export function useNoteBridge(encounterId: string | null) {
           return false
         }
         if (step.label === '病例页签' && step.component === 'tabs' && step.action === 'setValue') {
-          return step.args?.[0] === 'note' || step.args?.[0] === '病历记录'
+          return typeof step.args?.[0] === 'string' && draftTabs.has(step.args[0])
+        }
+        if (step.component === 'button' && step.action === 'press' && draftButton(step.label ?? '')) return true
+        if (step.component === 'combobox' && step.action === 'setValue' && draftSearchLabels.has(step.label ?? '')) {
+          return typeof step.args?.[0] === 'string'
         }
         const text = step.args?.[0]
         return step.component === 'textarea' && noteLabels.has(step.label ?? '') && step.action === 'setValue' &&
@@ -97,24 +106,27 @@ export function useNoteBridge(encounterId: string | null) {
         respond({ ok: false, outcome: 'denied', result: '被拦截：该操作需要医生本人的临床确认。' })
         return
       }
-      const recorded = { callId, controller: new AbortController(), suggestionIds: [] as string[], runId: message.runId }
+      const recorded = { callId, controller: new AbortController(), proposals: [] as Promise<{ id: string; response: DraftAssistanceResponse }>[], runId: message.runId }
       active.current = recorded
       denied = false
       try {
         const result = await agent.act({ steps }, { signal: recorded.controller.signal })
+        const proposals = await Promise.all(recorded.proposals)
+        const suggestionIds = proposals.filter(({ response }) => response.outcome === 'suggestion').map(({ id }) => id)
+        const applied = proposals.filter(({ response }) => response.outcome === 'applied').length
         if (recorded.controller.signal.aborted) {
           respond({ ok: false, result: '已停止剩余界面操作。' })
           return
         }
         if (denied) {
           respond({ ok: false, outcome: 'denied', result: '被拦截：该操作需要医生本人的临床确认。' })
-        } else if (recorded.suggestionIds.length) {
+        } else if (suggestionIds.length) {
           respond({
             ok: true, outcome: 'suggestion',
-            result: JSON.stringify({ suggestionIds: recorded.suggestionIds, action: result }),
+            result: JSON.stringify({ suggestionIds, applied }),
           })
         } else {
-          respond({ ok: result.ok, result: JSON.stringify(result) })
+          respond({ ok: applied > 0 || result.ok, result: JSON.stringify({ applied, action: result }) })
         }
       } catch {
         respond({ ok: false, result: '界面操作失败，请重新读取快照后再试。' })
@@ -156,8 +168,10 @@ export function useNoteBridge(encounterId: string | null) {
     }
   }, [encounterId])
 
-  return (suggestionId: string) => {
-    active.current?.suggestionIds.push(suggestionId)
-    return active.current?.runId
+  return (apply: (runId: string | null, signal?: AbortSignal) => Promise<{ id: string; response: DraftAssistanceResponse }>) => {
+    const call = active.current
+    const pending = apply(call?.runId ?? null, call?.controller.signal)
+    call?.proposals.push(pending)
+    return pending
   }
 }

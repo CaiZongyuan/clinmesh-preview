@@ -1,3 +1,5 @@
+import { useClinicalNoteContext } from '../clinical-note/clinical-note-context'
+import { NoteSuggestions } from '../clinical-note/note-suggestions'
 import { Button } from '@ui-sdk/react/button'
 import {
   Combobox,
@@ -93,6 +95,7 @@ export function DiagnosisTab({ encounter, state }: { encounter: EncounterView; s
         )}
         <IcdSearch disabled={!writable || full} full={full} onAdd={state.add} />
         <CommonDiagnoses disabled={!writable} onAdd={state.add} />
+        <NoteSuggestions module="diagnosis" />
         <ConfirmDiagnosis state={state} primaryName={primary ? icdName(primary.code) : undefined} writable={writable} />
       </section>
     </div>
@@ -164,12 +167,15 @@ function DraftTable({
 // The ICD-10 search: typing filters by name, code or pinyin initials (via item keywords); Enter adds the
 // highlighted entry, or the doctor clicks it. The selection resets so the field keeps acting as a search box.
 function IcdSearch({ disabled, full, onAdd }: { disabled: boolean; full: boolean; onAdd: (code: string) => void }) {
+  const proposal = useClinicalNoteContext()
   return (
-    <Combobox
+    <Combobox aria-label="ICD-10 搜索"
       onValueChange={(code, details) => {
         // The field stays a search box: refuse the selection so the typed query remains, and add the entry.
         details.cancel()
-        if (code) onAdd(code)
+        if (!code) return
+        if (details.source === 'agent') proposal?.propose({ module: 'diagnosis', itemId: code })
+        else onAdd(code)
       }}
       autoHighlight
       disabled={disabled}
@@ -194,6 +200,7 @@ function IcdSearch({ disabled, full, onAdd }: { disabled: boolean; full: boolean
 }
 
 function CommonDiagnoses({ disabled, onAdd }: { disabled: boolean; onAdd: (code: string) => void }) {
+  const proposal = useClinicalNoteContext()
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <span className="text-muted-foreground">常用：</span>
@@ -204,7 +211,10 @@ function CommonDiagnoses({ disabled, onAdd }: { disabled: boolean; onAdd: (code:
           className="h-7 rounded-full px-2.5 text-xs"
           disabled={disabled}
           aria-label={`添加常用诊断 ${icdName(code)}`}
-          onClick={() => onAdd(code)}
+          onClick={(_event, details) => {
+            if (details.source === 'agent') proposal?.propose({ module: 'diagnosis', itemId: code })
+            else onAdd(code)
+          }}
         >
           <PlusIcon aria-hidden className="size-3" />
           {icdName(code)}

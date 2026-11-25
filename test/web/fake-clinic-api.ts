@@ -1,3 +1,4 @@
+import { createFakeDraftAssistance } from './fake-draft-assistance'
 import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebriefReference, type ClinicalDrafts } from '../../src/shared/completion'
 import type { AgentEvent, ClientMessage, ServerMessage } from '../../src/shared/agent-wire'
 import type { ConsultationTurn, PatientTurnFailure } from '../../src/shared/consultation'
@@ -160,6 +161,12 @@ export function createFakeClinicApi({
 
   const draftsByEncounter = new Map<string, ClinicalDrafts>()
   const draftsOf = (id: string) => draftsByEncounter.get(id) ?? { investigations: [], prescriptions: [] }
+  const assistance = createFakeDraftAssistance({
+    note: clinicalNotes.note,
+    diagnosis: fakeDiagnoses.diagnosis,
+    drafts: draftsOf,
+    saveDrafts: (id, drafts) => draftsByEncounter.set(id, drafts),
+  })
   const queue = (): GoldenCaseQueueEntry[] => {
     const completed = state.encounters.findLast((e) => e.status === 'completed')
     return [{
@@ -270,9 +277,12 @@ export function createFakeClinicApi({
     }
     const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined
     const drafts = draftsOf(encounterId)
+    if (action === 'draft-assistance') return assistance.handle(method, encounter, body)
+    if (method === 'PUT' && action === 'diagnosis/draft') assistance.touch(encounterId, 'diagnosis')
     if (method === 'GET' && action === 'clinical-drafts') return Response.json({ drafts })
     if (method === 'PUT' && (action === 'investigations/draft' || action === 'prescriptions/draft')) {
       if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
+      assistance.touch(encounterId, action === 'investigations/draft' ? 'investigations' : 'prescriptions')
       const next = { ...drafts, [action.split('/')[0]]: (body as { entries: unknown }).entries }
       draftsByEncounter.set(encounterId, next)
       return Response.json({ drafts: next })
@@ -289,7 +299,7 @@ export function createFakeClinicApi({
     if (method === 'POST' && action === 'completion') {
       if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
       const record = debriefRecord()
-      const gates = completionGates(fakeDiagnoses.diagnosis(encounterId), record.investigations, record.prescriptions, record.signedNote, drafts)
+      const gates = completionGates(fakeDiagnoses.diagnosis(encounterId), record.investigations, record.prescriptions, record.signedNote, drafts, assistance.view(encounterId).suggestions.length)
       const failed = gates.filter((gate) => !gate.met)
       if (failed.length) return refuse('completion-gates-unmet', `未满足完诊条件：${failed.map((gate) => COMPLETION_GATE_LABELS[gate.id]).join('、')}`)
       Object.assign(encounter, { status: 'completed', endedAt: new Date().toISOString() })

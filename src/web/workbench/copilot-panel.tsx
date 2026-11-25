@@ -201,7 +201,9 @@ function CopilotTurnView({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot
         </div>
       )}
       {turn.failure && <p className="m-0 text-xs text-destructive">{FAILURE_TEXT[turn.failure]}</p>}
-      {!turn.failure && turn.stopReason && <p className="m-0 text-xs text-muted-foreground">{STOP_TEXT[turn.stopReason]}</p>}
+      {!turn.failure && turn.stopReason && (
+        <p className="m-0 text-xs text-muted-foreground">{STOP_TEXT[turn.stopReason]}{turn.keptDrafts !== undefined && `已保留 ${turn.keptDrafts} 项草稿。`}</p>
+      )}
       {!live && (
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-muted-foreground">

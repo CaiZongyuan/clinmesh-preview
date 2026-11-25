@@ -74,9 +74,9 @@ it('creates a Suggestion for a focused or doctor-edited field and offers accept,
   const card = screen.getByRole('region', { name: '会话建议：主诉' })
   expect(card).toHaveTextContent('建议文本。')
   await user.click(within(card).getByRole('button', { name: '采纳' }))
-  expect(field).toHaveValue('建议文本。')
+  await waitFor(() => expect(field).toHaveValue('建议文本。'))
   await user.click(screen.getByRole('button', { name: '撤销采纳' }))
-  expect(field).toHaveValue('医生原文')
+  await waitFor(() => expect(field).toHaveValue('医生原文'))
   expect(screen.getByRole('region', { name: '会话建议：主诉' })).toBeInTheDocument()
 })
 
