@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { CaseDebrief } from '../../shared/completion'
 import type { EncounterView } from '../../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
@@ -11,7 +12,7 @@ import { WorkbenchColumns } from './workbench-columns'
 export type CaseFocus =
   | { kind: 'none' }
   | { kind: 'registration'; entry: GoldenCaseQueueEntry }
-  | { kind: 'encounter'; encounter: EncounterView; examinations: PhysicalExaminationView[] }
+  | { kind: 'encounter'; encounter: EncounterView; examinations: PhysicalExaminationView[]; debrief?: CaseDebrief }
 
 const HIDDEN_KEY = 'clinmesh.copilot.hidden'
 
@@ -63,7 +64,7 @@ export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; foc
       </header>
       <div className="flex min-h-0 flex-1 gap-2 py-3 pr-4 pl-3">
         <QueueRail queue={queue} focusedCaseId={focusedCaseId} />
-        <ClinicalNoteProvider encounter={focus.kind === 'encounter' ? focus.encounter : null}>
+        <ClinicalNoteProvider key={focus.kind === 'encounter' ? focus.encounter.encounterId : 'registration'} encounter={focus.kind === 'encounter' ? focus.encounter : null}>
           <WorkbenchColumns
             caseWorkspace={<CaseWorkspace focus={focus} />}
             encounter={focus.kind === 'encounter' ? focus : undefined}

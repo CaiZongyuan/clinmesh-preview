@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
+import { COMPLETION_GATE_LABELS, completionGates, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
 import type { AuditEventType, EncounterError, EncounterView } from '../shared/encounter'
 import type { CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
 import { CopilotReadModel } from './copilot-read-model'
@@ -13,11 +14,13 @@ import { PrescriptionRepository, type PrescriptionsResult } from './prescription
 import type { PrescriptionLineRequest } from '../shared/medication'
 import { ConsultationRepository, type Exchange } from './consultation-repository'
 import { EncounterRepository, type EncounterResult } from './encounter-repository'
-import { encounterChart, goldenCaseRegistrations, personaFor } from './golden-case-pack'
+import { EncounterCompletionRepository } from './encounter-completion-repository'
+import { caseTruth, encounterChart, goldenCaseRegistrations, personaFor } from './golden-case-pack'
 import { GoldenCaseRepository } from './golden-case-repository'
 import { PhysicalExaminationRepository, type PhysicalExaminationResult } from './physical-examination-repository'
 import type { InvestigationCatalogResponse } from '../shared/investigation'
-import { catalogVersion, catalogView } from './investigation-catalog'
+import { catalogItem, catalogVersion, catalogView } from './investigation-catalog'
+import { medicationCatalog } from './medication-catalog'
 import { InvestigationRepository, type InvestigationsResult } from './investigation-repository'
 import type { PatientPersona } from './simulated-patient/patient-context'
 import type { PatientReplyRequest, PatientTurnSettlement } from './simulated-patient/simulated-patient-do'
@@ -40,6 +43,7 @@ const millis = (value: unknown, fallback: number) => {
 export class ClinicWorkspaceDO extends DurableObject<Env> {
   private readonly goldenCases: GoldenCaseRepository
   private readonly encounters: EncounterRepository
+  private readonly completion: EncounterCompletionRepository
   private readonly examinations: PhysicalExaminationRepository
   private readonly investigations: InvestigationRepository
   private readonly consultation: ConsultationRepository
@@ -55,6 +59,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     super(ctx, env)
     this.goldenCases = new GoldenCaseRepository(ctx.storage.sql)
     this.encounters = new EncounterRepository(ctx.storage.sql)
+    this.completion = new EncounterCompletionRepository(ctx.storage.sql)
     this.examinations = new PhysicalExaminationRepository(ctx.storage.sql, this.encounters)
     this.investigations = new InvestigationRepository(ctx.storage.sql, this.encounters)
     this.consultation = new ConsultationRepository(ctx.storage.sql)
@@ -94,18 +99,117 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       if (result.ok) this.consultation.failPending(encounterId, 'encounter-ended', now)
       return result
     })
-    // The same freeze hook that encounter completion will call: no copilot turn may run or finish afterwards.
-    // Awaited outside the workspace transaction — an RPC inside it would deadlock the Durable Object — and a
-    // failed freeze is surfaced, because the Copilot's own encounter-state guard is only the second line of
-    // defense against late output.
-    if (result.ok) {
-      try {
-        await this.env.CLINICAL_COPILOT.getByName(encounterId).freeze(encounterId)
-      } catch (error) {
-        console.error('Clinical Copilot freeze failed', encounterId, error)
-      }
-    }
+    if (result.ok) await this.freezeCopilot(encounterId)
     return result
+  }
+
+  private async freezeCopilot(encounterId: string): Promise<void> {
+    // Await outside the transaction. Copilot's freeze hook only updates its own storage.
+    try {
+      await this.env.CLINICAL_COPILOT.getByName(encounterId).freeze(encounterId)
+    } catch (error) {
+      console.error('Clinical Copilot freeze failed', encounterId, error)
+    }
+  }
+
+  async completeEncounter(encounterId: string): Promise<EncounterResult> {
+    const result = this.ctx.storage.transactionSync((): EncounterResult => {
+      const active = this.encounters.requireActive(encounterId)
+      if (!active.ok) return active
+      const now = new Date()
+      const diagnosis = this.diagnosis.view(encounterId)
+      const prescriptions = this.prescriptions.view(encounterId)
+      const note = this.clinicalNote.view(encounterId)
+      if (!diagnosis.ok) return diagnosis
+      if (!prescriptions.ok) return prescriptions
+      if (!note.ok) return note
+      const investigations = this.investigations.list(active.encounter, now.getTime())
+      const failedGates = completionGates(
+        diagnosis.diagnosis, investigations, prescriptions.prescriptions,
+        note.note.revisions.at(-1), this.completion.drafts(encounterId),
+      ).filter((gate) => !gate.met).map((gate) => gate.id)
+      if (failedGates.length) {
+        return { ok: false, error: {
+          code: 'completion-gates-unmet',
+          message: `未满足完诊条件：${failedGates.map((gate) => COMPLETION_GATE_LABELS[gate]).join('、')}`,
+          failedGates,
+        } }
+      }
+      const truth = caseTruth(active.encounter.caseId, active.encounter.caseVersion)
+      if (!truth.ok) return truth
+      this.completion.recordDebrief(encounterId, truth.caseTruth.debriefReference)
+      this.consultation.failPending(encounterId, 'encounter-ended', now)
+      return this.encounters.end(encounterId, 'completed', DEMO_PRACTITIONER_ID, now.toISOString())
+    })
+    if (result.ok) await this.freezeCopilot(encounterId)
+    return result
+  }
+
+  getCaseDebrief(encounterId: string): { ok: true; debrief: CaseDebrief } | Refusal {
+    const found = this.encounters.get(encounterId)
+    if (!found.ok) return found
+    if (found.encounter.status !== 'completed') {
+      return { ok: false, error: { code: 'debrief-locked', message: '完诊后才能查看病例复盘。' } }
+    }
+    const reference = this.completion.reference(encounterId)
+    const diagnosis = this.diagnosis.view(encounterId)
+    const prescriptions = this.prescriptions.view(encounterId)
+    const examinations = this.examinations.list(encounterId)
+    const note = this.clinicalNote.view(encounterId)
+    if (!diagnosis.ok) return diagnosis
+    if (!prescriptions.ok) return prescriptions
+    if (!examinations.ok) return examinations
+    if (!note.ok) return note
+    const signedNote = note.note.revisions.at(-1)
+    if (!reference || !signedNote) {
+      return { ok: false, error: { code: 'debrief-locked', message: '该就诊没有可用的病例复盘。' } }
+    }
+    const questions = this.consultation.list(encounterId)
+      .filter((turn) => turn.speaker === 'doctor' && turn.status === 'final')
+      .map(({ turnId, text }) => ({ turnId, text }))
+    const investigations = this.ctx.storage.transactionSync(() =>
+      this.investigations.list(found.encounter, Date.parse(found.encounter.endedAt!)),
+    )
+    return {
+      ok: true,
+      debrief: {
+        reference, signedNote, questions,
+        diagnoses: diagnosis.diagnosis.revisions.at(-1)?.entries ?? [],
+        investigations,
+        examinations: examinations.examinations,
+        prescriptions: prescriptions.prescriptions,
+      },
+    }
+  }
+
+  getClinicalDrafts(encounterId: string): { ok: true; drafts: ClinicalDrafts } | Refusal {
+    const found = this.encounters.get(encounterId)
+    return found.ok ? { ok: true, drafts: this.completion.drafts(encounterId) } : found
+  }
+
+  saveInvestigationDraft(encounterId: string, entries: string[]): { ok: true; drafts: ClinicalDrafts } | Refusal {
+    return this.ctx.storage.transactionSync(() => {
+      const active = this.encounters.requireActive(encounterId)
+      if (!active.ok) return active
+      if (entries.some((id) => !catalogItem(id))) {
+        return { ok: false, error: { code: 'catalog-item-not-found', message: '检查目录中未找到草稿项目。' } }
+      }
+      this.completion.saveDraft(encounterId, 'investigations', entries)
+      return { ok: true, drafts: this.completion.drafts(encounterId) }
+    })
+  }
+
+  savePrescriptionDraft(encounterId: string, entries: ClinicalDrafts['prescriptions']): { ok: true; drafts: ClinicalDrafts } | Refusal {
+    return this.ctx.storage.transactionSync(() => {
+      const active = this.encounters.requireActive(encounterId)
+      if (!active.ok) return active
+      const catalog = medicationCatalog().items
+      if (entries.some((entry) => !catalog.some((item) => item.id === entry.drugId))) {
+        return { ok: false, error: { code: 'catalog-item-not-found', message: '药品目录中未找到处方草稿项目。' } }
+      }
+      this.completion.saveDraft(encounterId, 'prescriptions', entries)
+      return { ok: true, drafts: this.completion.drafts(encounterId) }
+    })
   }
 
   getEncounter(encounterId: string): EncounterResult {
@@ -143,9 +247,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   issueInvestigations(encounterId: string, catalogItemIds: string[]): InvestigationsResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.investigations.issue(encounterId, catalogItemIds, DEMO_PRACTITIONER_ID, Date.now()),
-    )
+    return this.ctx.storage.transactionSync(() => {
+      const issued = this.investigations.issue(encounterId, catalogItemIds, DEMO_PRACTITIONER_ID, Date.now())
+      if (issued.ok) this.completion.issuedInvestigations(encounterId, catalogItemIds)
+      return issued
+    })
   }
 
   releaseInvestigationNow(encounterId: string, investigationId: string): InvestigationsResult {
@@ -207,9 +313,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   issuePrescription(encounterId: string, lines: PrescriptionLineRequest[]): PrescriptionsResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.prescriptions.issue(encounterId, lines, DEMO_PRACTITIONER_ID, new Date().toISOString()),
-    )
+    return this.ctx.storage.transactionSync(() => {
+      const issued = this.prescriptions.issue(encounterId, lines, DEMO_PRACTITIONER_ID, new Date().toISOString())
+      if (issued.ok) this.completion.issuedPrescriptions(encounterId, lines)
+      return issued
+    })
   }
 
   recordNoMedication(encounterId: string): PrescriptionsResult {

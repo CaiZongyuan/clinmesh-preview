@@ -271,7 +271,7 @@ function DraftTable({ state, writable }: { state: PrescriptionsState; writable: 
                       value={line.dose}
                       aria-label={`${drug.name} 单次剂量`}
                       disabled={!writable}
-                      onChange={(e) => state.edit(line.drugId, 'dose', Number(e.target.value) || 0)}
+                      onChange={(e) => state.edit(line.drugId, 'dose', Math.max(0, Number(e.target.value) || 0))}
                     />
                     <span className="text-xs text-muted-foreground">{drug.doseUnit}</span>
                   </span>

@@ -52,8 +52,13 @@ export class EncounterRepository {
   abandon(encounterId: string, practitionerId: string, now: string): EncounterResult {
     const active = this.requireActive(encounterId)
     if (!active.ok) return active
-    this.sql.exec(`UPDATE encounter SET status = 'abandoned', ended_at = ? WHERE encounter_id = ?`, now, encounterId)
-    this.audit(encounterId, 'encounter-abandoned', practitionerId, now)
+    return this.end(encounterId, 'abandoned', practitionerId, now)
+  }
+
+  end(encounterId: string, status: 'abandoned' | 'completed', practitionerId: string, now: string): EncounterResult {
+    this.sql.exec('UPDATE encounter SET status = ?, ended_at = ? WHERE encounter_id = ?', status, now, encounterId)
+    const eventType = status === 'completed' ? 'encounter-completed' : 'encounter-abandoned'
+    this.audit(encounterId, eventType, practitionerId, now, status === 'completed' ? encounterId : undefined)
     return { ok: true, encounter: this.find(encounterId)! }
   }
 

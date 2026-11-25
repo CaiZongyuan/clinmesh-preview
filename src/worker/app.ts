@@ -58,6 +58,8 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'encounter-not-found': 404,
   'active-encounter-exists': 409,
   'encounter-not-active': 409,
+  'completion-gates-unmet': 409,
+  'debrief-locked': 409,
   'body-system-already-examined': 409,
   'case-version-retired': 409,
   'catalog-item-not-found': 404,
@@ -89,10 +91,10 @@ const investigationsOr = (c: AppContext, result: InvestigationsResult, status: C
   result.ok ? c.json<InvestigationsResponse>({ investigations: result.investigations }, status) : refuse(c, result.error)
 
 // A non-empty list of distinct ids under `key`, or null.
-async function idList(c: AppContext, key: string): Promise<string[] | null> {
+async function idList(c: AppContext, key: string, allowEmpty = false): Promise<string[] | null> {
   const body: unknown = await c.req.json().catch(() => null)
   const ids = (body as Record<string, unknown> | null)?.[key]
-  const valid = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === 'string') && new Set(ids).size === ids.length
+  const valid = Array.isArray(ids) && (allowEmpty || ids.length > 0) && ids.every((id) => typeof id === 'string') && new Set(ids).size === ids.length
   return valid ? (ids as string[]) : null
 }
 
@@ -170,6 +172,38 @@ app.get('/encounters/:encounterId/audit-events', async (c) => {
 app.post('/encounters/:encounterId/abandonment', async (c) => {
   const result = await workspace(c).abandonEncounter(c.req.param('encounterId'))
   return result.ok ? c.json<EncounterResponse>({ encounter: result.encounter }) : refuse(c, result.error)
+})
+
+app.post('/encounters/:encounterId/completion', async (c) => {
+  const result = await workspace(c).completeEncounter(c.req.param('encounterId'))
+  return result.ok ? c.json<EncounterResponse>({ encounter: result.encounter }) : refuse(c, result.error)
+})
+
+app.get('/encounters/:encounterId/debrief', async (c) => {
+  const result = await workspace(c).getCaseDebrief(c.req.param('encounterId'))
+  return result.ok ? c.json({ debrief: result.debrief }) : refuse(c, result.error)
+})
+
+app.get('/encounters/:encounterId/clinical-drafts', async (c) => {
+  const result = await workspace(c).getClinicalDrafts(c.req.param('encounterId'))
+  return result.ok ? c.json({ drafts: result.drafts }) : refuse(c, result.error)
+})
+
+app.put('/encounters/:encounterId/investigations/draft', async (c) => {
+  const entries = await idList(c, 'entries', true)
+  if (!entries) return refuse(c, { code: 'invalid-request', message: '检查草稿须为 { "entries": string[] }，且不重复' })
+  const result = await workspace(c).saveInvestigationDraft(c.req.param('encounterId'), entries)
+  return result.ok ? c.json({ drafts: result.drafts }) : refuse(c, result.error)
+})
+
+app.put('/encounters/:encounterId/prescriptions/draft', async (c) => {
+  const body: unknown = await c.req.json().catch(() => null)
+  const entries = (body as { entries?: unknown } | null)?.entries
+  const parsed = Array.isArray(entries) && entries.length === 0 ? [] : prescriptionLines(entries, { draft: true })
+  if (!parsed) return refuse(c, { code: 'invalid-request', message: '处方草稿须包含有效且不重复的药品条目' })
+  const lines = parsed.map(({ drugId, dose, route, frequency, days }) => ({ drugId, dose, route, frequency, days }))
+  const result = await workspace(c).savePrescriptionDraft(c.req.param('encounterId'), lines)
+  return result.ok ? c.json({ drafts: result.drafts }) : refuse(c, result.error)
 })
 
 app.get('/encounters/:encounterId/physical-examinations', async (c) => {

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { PrescriptionDraftLine } from '../../../shared/completion'
+import type { ClinicalDraftState } from '../use-clinical-drafts'
 import type { EncounterView } from '../../../shared/encounter'
 import {
   allergyTagFor,
@@ -10,24 +12,19 @@ import {
 } from '../../../shared/medication'
 import { fetchMedicationCatalog, fetchPrescriptions, issuePrescription, recordNoMedication } from '../../api'
 
-export interface DraftLine {
-  drugId: string
-  dose: number
-  route: MedicationRoute
-  frequency: MedicationFrequency
-  days: number
-}
+export type DraftLine = PrescriptionDraftLine
 
 const message = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback)
 
 // The 处方 tab's state: the formulary, the issued lines and No Medication conclusion of the Encounter, and
-// the Draft the doctor edits locally until Clinical Confirmation posts it whole — a red line refusal
+// the Draft the doctor edits until Clinical Confirmation posts it whole — a red line refusal
 // leaves both the server record and this Draft untouched.
-export function usePrescriptions(encounter: EncounterView) {
+export function usePrescriptions(encounter: EncounterView, drafts: ClinicalDraftState) {
   const { encounterId, status } = encounter
   const [catalog, setCatalog] = useState<MedicationCatalogItemView[]>([])
   const [view, setView] = useState<PrescriptionsView>({ lines: [], noMedication: null })
-  const [draft, setDraft] = useState<DraftLine[]>([])
+  const draft = drafts.drafts.prescriptions
+  const setDraft = (update: (entries: DraftLine[]) => DraftLine[]) => drafts.change('prescriptions', update)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -67,7 +64,7 @@ export function usePrescriptions(encounter: EncounterView) {
     [draft, catalog, allergyClasses],
   )
 
-  const writable = status === 'active' && !busy
+  const writable = status === 'active' && !busy && drafts.loaded
   const drugOf = (drugId: string) => catalog.find((drug) => drug.id === drugId)
 
   const add = (drugId: string) => {
@@ -75,13 +72,13 @@ export function usePrescriptions(encounter: EncounterView) {
     if (!drug || draft.some((line) => line.drugId === drugId) || view.lines.some((line) => line.drugId === drugId) || view.noMedication)
       return
     setError(null)
-    setDraft([...draft, { drugId, ...drug.defaults }])
+    setDraft((entries) => entries.some((entry) => entry.drugId === drugId) ? entries : [...entries, { drugId, ...drug.defaults }])
   }
 
   const edit = (drugId: string, field: keyof Omit<DraftLine, 'drugId'>, value: number | MedicationRoute | MedicationFrequency) =>
-    setDraft(draft.map((line) => (line.drugId === drugId ? { ...line, [field]: value } : line)))
+    setDraft((entries) => entries.map((line) => (line.drugId === drugId ? { ...line, [field]: value } : line)))
 
-  const remove = (drugId: string) => setDraft(draft.filter((line) => line.drugId !== drugId))
+  const remove = (drugId: string) => setDraft((entries) => entries.filter((line) => line.drugId !== drugId))
 
   const run = useCallback(async (command: () => Promise<PrescriptionsView>, fallback: string) => {
     setBusy(true)
@@ -100,17 +97,19 @@ export function usePrescriptions(encounter: EncounterView) {
 
   const issue = (override?: { reason: string; note: string }) =>
     run(
-      () =>
-        issuePrescription(
+      async () => {
+        await drafts.flush()
+        return issuePrescription(
           encounterId,
           draft.map((line) =>
             crossDrugIds.includes(line.drugId) && override ? { ...line, override } : line,
           ),
-        ),
+        )
+      },
       '开具处方失败',
     ).then((next) => {
       // A clean issuance empties the Draft; a refusal leaves it exactly as it was.
-      setDraft([])
+      drafts.replace('prescriptions', (entries) => entries.filter((line) => !draft.includes(line)))
       return next
     })
 

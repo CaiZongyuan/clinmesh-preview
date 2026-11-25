@@ -1,3 +1,4 @@
+import type { CaseDebrief, ClinicalDrafts } from '../shared/completion'
 import type {
   AskPatientResponse,
   ConsultationResponse,
@@ -107,6 +108,25 @@ export async function acknowledgeReports(encounterId: string, reportIds: string[
 }
 
 const encounterPath = (encounterId: string) => `/api/encounters/${encodeURIComponent(encounterId)}`
+
+export async function completeEncounter(encounterId: string): Promise<EncounterView> {
+  return (await request<EncounterResponse>(`${encounterPath(encounterId)}/completion`, post())).encounter
+}
+
+export async function fetchCaseDebrief(encounterId: string): Promise<CaseDebrief> {
+  return (await request<{ debrief: CaseDebrief }>(`${encounterPath(encounterId)}/debrief`)).debrief
+}
+
+export async function fetchClinicalDrafts(encounterId: string): Promise<ClinicalDrafts> {
+  return (await request<{ drafts: ClinicalDrafts }>(`${encounterPath(encounterId)}/clinical-drafts`)).drafts
+}
+
+export async function saveClinicalDraft<K extends keyof ClinicalDrafts>(
+  encounterId: string, kind: K, entries: ClinicalDrafts[K],
+): Promise<void> {
+  await request(`${encounterPath(encounterId)}/${kind}/draft`, { ...post({ entries }), method: 'PUT', keepalive: true })
+}
+
 
 export async function fetchConsultation(encounterId: string): Promise<ConsultationTurn[]> {
   return (await request<ConsultationResponse>(`${encounterPath(encounterId)}/consultation`)).turns

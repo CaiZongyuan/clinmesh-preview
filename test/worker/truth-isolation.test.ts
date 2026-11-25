@@ -77,6 +77,15 @@ const request = (method: string, path: string, body?: unknown) =>
 // and get a probe here. A probe that uncovers Case Truth through a compliant action records it in `revealed`.
 // The Encounter Abandonment probe stays last because it ends the active Encounter.
 const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
+  'PUT /api/encounters/:encounterId/investigations/draft': ({ encounterId }) =>
+    request('PUT', `/api/encounters/${encounterId}/investigations/draft`, { entries: ['pct'] }),
+  'PUT /api/encounters/:encounterId/prescriptions/draft': ({ encounterId }) =>
+    request('PUT', `/api/encounters/${encounterId}/prescriptions/draft`, {
+      entries: [{ drugId: 'doxycycline', dose: 1, route: '口服', frequency: 'BID', days: 7 }],
+    }),
+  'POST /api/encounters/:encounterId/completion': ({ encounterId }) => request('POST', `/api/encounters/${encounterId}/completion`),
+  'GET /api/encounters/:encounterId/debrief': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/debrief`),
+  'GET /api/encounters/:encounterId/clinical-drafts': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/clinical-drafts`),
   'GET /api/golden-cases': () => request('GET', '/api/golden-cases'),
   'POST /api/encounters': ({ caseId }) => request('POST', '/api/encounters', { caseId }),
   'GET /api/encounters/active': () => request('GET', '/api/encounters/active'),

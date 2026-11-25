@@ -37,6 +37,13 @@ interface FrozenEncounter {
 // Every command that writes to one Encounter, each with a request that would succeed on an active Encounter.
 // A new write route under /api/encounters/:encounterId fails the first test until it is listed here.
 const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>> = {
+  'POST /api/encounters/:encounterId/completion': ({ encounterId }) => send('POST', `/api/encounters/${encounterId}/completion`),
+  'PUT /api/encounters/:encounterId/investigations/draft': ({ encounterId }) =>
+    send('PUT', `/api/encounters/${encounterId}/investigations/draft`, { entries: ['pct'] }),
+  'PUT /api/encounters/:encounterId/prescriptions/draft': ({ encounterId }) =>
+    send('PUT', `/api/encounters/${encounterId}/prescriptions/draft`, {
+      entries: [{ drugId: 'doxycycline', dose: 1, route: '口服', frequency: 'BID', days: 7 }],
+    }),
   'POST /api/encounters/:encounterId/abandonment': ({ encounterId }) => send('POST', `/api/encounters/${encounterId}/abandonment`),
   'POST /api/encounters/:encounterId/physical-examinations': ({ encounterId }) =>
     send('POST', `/api/encounters/${encounterId}/physical-examinations`, { system: 'vitals' }),
@@ -82,7 +89,7 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
 // An Encounter with one released, unacknowledged Report, one pending Investigation, one failed patient reply
 // (no model is configured, so it fails, and a failed reply is what a retry is asked of) and a signed Clinical Note
 // with a later Draft edit, then abandoned.
-async function frozenEncounter(): Promise<FrozenEncounter> {
+async function frozenEncounter(status: 'abandoned' | 'completed'): Promise<FrozenEncounter> {
   const started = await send('POST', '/api/encounters', { caseId: 'golden-case-01' })
   const { encounterId } = ((await started.json()) as EncounterResponse).encounter
   const issued = await send('POST', `/api/encounters/${encounterId}/investigations`, { catalogItemIds: ['cbc', 'crp'] })
@@ -103,7 +110,16 @@ async function frozenEncounter(): Promise<FrozenEncounter> {
     clientPromptId: 'frozen-setup', text: '总结一下', mentions: [], mode: 'queue',
   })
   const copilotTurnId = prompted.ok ? ((await prompted.json()) as { turnId: string }).turnId : 'missing'
-  await send('POST', `/api/encounters/${encounterId}/abandonment`)
+  if (status === 'completed') {
+    await send('POST', `/api/encounters/${encounterId}/investigations/${crp.investigationId}/cancellation`)
+    await send('POST', `/api/encounters/${encounterId}/report-acknowledgements`, { reportIds: [cbcReleased.reports[0].reportId] })
+    await send('PUT', `/api/encounters/${encounterId}/diagnosis/draft`, { entries: [] })
+    await send('POST', `/api/encounters/${encounterId}/no-medication`)
+    await send('POST', `/api/encounters/${encounterId}/clinical-note/revisions`, { sections: SIGNABLE_NOTE })
+    expect((await send('POST', `/api/encounters/${encounterId}/completion`)).status).toBe(200)
+  } else {
+    expect((await send('POST', `/api/encounters/${encounterId}/abandonment`)).status).toBe(200)
+  }
   return {
     encounterId,
     pendingInvestigationId: crp.investigationId,
@@ -122,8 +138,8 @@ describe('frozen Encounters', () => {
     expect(new Set(writes)).toEqual(new Set(Object.keys(writeProbes)))
   })
 
-  it('refuses every write command once the Encounter is abandoned, changing nothing', async () => {
-    const frozenIds = await frozenEncounter()
+  it.each(['abandoned', 'completed'] as const)('refuses every write command once the Encounter is %s, changing nothing', async (status) => {
+    const frozenIds = await frozenEncounter(status)
     const { encounterId } = frozenIds
 
     const read = async () => ({
@@ -134,17 +150,17 @@ describe('frozen Encounters', () => {
       investigations: ((await (await api(`/api/encounters/${encounterId}/investigations`)).json()) as InvestigationsResponse)
         .investigations,
       consultation: await transcript(encounterId),
+      drafts: await (await api(`/api/encounters/${encounterId}/clinical-drafts`)).json(),
       note: ((await (await api(`/api/encounters/${encounterId}/clinical-note`)).json()) as ClinicalNoteResponse).note,
       diagnosis: ((await (await api(`/api/encounters/${encounterId}/diagnosis`)).json()) as DiagnosisResponse).diagnosis,
       prescriptions: ((await (await api(`/api/encounters/${encounterId}/prescriptions`)).json()) as PrescriptionsResponse)
         .prescriptions,
     })
     const frozen = await read()
-    expect(frozen.encounter.status).toBe('abandoned')
+    expect(frozen.encounter.status).toBe(status)
     expect(frozen.investigations.map((i) => i.reports.length)).toEqual([1, 0])
-    expect(frozen.note.revisions).toHaveLength(1)
-    expect(frozen.note.draft.find((d) => d.section === 'assessment')?.content).toBe('待查。')
-    expect(frozen.diagnosis.draft).toHaveLength(2)
+    expect(frozen.note.revisions).toHaveLength(status === 'completed' ? 2 : 1)
+    expect(frozen.diagnosis.draft).toHaveLength(status === 'completed' ? 0 : 2)
     expect(frozen.diagnosis.revisions).toHaveLength(1)
 
     for (const [route, probe] of Object.entries(writeProbes)) {
