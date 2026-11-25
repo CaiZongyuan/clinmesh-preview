@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { MAX_DIAGNOSIS_ENTRIES, type DiagnosisDraftEntry, type DiagnosisView } from '../../../shared/diagnosis'
 import type { EncounterView } from '../../../shared/encounter'
+import { useClinicalNoteContext } from '../clinical-note/clinical-note-context'
 import { confirmDiagnosis, fetchDiagnosis, reopenDiagnosis, saveDiagnosisDraft } from '../../api'
 
 export type DiagnosisState = {
@@ -25,6 +26,10 @@ export function useDiagnosis(encounter: EncounterView): DiagnosisState {
   const [view, setView] = useState<DiagnosisView>({ draft: [], revisions: [] })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const incoming = useClinicalNoteContext()?.changes.diagnosis
+  useEffect(() => {
+    if (incoming?.module === 'diagnosis') setView(incoming.diagnosis)
+  }, [incoming])
 
   useEffect(() => {
     let current = true

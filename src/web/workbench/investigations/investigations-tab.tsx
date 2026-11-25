@@ -1,3 +1,5 @@
+import { useClinicalNoteContext } from '../clinical-note/clinical-note-context'
+import { NoteSuggestions } from '../clinical-note/note-suggestions'
 import { Button } from '@ui-sdk/react/button'
 import { Checkbox, CheckboxIndicator } from '@ui-sdk/react/checkbox'
 import { Input } from '@ui-sdk/react/input'
@@ -34,6 +36,7 @@ const matches = (item: CatalogItemView, query: string) =>
   !query || item.name.toLowerCase().includes(query) || item.pinyinInitials.some((initials) => initials.startsWith(query))
 
 export function InvestigationsTab({ state, writable }: { state: Investigations; writable: boolean }) {
+  const proposal = useClinicalNoteContext()
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [abnormalOnly, setAbnormalOnly] = useState(false)
@@ -116,7 +119,10 @@ export function InvestigationsTab({ state, writable }: { state: Investigations; 
                       className="h-7 px-2.5 text-xs"
                       disabled={!writable}
                       aria-label={`加入待开立：${item.name}`}
-                      onClick={() => state.add(item.id)}
+                      onClick={(_event, details) => {
+                        if (details.source === 'agent') proposal?.propose({ module: 'investigations', itemId: item.id })
+                        else state.add(item.id)
+                      }}
                     >
                       加入
                     </Button>
@@ -179,6 +185,7 @@ export function InvestigationsTab({ state, writable }: { state: Investigations; 
           </div>
         </div>
       </section>
+      <NoteSuggestions module="investigations" />
       <section aria-labelledby="issued-heading" className={card}>
         <div className="flex items-center justify-between gap-2">
           <h3 id="issued-heading" className="m-0 text-sm font-semibold">

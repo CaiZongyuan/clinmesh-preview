@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { CopilotCompactResponse, CopilotContextView } from '../../shared/copilot-context'
 import type {
+  CopilotAnalysisEvent,
   CopilotConfigRequest,
   CopilotCountdown,
   CopilotFeedback,
@@ -66,6 +67,16 @@ const COPILOT_MIGRATIONS: readonly string[] = [
      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
      confirm_refs_json TEXT NOT NULL,
      updated_at INTEGER NOT NULL
+   );`,
+  `CREATE TABLE copilot_analysis_setting (
+     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
+   );
+   CREATE TABLE copilot_analysis_event (
+     id INTEGER PRIMARY KEY,
+     ref TEXT NOT NULL UNIQUE,
+     text TEXT NOT NULL,
+     automatic INTEGER NOT NULL CHECK (automatic IN (0, 1))
    );`,
 ]
 
@@ -256,17 +267,28 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
 
   async snapshot(encounterId: string): Promise<CopilotSnapshot> {
     this.bind(encounterId)
-    return {
+    const snapshot = {
       seq: this.runtime.events.latestSeq(),
       model: this.modelSetting(),
       countdown: this.countdown(),
+      autoAnalysis: this.automaticAnalysis(),
+      pendingAnalysis: this.analysisEvents(false).map(({ ref, text }) => ({ ref, text })),
       ...readSession(this.ctx.storage.sql),
+    }
+    if (!snapshot.turns.some((turn) => turn.status === 'stopped')) return snapshot
+    const kept = await this.env.CLINIC_WORKSPACE.getByName(WORKSPACE_NAME).getDraftAppliedCounts(encounterId)
+    return {
+      ...snapshot,
+      turns: snapshot.turns.map((turn) => {
+        const keptDrafts = kept[turn.turnId]
+        return keptDrafts && turn.status === 'stopped' ? { ...turn, keptDrafts } : turn
+      }),
     }
   }
 
   // The workspace calls this when a consultation turn finalizes: the trigger waits ~1.2s (立即 / 跳过 in the
   // session); a newer finalized turn flushes the pending one into the queue and replaces the countdown.
-  async triggerAnalysis(encounterId: string, trigger: { ref: string; text: string }): Promise<void> {
+  async triggerAnalysis(encounterId: string, trigger: CopilotAnalysisEvent, debounce = true): Promise<void> {
     this.bind(encounterId)
     // A frozen Encounter takes no ambient analysis; the workspace also stops any countdown at its freeze hook.
     const state = await this.read({ kind: 'encounter-state' })
@@ -277,6 +299,11 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
       if (sql.exec('SELECT 1 FROM copilot_ended').toArray().length) return null
       const seen = sql.exec('INSERT OR IGNORE INTO copilot_seen_trigger (ref) VALUES (?)', trigger.ref).rowsWritten
       if (!seen) return null
+      const automatic = this.automaticAnalysis()
+      if (!automatic || !debounce) {
+        this.storeAnalysisEvent(trigger, automatic)
+        return { previous: null }
+      }
       const pending = this.pending()
       this.ctx.storage.sql.exec(
         `INSERT INTO copilot_pending_trigger (singleton, ref, text, fire_at) VALUES (1, ?, ?, ?)
@@ -288,10 +315,72 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     if (!result) return
     this.runtime.announce({ type: 'session.updated', runId: null })
     if (result.previous) await this.enqueueTrigger(result.previous)
-    else if (this.runtime.sockets.bridgeConnected()) {
-      const alarm = await this.ctx.storage.getAlarm()
-      if (alarm === null || alarm > fireAt) await this.ctx.storage.setAlarm(fireAt)
+    else {
+      const next = this.pendingFireAt()
+      if (next !== null) {
+        const alarm = await this.ctx.storage.getAlarm()
+        if (alarm === null || alarm > next) await this.ctx.storage.setAlarm(next)
+      }
     }
+  }
+
+  setAutomaticAnalysis(encounterId: string, enabled: boolean): CopilotResult<{ enabled: boolean }> {
+    this.bind(encounterId)
+    return this.ctx.storage.transactionSync(() => {
+      const sql = this.ctx.storage.sql
+      if (sql.exec('SELECT 1 FROM copilot_ended').toArray().length) {
+        return { ok: false, error: { code: 'encounter-not-active', message: '就诊已结束。' } }
+      }
+      if (this.automaticAnalysis() !== enabled) {
+        sql.exec(`INSERT INTO copilot_analysis_setting VALUES (1, ?) ON CONFLICT (singleton) DO UPDATE SET enabled = excluded.enabled`, Number(enabled))
+        if (!enabled) {
+          sql.exec('UPDATE copilot_analysis_event SET automatic = 0 WHERE automatic = 1')
+          const countdown = this.pending()
+          if (countdown) {
+            this.storeAnalysisEvent(countdown, false)
+            sql.exec('DELETE FROM copilot_pending_trigger')
+          }
+        }
+        this.runtime.announce({ type: 'session.updated', runId: null })
+      }
+      return { ok: true, value: { enabled } }
+    })
+  }
+
+  async runPendingAnalysis(encounterId: string): Promise<CopilotResult<CopilotPromptResponse | null>> {
+    this.bind(encounterId)
+    const sql = this.ctx.storage.sql
+    if (sql.exec('SELECT 1 FROM copilot_ended').toArray().length) {
+      return { ok: false, error: { code: 'encounter-not-active', message: '就诊已结束。' } }
+    }
+    const events = this.analysisEvents(false)
+    const last = events.at(-1)
+    if (!last) return { ok: true, value: null }
+    if (!this.runtime.sockets.bridgeConnected()) {
+      return { ok: false, error: { code: 'copilot-bridge-required', message: '临床助手界面尚未连接，待分析事件已保留。' } }
+    }
+    const value = await this.enqueueTrigger({
+      ref: `analysis-batch:${crypto.randomUUID()}`,
+      text: `批量分析（${events.length} 个事件）：${events.map(({ text }) => text).join('；')}`,
+    }, () => {
+      sql.exec('DELETE FROM copilot_analysis_event WHERE automatic = 0 AND id <= ?', last.id)
+    })
+    return { ok: true, value }
+  }
+
+  private automaticAnalysis(): boolean {
+    return this.ctx.storage.sql.exec<{ enabled: number }>('SELECT enabled FROM copilot_analysis_setting').toArray()[0]?.enabled !== 0
+  }
+
+  private analysisEvents(automatic: boolean) {
+    return this.ctx.storage.sql.exec<{ ref: string; text: string; id: number }>(
+      'SELECT id, ref, text FROM copilot_analysis_event WHERE automatic = ? ORDER BY id',
+      Number(automatic),
+    ).toArray()
+  }
+
+  private storeAnalysisEvent(event: CopilotAnalysisEvent, automatic: boolean) {
+    this.ctx.storage.sql.exec('INSERT INTO copilot_analysis_event (ref, text, automatic) VALUES (?, ?, ?)', event.ref, event.text, Number(automatic))
   }
 
   // 立即：the doctor pulls the countdown forward; idempotent once it has become a run.
@@ -323,6 +412,13 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   // is spent on a turn that cannot see the screen; otherwise the fire time slips until one joins.
   async fireDueTriggers(): Promise<void> {
     if (!this.runtime.sockets.bridgeConnected()) return
+    while (this.runtime.sockets.bridgeConnected()) {
+      const event = this.analysisEvents(true)[0]
+      if (!event) break
+      await this.enqueueTrigger(event, () => {
+        this.ctx.storage.sql.exec('DELETE FROM copilot_analysis_event WHERE id = ?', event.id)
+      })
+    }
     const due = this.ctx.storage.transactionSync(() => {
       const row = this.pending()
       if (!row || row.fire_at > Date.now()) return null
@@ -332,7 +428,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     if (due) await this.enqueueTrigger(due)
   }
 
-  private enqueueTrigger(trigger: { ref: string; text: string }): Promise<CopilotPromptResponse> {
+  private enqueueTrigger(trigger: CopilotAnalysisEvent, onEnqueue?: () => void): Promise<CopilotPromptResponse> {
     const copilotTrigger: CopilotTrigger = { kind: 'event', text: trigger.text, mentions: [] }
     return this.runtime
       .enqueue({
@@ -341,8 +437,8 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
         trigger: copilotTrigger,
         deadlineAt: null,
         subject: trigger.ref,
-        messages: [{ originRef: trigger.ref, message: { role: 'user', content: `${trigger.text}\n基于这一轮开始时的界面快照，把本次对话的信息更新到病历草稿中。可以使用 ui_act 写入草稿，医生正在编辑的字段会保留为建议。` } }],
-      })
+        messages: [{ originRef: trigger.ref, message: { role: 'user', content: `${trigger.text}\n基于这一轮开始时的界面快照，按这些临床事件更新相关草稿。可以使用 ui_act 写入病历、检查、诊断和处方草稿，医生正在编辑的内容会保留为建议。` } }],
+      }, { onEnqueue })
       .then(({ runId }) => ({ kind: 'run' as const, turnId: runId }))
   }
 
@@ -358,7 +454,9 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   }
 
   private pendingFireAt(): number | null {
-    return this.runtime.sockets.bridgeConnected() ? this.pending()?.fire_at ?? null : null
+    if (!this.runtime.sockets.bridgeConnected()) return null
+    if (this.ctx.storage.sql.exec('SELECT 1 FROM copilot_analysis_event WHERE automatic = 1 LIMIT 1').toArray().length) return Date.now()
+    return this.pending()?.fire_at ?? null
   }
 
   private bridge() {
@@ -446,6 +544,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     this.bind(encounterId)
     this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec('INSERT OR IGNORE INTO copilot_ended VALUES (1)')
+      this.ctx.storage.sql.exec('DELETE FROM copilot_analysis_event')
       this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger')
       this.runtime.announce({ type: 'session.updated', runId: null })
     })
@@ -501,8 +600,8 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
-    await this.runtime.onAlarm()
     await this.fireDueTriggers()
+    await this.runtime.onAlarm()
   }
 
   private bind(encounterId: string): void {

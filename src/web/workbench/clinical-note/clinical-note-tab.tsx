@@ -68,7 +68,7 @@ export function ClinicalNoteTab({ encounter, diagnosisSeq }: { encounter: Encoun
           </p>
         )}
         {NOTE_SECTIONS.map((section) => (
-          <NoteSectionField key={section} section={section} note={note} writable={writable} suggest={context.suggest} />
+          <NoteSectionField key={section} section={section} note={note} writable={writable} propose={context.propose} />
         ))}
       </section>
     </div>
@@ -102,8 +102,8 @@ function SaveStatus({ save, onRetry }: { save: SaveState; onRetry: () => void })
   )
 }
 
-function NoteSectionField({ section, note, writable, suggest }: {
-  section: NoteSection; note: ClinicalNote; writable: boolean; suggest(section: NoteSection, text: string): void
+function NoteSectionField({ section, note, writable, propose }: {
+  section: NoteSection; note: ClinicalNote; writable: boolean; propose: NonNullable<ReturnType<typeof useClinicalNoteContext>>['propose']
 }) {
   const name = NOTE_SECTION_NAME[section]
   const required = REQUIRED_NOTE_SECTIONS.includes(section)
@@ -134,12 +134,10 @@ function NoteSectionField({ section, note, writable, suggest }: {
             return
           }
           const focused = document.activeElement?.getAttribute('data-note-section') === section
-          if (focused || note.authorOf(section) === 'doctor') {
-            details.cancel()
-            if (value !== note.contentOf(section)) suggest(section, value)
-            return
+          details.cancel()
+          if (value !== note.contentOf(section)) {
+            propose({ module: 'note', section, text: value }, focused || note.authorOf(section) === 'doctor')
           }
-          note.edit(section, value, 'assistant')
         }}
         aria-required={required || undefined}
         maxLength={MAX_NOTE_SECTION_LENGTH}

@@ -74,6 +74,7 @@ export interface CopilotTurn {
   status: CopilotTurnStatus
   failure: CopilotFailure | null
   stopReason: CopilotStopReason | null
+  keptDrafts?: number
   steps: CopilotStep[]
   steers: CopilotSteer[]
   reply: string
@@ -111,11 +112,16 @@ export interface CopilotSnapshot {
   compactions: CopilotCompactionEntry[]
   // An ambient trigger counting down its ~1.2s debounce (立即 / 跳过); a newer finalized turn flushes it into the queue.
   countdown: CopilotCountdown | null
+  autoAnalysis: boolean
+  pendingAnalysis: CopilotAnalysisEvent[]
 }
 
-export interface CopilotCountdown {
+export interface CopilotAnalysisEvent {
   ref: string
   text: string
+}
+
+export interface CopilotCountdown extends CopilotAnalysisEvent {
   fireAt: string
 }
 

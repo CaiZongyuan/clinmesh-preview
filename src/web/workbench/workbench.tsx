@@ -68,7 +68,7 @@ export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; foc
 
 function CopilotTopBar({ copilot, hidden, onShow }: { copilot: CopilotSession; hidden: boolean; onShow: () => void }) {
   const note = useClinicalNoteContext()
-  const pending = note?.writable ? note.suggestions.length : 0
+  const pending = note?.writable ? note.assistance.suggestions.length : 0
   return (
         <button
           type="button"

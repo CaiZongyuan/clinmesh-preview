@@ -231,12 +231,13 @@ export class DurableAgentRuntime {
   }
 
   // Idempotent by `externalRef`: resending the same command neither adds context twice nor runs twice.
-  async enqueue(command: EnqueueRun, { head = false } = {}): Promise<{ runId: string; created: boolean }> {
+  async enqueue(command: EnqueueRun, { head = false, onEnqueue }: { head?: boolean; onEnqueue?: () => void } = {}): Promise<{ runId: string; created: boolean }> {
     const published: LoggedEvent[] = []
     const result = this.ctx.storage.transactionSync(() => {
       const existing = this.sql
         .exec<{ run_id: string }>('SELECT run_id FROM agent_run WHERE external_ref = ?', command.externalRef)
         .toArray()[0]
+      onEnqueue?.()
       if (existing) return { runId: existing.run_id, created: false }
       if (command.subject !== undefined) published.push(...this.supersede(command.subject))
       const runId = this.insertRun(command, head)

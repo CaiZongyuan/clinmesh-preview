@@ -237,6 +237,21 @@ export class InvestigationRepository {
     return null
   }
 
+  nextReportReleaseAt(encounterId: string, now: number): number | null {
+    const firstReports = this.rows(encounterId)
+      .filter((row) => !row.cancelled_at && !this.isSettled(row.investigation_id))
+      .map((row) => Date.parse(reportTime(row)))
+      .filter((at) => at > now)
+    const amendment = this.sql.exec<{ next_at: string | null }>(
+      `SELECT MIN(report.released_at) AS next_at FROM report
+       JOIN investigation USING (investigation_id)
+       WHERE investigation.encounter_id = ? AND report.released_at > ?`,
+      encounterId, iso(now),
+    ).one().next_at
+    const next = Math.min(...firstReports, amendment ? Date.parse(amendment) : Infinity)
+    return Number.isFinite(next) ? next : null
+  }
+
   private insertReport(investigationId: string, version: number, releasedAt: string, content: ReportContent) {
     this.sql.exec(
       'INSERT INTO report (report_id, investigation_id, version, released_at, content) VALUES (?, ?, ?, ?, ?)',

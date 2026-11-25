@@ -38,6 +38,23 @@ async function ask(text: string) {
 }
 
 describe('Clinical Copilot panel', () => {
+  it('lets the doctor pause automatic analysis and run waiting events together', async () => {
+    const api = openEncounter()
+    const user = userEvent.setup()
+    const control = await screen.findByRole('switch', { name: '自动分析' })
+    expect(control).toBeChecked()
+    await user.click(control)
+    await waitFor(() => expect(control).not.toBeChecked())
+    expect(requestsTo('PUT', `/api/encounters/${ENCOUNTER}/copilot/automatic-analysis`)).toHaveLength(1)
+    act(() => api.copilot.analysisEvent(ENCOUNTER, { ref: 'examination:vitals', text: '查体完成：生命体征' }))
+    const run = await screen.findByRole('button', { name: '立即分析' })
+    await waitFor(() => expect(run).toBeEnabled())
+    expect(screen.getByText('查体完成：生命体征')).toBeInTheDocument()
+    await user.click(run)
+    await waitFor(() => expect(run).toBeDisabled())
+    expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/pending-analysis/run`)).toHaveLength(1)
+  })
+
   it('sends a prompt, streams the running turn, and shows the reply with steps and usage', async () => {
     const api = openEncounter()
     await panel()

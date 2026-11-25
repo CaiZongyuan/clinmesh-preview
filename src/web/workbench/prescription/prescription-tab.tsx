@@ -1,3 +1,5 @@
+import { useClinicalNoteContext } from '../clinical-note/clinical-note-context'
+import { NoteSuggestions } from '../clinical-note/note-suggestions'
 import { Button } from '@ui-sdk/react/button'
 import {
   Combobox,
@@ -211,6 +213,7 @@ export function PrescriptionTab({ encounter, state }: { encounter: EncounterView
             </ClinicalConfirmation>
           </>
         )}
+        <NoteSuggestions module="prescriptions" />
         {mode === 'nomed' && !noMedication && lines.length === 0 && (
           <div className="flex flex-wrap items-center gap-2 text-[13px]">
             <span className="flex-1 text-muted-foreground">
@@ -407,12 +410,20 @@ function MedicationSearch({
   disabled: boolean
   onAdd: (drugId: string) => void
 }) {
+  const proposal = useClinicalNoteContext()
+  const options = state.catalog.map((drug) => ({
+    value: drug.id,
+    label: drug.name,
+    keywords: [...drug.pinyinInitials, drug.drugClassName],
+  }))
   return (
-    <Combobox
+    <Combobox aria-label="搜索药品（本院药房）" items={options}
       onValueChange={(drugId, details) => {
         // The field stays a search box: refuse the selection so the typed query remains, and add the drug.
         details.cancel()
-        if (drugId) onAdd(drugId)
+        if (!drugId) return
+        if (details.source === 'agent') proposal?.propose({ module: 'prescriptions', itemId: drugId })
+        else onAdd(drugId)
       }}
       autoHighlight
       disabled={disabled}
@@ -422,7 +433,9 @@ function MedicationSearch({
       <ComboboxContent>
         <ComboboxEmpty>没有匹配的药品。</ComboboxEmpty>
         <ComboboxList>
-          {state.catalog.map((drug) => {
+          {({ items }) => (items as typeof options).map((item) => {
+            const drug = state.drugOf(item.value)
+            if (!drug) return null
             const tag = state.tagFor(drug)
             return (
               <ComboboxItem

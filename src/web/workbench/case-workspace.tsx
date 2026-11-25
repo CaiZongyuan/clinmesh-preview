@@ -82,16 +82,23 @@ function EncounterWorkspace({
   const investigations = useInvestigations(encounter, drafts)
   const diagnosis = useDiagnosis(encounter)
   const prescriptions = usePrescriptions(encounter, drafts)
-  const note = useClinicalNoteContext()?.note
+  const assistance = useClinicalNoteContext()
+  const note = assistance?.note
+  const suggestions = assistance?.assistance.suggestions ?? []
+  const assistantItems = assistance?.assistance.assistantItems
+  const assistantInvestigations = drafts.drafts.investigations.filter((id) => assistantItems?.investigations.includes(id)).length
+  const assistantDiagnoses = diagnosis.view.draft.filter((entry) => entry.source === 'assistant').length
+  const assistantPrescriptions = drafts.drafts.prescriptions.filter((entry) => assistantItems?.prescriptions.includes(entry.drugId)).length
   const assistantSections = Object.values(note?.authors ?? {}).filter((author) => author === 'assistant').length
   const [selectedTab, selectTab] = useState<ClinicalTab>(debrief ? 'debrief' : 'note')
   const gates = completionGates(
-    diagnosis.view, investigations.investigations, prescriptions.view, note?.revisions.at(-1), drafts.drafts,
+    diagnosis.view, investigations.investigations, prescriptions.view, note?.revisions.at(-1), drafts.drafts, suggestions.length,
   )
   const draftTabs = [
-    { tab: 'investigations', name: '检验检查', count: drafts.drafts.investigations.length },
-    { tab: 'diagnosis', name: '诊断', count: diagnosis.view.draft.length },
-    { tab: 'prescription', name: '处方', count: drafts.drafts.prescriptions.length },
+    { tab: 'note', name: '病历记录', count: suggestions.filter(({ action }) => action.module === 'note').length },
+    { tab: 'investigations', name: '检验检查', count: drafts.drafts.investigations.length + suggestions.filter(({ action }) => action.module === 'investigations').length },
+    { tab: 'diagnosis', name: '诊断', count: diagnosis.view.draft.length + suggestions.filter(({ action }) => action.module === 'diagnosis').length },
+    { tab: 'prescription', name: '处方', count: drafts.drafts.prescriptions.length + suggestions.filter(({ action }) => action.module === 'prescriptions').length },
   ] as const
   const checklist = { gates, draftTabs: draftTabs.filter(({ count }) => count > 0), onSelect: selectTab }
   const active = encounter.status === 'active'
@@ -115,28 +122,31 @@ function EncounterWorkspace({
             病历记录
             {assistantSections > 0 && <span className={`${badge} bg-info/10 text-info`}>助手 {assistantSections}</span>}
           </TabsTab>
-          <TabsTab value="investigations" className={tab}>
+          <TabsTab value="investigations" className={tab} data-agent-note-updated={assistantInvestigations > 0 || undefined}>
             检验检查
             <PendingCount count={investigations.pendingCount} />
+            <AssistantCount count={assistantInvestigations} />
           </TabsTab>
-          <TabsTab value="diagnosis" className={tab}>
+          <TabsTab value="diagnosis" className={tab} data-agent-note-updated={assistantDiagnoses > 0 || undefined}>
             诊断
+            <AssistantCount count={assistantDiagnoses} />
           </TabsTab>
-          <TabsTab value="prescription" className={tab}>
+          <TabsTab value="prescription" className={tab} data-agent-note-updated={assistantPrescriptions > 0 || undefined}>
             处方
+            <AssistantCount count={assistantPrescriptions} />
           </TabsTab>
           {debrief && <TabsTab value="debrief" className={tab}>病例复盘</TabsTab>}
         </TabsList>
         <TabsPanel value="note" className={paneBody}>
           <ClinicalNoteTab encounter={encounter} diagnosisSeq={diagnosis.view.revisions.at(-1)?.seq} />
         </TabsPanel>
-        <TabsPanel value="investigations" className={paneBody}>
+        <TabsPanel value="investigations" data-draft-module="investigations" className={paneBody}>
           <InvestigationsTab state={investigations} writable={active && drafts.loaded} />
         </TabsPanel>
-        <TabsPanel value="diagnosis" className={paneBody}>
+        <TabsPanel value="diagnosis" data-draft-module="diagnosis" className={paneBody}>
           <DiagnosisTab encounter={encounter} state={diagnosis} />
         </TabsPanel>
-        <TabsPanel value="prescription" className={paneBody}>
+        <TabsPanel value="prescription" data-draft-module="prescriptions" className={paneBody}>
           <PrescriptionTab encounter={encounter} state={prescriptions} />
         </TabsPanel>
         {debrief && <TabsPanel value="debrief" className={paneBody}><CaseDebriefPanel debrief={debrief} /></TabsPanel>}
@@ -150,7 +160,7 @@ function EncounterWorkspace({
           <CompleteEncounter
             encounter={encounter}
             ready={gates.every((gate) => gate.met)}
-            saving={drafts.saving || !drafts.loaded || Boolean(drafts.error)}
+            saving={drafts.saving || !drafts.loaded || Boolean(drafts.error) || Boolean(assistance?.pending)}
             flush={drafts.flush}
             onCompleted={() => selectTab('debrief')}
           />
@@ -158,6 +168,10 @@ function EncounterWorkspace({
       )}
     </main>
   )
+}
+
+function AssistantCount({ count }: { count: number }) {
+  return count > 0 ? <span className={`${badge} bg-info/10 text-info`}>助手 {count}</span> : null
 }
 
 // Yellow count of what waits on the doctor in a tab: pending items to issue and Reports not yet acknowledged.

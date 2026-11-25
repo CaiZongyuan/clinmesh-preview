@@ -1,3 +1,4 @@
+import { parseDraftAssistanceCommand } from '../shared/draft-assistance'
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import {
@@ -87,6 +88,8 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'copilot-turn-not-found': 404,
   'copilot-nothing-to-compact': 409,
   'copilot-llm-unavailable': 503,
+  'copilot-bridge-required': 409,
+  'copilot-run-stopped': 409,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -188,6 +191,18 @@ app.post('/encounters/:encounterId/completion', async (c) => {
 app.get('/encounters/:encounterId/debrief', async (c) => {
   const result = await workspace(c).getCaseDebrief(c.req.param('encounterId'))
   return result.ok ? c.json({ debrief: result.debrief }) : refuse(c, result.error)
+})
+
+app.get('/encounters/:encounterId/draft-assistance', async (c) => {
+  const result = await workspace(c).getDraftAssistance(c.req.param('encounterId'))
+  return result.ok ? c.json({ assistance: result.assistance }) : refuse(c, result.error)
+})
+
+app.post('/encounters/:encounterId/draft-assistance', async (c) => {
+  const command = parseDraftAssistanceCommand(await c.req.json().catch(() => null))
+  if (!command) return refuse(c, { code: 'invalid-request', message: '草稿建议操作参数无效。' })
+  const result = await workspace(c).updateDraftAssistance(c.req.param('encounterId'), command)
+  return result.ok ? c.json(result.result) : refuse(c, result.error)
 })
 
 app.get('/encounters/:encounterId/clinical-drafts', async (c) => {
@@ -565,6 +580,33 @@ app.post('/encounters/:encounterId/copilot/triggers/:ref/flush', async (c) => {
   const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-trigger-flushed', c.req.param('ref'))
   if (!audited.ok) return refuse(c, audited.error)
   return c.json<CopilotPromptResponse>(flushed.value, 201)
+})
+
+app.put('/encounters/:encounterId/copilot/automatic-analysis', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { enabled?: unknown } | null
+  if (typeof body?.enabled !== 'boolean') {
+    return refuse(c, { code: 'invalid-request', message: '请求体须为 { enabled: boolean }' })
+  }
+  const encounterId = c.req.param('encounterId')
+  const allowed = await workspace(c).authorizeCopilotCommand(encounterId)
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const result = await copilot(c).setAutomaticAnalysis(encounterId, body.enabled)
+  if (!result.ok) return refuse(c, result.error)
+  const audited = await workspace(c).auditCopilotCommand(encounterId, 'copilot-automatic-analysis-changed', body.enabled ? 'on' : 'off')
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json(result.value)
+})
+
+app.post('/encounters/:encounterId/copilot/pending-analysis/run', async (c) => {
+  const encounterId = c.req.param('encounterId')
+  const allowed = await workspace(c).authorizeCopilotCommand(encounterId)
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const run = await copilot(c).runPendingAnalysis(encounterId)
+  if (!run.ok) return refuse(c, run.error)
+  if (!run.value) return c.json(null)
+  const audited = await workspace(c).auditCopilotCommand(encounterId, 'copilot-pending-analysis-run', run.value.turnId)
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json(run.value, 201)
 })
 
 app.delete('/encounters/:encounterId/copilot/triggers/:ref', async (c) => {

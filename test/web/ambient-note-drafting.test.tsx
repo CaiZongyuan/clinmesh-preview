@@ -9,19 +9,18 @@ const id = 'encounter-1'
 
 afterEach(() => vi.unstubAllGlobals())
 
-async function openEncounter() {
-  const api = createFakeClinicApi({ encounters: [encounterFor()] })
+async function openEncounter(api = createFakeClinicApi({ encounters: [encounterFor()] })) {
   const fetch = vi.fn<typeof globalThis.fetch>(api.handle)
   vi.stubGlobal('fetch', fetch)
   vi.stubGlobal('WebSocket', api.WebSocket)
-  render(<RouterProvider router={createAppRouter({
+  const mounted = render(<RouterProvider router={createAppRouter({
     history: createMemoryHistory({ initialEntries: [`/encounters/${id}`] }),
   })} />)
   const bridge = await waitFor(() => {
     expect(api.copilot.bridge(id)).toBeDefined()
     return api.copilot.bridge(id)!
   })
-  return { api, bridge, fetch, user: userEvent.setup() }
+  return { api, bridge, fetch, unmount: mounted.unmount, user: userEvent.setup() }
 }
 
 type SnapshotEntry = { ref: string; label: string; focused?: boolean; doctorEdited?: boolean }
@@ -74,9 +73,9 @@ it('creates a Suggestion for a focused or doctor-edited field and offers accept,
   const card = screen.getByRole('region', { name: '会话建议：主诉' })
   expect(card).toHaveTextContent('建议文本。')
   await user.click(within(card).getByRole('button', { name: '采纳' }))
-  expect(field).toHaveValue('建议文本。')
+  await waitFor(() => expect(field).toHaveValue('建议文本。'))
   await user.click(screen.getByRole('button', { name: '撤销采纳' }))
-  expect(field).toHaveValue('医生原文')
+  await waitFor(() => expect(field).toHaveValue('医生原文'))
   expect(screen.getByRole('region', { name: '会话建议：主诉' })).toBeInTheDocument()
 })
 
@@ -156,4 +155,57 @@ it('signs the displayed note and leaves a bridge change during the save as a dra
   await waitFor(() => expect(api.note(id).revisions).toHaveLength(1))
   expect(api.note(id).revisions[0].sections.plan).toBe('')
   await waitFor(() => expect(api.note(id).draft.find((section) => section.section === 'plan')?.content).toBe('晚到的建议。'))
+})
+
+it('adds investigation, diagnosis and prescription drafts with the real bridge and marks their tabs', async () => {
+  const { user, bridge, api } = await openEncounter()
+  await user.click(screen.getByRole('tab', { name: '检验检查' }))
+  await screen.findByRole('button', { name: '加入待开立：血常规（五分类）' })
+  const investigations = await readSnapshot(bridge)
+  const cbc = investigations.find((item) => item.label === '加入待开立：血常规（五分类）')
+  expect(cbc).toBeDefined()
+  expect(await act(async () => bridge.call('ui_act', { steps: [{ ref: cbc!.ref, action: 'press' }] }))).toMatchObject({ ok: true })
+  await screen.findByRole('tab', { name: /检验检查.*助手 1/ })
+
+  await user.click(screen.getByRole('tab', { name: '诊断' }))
+  const diagnoses = await readSnapshot(bridge)
+  const diagnosis = diagnoses.find((item) => item.label === 'ICD-10 搜索' || item.label === '搜索 ICD-10 诊断')
+  expect(diagnosis, JSON.stringify(diagnoses)).toBeDefined()
+  const dxResult = await act(async () => bridge.call('ui_act', { steps: [{ ref: diagnosis!.ref, action: 'setValue', args: ['I10'] }] }))
+  expect(dxResult, JSON.stringify(dxResult)).toMatchObject({ ok: true })
+  expect(api.diagnosis(id).draft).toEqual([{ code: 'I10', primary: true, source: 'assistant' }])
+  await screen.findByRole('tab', { name: /诊断.*助手 1/ })
+
+  await user.click(screen.getByRole('tab', { name: '处方' }))
+  const prescriptions = await readSnapshot(bridge)
+  const medication = prescriptions.find((item) => item.label === '搜索药品（本院药房）' || item.label === '搜索药品')
+  expect(medication, JSON.stringify(prescriptions)).toBeDefined()
+  expect(await act(async () => bridge.call('ui_act', { steps: [{ ref: medication!.ref, action: 'setValue', args: ['doxycycline'] }] }))).toMatchObject({ ok: true })
+  await screen.findByRole('tab', { name: /处方.*助手 1/ })
+  const days = screen.getByRole('spinbutton', { name: /多西环素.*天数/ })
+  await user.clear(days)
+  await user.type(days, '9')
+  await waitFor(() => expect(screen.getByRole('tab', { name: '处方' })).toBeInTheDocument())
+  const outside = screen.getByRole('tab', { name: /检验检查.*助手 1/ })
+  expect(outside).toHaveAttribute('data-agent-note-updated', 'true')
+  expect(outside).not.toHaveAttribute('aria-selected', 'true')
+})
+
+it('shows a pending module Suggestion after reload when the doctor had changed an Investigation draft', async () => {
+  const original = await openEncounter()
+  await original.user.click(screen.getByRole('tab', { name: '检验检查' }))
+  await original.user.click(await screen.findByRole('button', { name: '加入待开立：血常规（五分类）' }))
+  await original.user.click(screen.getByRole('button', { name: '清空待开立' }))
+  await waitFor(() => expect(original.fetch.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2))
+  const cbc = (await readSnapshot(original.bridge)).find((item) => item.label === '加入待开立：血常规（五分类）')!
+  expect(await act(async () => original.bridge.call('ui_act', { steps: [{ ref: cbc.ref, action: 'press' }] }))).toMatchObject({ outcome: 'suggestion' })
+  original.unmount()
+  const reloaded = await openEncounter(original.api)
+  await reloaded.user.click(screen.getByRole('tab', { name: '检验检查' }))
+  const suggestion = await screen.findByRole('region', { name: '字段建议：血常规（五分类）' })
+  expect(screen.getByRole('button', { name: '完诊清单 1/5' })).toBeInTheDocument()
+  await reloaded.user.click(within(suggestion).getByRole('button', { name: '采纳' }))
+  await waitFor(() => expect(screen.queryByRole('region', { name: '字段建议：血常规（五分类）' })).not.toBeInTheDocument())
+  const saved = await original.api.handle(`/api/encounters/${id}/clinical-drafts`)
+  expect(await saved.json()).toMatchObject({ drafts: { investigations: ['cbc'] } })
 })
