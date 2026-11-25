@@ -50,12 +50,12 @@ describe('Diagnosis draft', () => {
 
   it('saves draft entries with who added each one, replacing the whole set', async () => {
     const encounterId = await startEncounter()
-    const saved = await saveDraft(encounterId, [entry('I10', true), entry('E11.9', false, 'assistant')])
+    const saved = await saveDraft(encounterId, [entry('I10', true), entry('E78.5', false, 'assistant')])
     expect(saved.status).toBe(200)
     expect(await diagnosis(encounterId)).toMatchObject({
       draft: [
         { code: 'I10', primary: true, source: 'doctor' },
-        { code: 'E11.9', primary: false, source: 'assistant' },
+        { code: 'E78.5', primary: false, source: 'assistant' },
       ],
       revisions: [],
     })
@@ -85,7 +85,7 @@ describe('Diagnosis draft', () => {
 describe('Diagnosis confirmation', () => {
   it('refuses a confirmation without exactly one primary diagnosis and writes nothing', async () => {
     const encounterId = await startEncounter()
-    for (const entries of [[entry('I10'), entry('E11.9')], [entry('I10', true), entry('E11.9', true)], []]) {
+    for (const entries of [[entry('I10'), entry('E78.5')], [entry('I10', true), entry('E78.5', true)], []]) {
       const { status, code } = await errorOf(await confirm(encounterId, entries))
       expect(status).toBe(422)
       expect(code).toBe('diagnosis-needs-primary')
@@ -96,7 +96,7 @@ describe('Diagnosis confirmation', () => {
 
   it('records exactly what the doctor confirmed as an immutable revision with names resolved, and audits it', async () => {
     const encounterId = await startEncounter()
-    const confirmed = await confirm(encounterId, [entry('I10', true), entry('E11.9', false, 'assistant')])
+    const confirmed = await confirm(encounterId, [entry('I10', true), entry('E78.5', false, 'assistant')])
     expect(confirmed.status).toBe(201)
     const view = await diagnosis(encounterId)
     expect(view.revisions).toHaveLength(1)
@@ -105,7 +105,7 @@ describe('Diagnosis confirmation', () => {
       version: 1,
       entries: [
         { code: 'I10', name: '原发性高血压', primary: true, source: 'doctor' },
-        { code: 'E11.9', name: '2型糖尿病', primary: false, source: 'assistant' },
+        { code: 'E78.5', name: '高脂血症', primary: false, source: 'assistant' },
       ],
       practitionerId: 'demo-practitioner',
     })
@@ -121,7 +121,7 @@ describe('Diagnosis confirmation', () => {
     const encounterId = await startEncounter()
     await confirm(encounterId, [entry('I10', true)])
     const noteRevision = await signNote(encounterId)
-    await confirm(encounterId, [entry('I10', true), entry('E11.9', false)])
+    await confirm(encounterId, [entry('I10', true), entry('E78.5', false)])
 
     const view = await diagnosis(encounterId)
     expect(view.revisions.map((r) => [r.version, r.entries.length])).toEqual([[1, 1], [2, 2]])
@@ -131,15 +131,15 @@ describe('Diagnosis confirmation', () => {
 
   it('reopens a draft from the latest revision, keeping codes, primary marks and sources', async () => {
     const encounterId = await startEncounter()
-    await confirm(encounterId, [entry('I10', true), entry('E11.9', false, 'assistant')])
+    await confirm(encounterId, [entry('I10', true), entry('E78.5', false, 'assistant')])
     const reopened = await reopen(encounterId)
     expect(reopened.status).toBe(200)
     expect((await diagnosis(encounterId)).draft).toEqual([
       entry('I10', true),
-      entry('E11.9', false, 'assistant'),
+      entry('E78.5', false, 'assistant'),
     ])
     await reopen(encounterId)
-    expect((await diagnosis(encounterId)).draft).toEqual([entry('I10', true), entry('E11.9', false, 'assistant')])
+    expect((await diagnosis(encounterId)).draft).toEqual([entry('I10', true), entry('E78.5', false, 'assistant')])
   })
 
   it('refuses reopening before anything was confirmed', async () => {

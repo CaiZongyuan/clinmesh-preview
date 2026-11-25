@@ -2,7 +2,7 @@
   "id": "clinmesh-preview-outpatient-golden-cases",
   "name": "ClinMesh Preview 门诊 Golden Case",
   "nameEn": "ClinMesh Preview outpatient Golden Cases",
-  "version": "2026-11-25.2",
+  "version": "2026-11-26.1",
   "cases": [
     {
       "id": "golden-case-01",
@@ -627,6 +627,240 @@
         "keyHistoryQuestions": "胸痛性质、持续时间与放射部位；高血压及血脂异常史",
         "severityAssessment": "高危：前壁导联缺血样改变伴高敏肌钙蛋白 I 升高",
         "disposition": "急转上级医院胸痛中心住院，收住 CCU 评估冠脉造影"
+      }
+    },
+    {
+      "id": "golden-case-03",
+      "title": "病例③ 新诊断2型糖尿病伴急性尿路感染",
+      "titleEn": "Newly diagnosed type 2 diabetes with urinary tract infection",
+      "recommendedEntry": "outpatient",
+      "indexDateTime": "2026-11-24T09:05:00+08:00",
+      "chiefComplaint": "多饮、多尿伴尿频、尿急 2 周",
+      "patient": {
+        "id": "golden-patient-03",
+        "name": "王秀英",
+        "birthDate": "1972-08-03",
+        "gender": "female"
+      },
+      "registration": {
+        "queueNumber": 9,
+        "outpatientNumber": "20261124-0009",
+        "registeredAt": "2026-11-24T09:05:00+08:00",
+        "visitKind": "first",
+        "department": "全科医学科门诊",
+        "insurance": "城乡居民医保"
+      },
+      "triage": {
+        "level": 3,
+        "measuredAt": "2026-11-24T08:55:00+08:00",
+        "vitals": {
+          "temperatureCelsius": 37.2,
+          "pulseBpm": 88,
+          "respiratoryRatePerMin": 18,
+          "systolicMmHg": 126,
+          "diastolicMmHg": 78,
+          "spo2Percent": 98
+        }
+      },
+      "allergies": [],
+      "chronicConditions": [],
+      "visibleHistory": [
+        {
+          "id": "lumbago-2024",
+          "encounterDateTime": "2024-05-16T10:30:00+08:00",
+          "department": "全科医学科",
+          "reasonText": "腰痛 1 周",
+          "conditions": [
+            {
+              "id": "lumbago",
+              "system": "http://hl7.org/fhir/sid/icd-10",
+              "code": "M54.5",
+              "display": "腰痛",
+              "note": "考虑腰肌劳损，休息后缓解。"
+            }
+          ],
+          "medications": [
+            {
+              "id": "ibuprofen",
+              "system": "urn:clinmesh:reference:drug-concept",
+              "code": "CM-DRUG-IBUPROFEN-300MG-ORAL-TABLET",
+              "display": "布洛芬缓释胶囊",
+              "dosageText": "0.3 g 每日两次 口服"
+            }
+          ],
+          "observations": []
+        },
+        {
+          "id": "checkup-2022",
+          "encounterDateTime": "2022-11-08T08:00:00+08:00",
+          "department": "体检中心",
+          "reasonText": "单位健康体检",
+          "conditions": [],
+          "medications": [],
+          "observations": []
+        }
+      ],
+      "persona": {
+        "version": "golden-case-03-persona-v1",
+        "content": {
+          "chiefComplaint": "这两周老是口渴，水喝得多，尿也多，小便还又急又疼。",
+          "openingStatement": "医生，我这半个月总觉得口干，水喝得比以前多不少，老跑厕所，小便的时候还有点刺痛。",
+          "knownHistorySummary": "以前身体还行，就是体检没查出过什么大病，血糖高没听说过。没有药物过敏。前段时间腰痛吃过布洛芬。",
+          "symptomExperience": "白天老是口渴，一天要喝好几暖瓶水，夜里也要起来两三趟。小便很急，憋不住，尿的时候尿道口火辣辣地疼，没有发烧，腰也不疼，就是最近人瘦了些，容易累。",
+          "medicationMemory": "现在没有在吃什么药，就是腰痛那次吃过几天止痛药。",
+          "persona": {
+            "character": "细心、有点担忧",
+            "speechStyle": "口语化，描述具体",
+            "healthLiteracy": "普通",
+            "attitude": "配合，担心自己得了大病"
+          }
+        }
+      },
+      "indexConditions": [
+        {
+          "id": "t2dm",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "E11.9",
+          "display": "2型糖尿病",
+          "note": "新诊断；糖化血红蛋白与随机血糖均显著升高；无酮症、无感知低血糖。"
+        },
+        {
+          "id": "uti",
+          "system": "http://hl7.org/fhir/sid/icd-10",
+          "code": "N39.0",
+          "display": "尿路感染",
+          "note": "急性单纯性下尿路感染；无发热、无腰痛、双肾区无叩击痛。"
+        }
+      ],
+      "physicalExamination": {
+        "vitals": {
+          "temperatureCelsius": 37.4,
+          "pulseBpm": 92,
+          "respiratoryRatePerMin": 19,
+          "systolicMmHg": 134,
+          "diastolicMmHg": 76,
+          "spo2Percent": 97,
+          "spo2Condition": "未吸氧"
+        },
+        "general": "神志清，步入诊室，应答自如，慢性病容",
+        "pharynx": "咽部不充血，双侧扁桃体不大",
+        "lungs": "双肺呼吸运动对称，听诊未闻及干湿性啰音",
+        "heart": "心率 92 次/分，律齐，各瓣膜听诊区未闻及病理性杂音",
+        "abdomen": "腹软，下腹轻压痛，无反跳痛，双肾区无叩击痛"
+      },
+      "laboratories": [
+        {
+          "id": "glu",
+          "catalogItem": "glu",
+          "codings": [
+            {
+              "code": "0101001A",
+              "display": "随机血糖",
+              "system": "https://caizongyuan.github.io/clinmesh/fhir/CodeSystem/wst-886-2026",
+              "version": "2026"
+            },
+            {
+              "code": "1508-0",
+              "display": "Glucose [Mass/volume] of Serum or Plasma",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": 13.8,
+          "unit": "mmol/L",
+          "interpretation": "H",
+          "referenceRange": {
+            "low": 3.9,
+            "high": 11.1,
+            "text": "3.9–11.1"
+          }
+        },
+        {
+          "id": "hba1c",
+          "catalogItem": "hba1c",
+          "codings": [
+            {
+              "code": "4548-4",
+              "display": "Hemoglobin A1c/Hemoglobin.total in Blood by HPLC",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": 9.8,
+          "unit": "%",
+          "interpretation": "H",
+          "referenceRange": {
+            "low": 4,
+            "high": 6,
+            "text": "4.0–6.0"
+          }
+        },
+        {
+          "id": "ua-leu",
+          "catalogItem": "urinalysis",
+          "codings": [
+            {
+              "code": "5725-9",
+              "display": "Leukocyte esterase [Presence] in Urine by Test strip",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": "阳性",
+          "unit": "",
+          "interpretation": "H",
+          "referenceRange": {
+            "text": "阴性"
+          }
+        },
+        {
+          "id": "ua-nit",
+          "catalogItem": "urinalysis",
+          "codings": [
+            {
+              "code": "5802-4",
+              "display": "Nitrite [Presence] in Urine by Test strip",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": "阳性",
+          "unit": "",
+          "interpretation": "H",
+          "referenceRange": {
+            "text": "阴性"
+          }
+        },
+        {
+          "id": "ua-glu",
+          "catalogItem": "urinalysis",
+          "codings": [
+            {
+              "code": "5749-2",
+              "display": "Glucose [Presence] in Urine by Test strip",
+              "system": "http://loinc.org",
+              "version": "2.83"
+            }
+          ],
+          "value": "阳性",
+          "unit": "",
+          "interpretation": "H",
+          "referenceRange": {
+            "text": "阴性"
+          }
+        }
+      ],
+      "textResults": [],
+      "reportAmendments": [],
+      "debriefReference": {
+        "primaryDiagnosis": "E11.9 2型糖尿病（新诊断）",
+        "secondaryDiagnoses": "N39.0 尿路感染（急性单纯性下尿路感染）",
+        "keyInvestigations": "尿检、血糖、糖化血红蛋白检测",
+        "keyExamination": "下腹轻压痛，双肾区无叩击痛",
+        "medicationConclusion": "二甲双胍控制血糖，联合抗尿路感染药物（如呋喃妥因）",
+        "keyHistoryQuestions": "两周口干多饮多尿；尿频尿急伴排尿刺痛；无发热腰痛；无药物过敏史",
+        "severityAssessment": "无发热与肾区叩痛，属单纯性下尿路感染；血糖显著升高但无酮症",
+        "disposition": "门诊口服药物治疗，两周后复诊复查血糖与尿常规"
       }
     },
     {

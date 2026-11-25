@@ -1,5 +1,5 @@
 {
-  "version": "2026-11-25.1",
+  "version": "2026-11-25.2",
   "items": [
     {
       "id": "moxifloxacin",
@@ -10,8 +10,15 @@
       "doseUnit": "片",
       "drugClass": "quinolone",
       "drugClassName": "喹诺酮类",
-      "pinyinInitials": ["mxsx"],
-      "defaults": { "dose": 1, "route": "口服", "frequency": "QD", "days": 7 },
+      "pinyinInitials": [
+        "mxsx"
+      ],
+      "defaults": {
+        "dose": 1,
+        "route": "口服",
+        "frequency": "QD",
+        "days": 7
+      },
       "insert": {
         "indications": "敏感菌所致成人社区获得性肺炎、急性细菌性鼻窦炎等。",
         "contraindications": "对莫西沙星或其他喹诺酮类过敏者禁用；QT 间期延长、低钾血症者慎用。",
@@ -27,8 +34,15 @@
       "doseUnit": "片",
       "drugClass": "tetracycline",
       "drugClassName": "四环素类",
-      "pinyinInitials": ["dxhs"],
-      "defaults": { "dose": 1, "route": "口服", "frequency": "BID", "days": 7 },
+      "pinyinInitials": [
+        "dxhs"
+      ],
+      "defaults": {
+        "dose": 1,
+        "route": "口服",
+        "frequency": "BID",
+        "days": 7
+      },
       "insert": {
         "indications": "社区获得性肺炎（非典型病原体）等。",
         "contraindications": "对四环素类过敏者禁用；8 岁以下儿童、孕妇禁用。",
@@ -44,8 +58,15 @@
       "doseUnit": "粒",
       "drugClass": "penicillin",
       "drugClassName": "青霉素类",
-      "pinyinInitials": ["amxl"],
-      "defaults": { "dose": 2, "route": "口服", "frequency": "TID", "days": 7 },
+      "pinyinInitials": [
+        "amxl"
+      ],
+      "defaults": {
+        "dose": 2,
+        "route": "口服",
+        "frequency": "TID",
+        "days": 7
+      },
       "insert": {
         "indications": "敏感菌所致呼吸道、泌尿道感染等。",
         "contraindications": "青霉素类药物过敏史或青霉素皮肤试验阳性患者禁用。",
@@ -61,8 +82,15 @@
       "doseUnit": "片",
       "drugClass": "penicillin",
       "drugClassName": "青霉素类",
-      "pinyinInitials": ["amxlklws"],
-      "defaults": { "dose": 1, "route": "口服", "frequency": "TID", "days": 7 },
+      "pinyinInitials": [
+        "amxlklws"
+      ],
+      "defaults": {
+        "dose": 1,
+        "route": "口服",
+        "frequency": "TID",
+        "days": 7
+      },
       "insert": {
         "indications": "产酶菌所致下呼吸道感染等。",
         "contraindications": "青霉素类过敏者禁用；既往使用本品出现胆汁淤积性黄疸者禁用。",
@@ -78,8 +106,15 @@
       "doseUnit": "片",
       "drugClass": "cephalosporin",
       "drugClassName": "头孢菌素类",
-      "pinyinInitials": ["tbfx"],
-      "defaults": { "dose": 1, "route": "口服", "frequency": "BID", "days": 7 },
+      "pinyinInitials": [
+        "tbfx"
+      ],
+      "defaults": {
+        "dose": 1,
+        "route": "口服",
+        "frequency": "BID",
+        "days": 7
+      },
       "insert": {
         "indications": "敏感菌所致下呼吸道感染等。",
         "contraindications": "对头孢菌素类过敏者禁用；青霉素过敏者慎用（交叉过敏）。",
@@ -95,8 +130,15 @@
       "doseUnit": "片",
       "drugClass": "analgesic",
       "drugClassName": "解热镇痛",
-      "pinyinInitials": ["dyxajf"],
-      "defaults": { "dose": 1, "route": "口服", "frequency": "PRN", "days": 3 },
+      "pinyinInitials": [
+        "dyxajf"
+      ],
+      "defaults": {
+        "dose": 1,
+        "route": "口服",
+        "frequency": "PRN",
+        "days": 3
+      },
       "insert": {
         "indications": "发热、轻中度疼痛。",
         "contraindications": "严重肝功能不全者禁用。",
@@ -112,12 +154,70 @@
       "doseUnit": "mL",
       "drugClass": "mucolytic",
       "drugClassName": "祛痰",
-      "pinyinInitials": ["axs"],
-      "defaults": { "dose": 10, "route": "口服", "frequency": "TID", "days": 5 },
+      "pinyinInitials": [
+        "axs"
+      ],
+      "defaults": {
+        "dose": 10,
+        "route": "口服",
+        "frequency": "TID",
+        "days": 5
+      },
       "insert": {
         "indications": "痰液黏稠不易咳出。",
         "contraindications": "对本品过敏者禁用。",
         "notes": "餐后服用。"
+      }
+    },
+    {
+      "id": "metformin",
+      "name": "盐酸二甲双胍片",
+      "spec": "0.5 g×20 片/盒",
+      "pack": 1,
+      "unit": "片",
+      "doseUnit": "片",
+      "drugClass": "biguanide",
+      "drugClassName": "双胍类",
+      "pinyinInitials": [
+        "ejjtg",
+        "jtg",
+        "mft"
+      ],
+      "defaults": {
+        "dose": 1,
+        "route": "口服",
+        "frequency": "BID",
+        "days": 14
+      },
+      "insert": {
+        "indications": "2型糖尿病，特别是伴超重或肥胖患者的降糖治疗。",
+        "contraindications": "1型糖尿病、糖尿病酮症酸中毒、严重肾功能不全者禁用。",
+        "notes": "随餐服用可减少胃肠道反应；碘造影检查当日停用。"
+      }
+    },
+    {
+      "id": "nitrofurantoin",
+      "name": "呋喃妥因肠溶片",
+      "spec": "0.1 g×24 片/盒",
+      "pack": 1,
+      "unit": "片",
+      "doseUnit": "片",
+      "drugClass": "nitrofuran",
+      "drugClassName": "硝基呋喃类",
+      "pinyinInitials": [
+        "fnty",
+        "fn"
+      ],
+      "defaults": {
+        "dose": 1,
+        "route": "口服",
+        "frequency": "TID",
+        "days": 7
+      },
+      "insert": {
+        "indications": "适用于大肠埃希菌、肠球菌等敏感菌所致的急性单纯性膀胱及尿道炎症。",
+        "contraindications": "对呋喃妥因或硝基呋喃类过敏者、肾功能严重减退者禁用。",
+        "notes": "整片吞服；葡萄糖-6-磷酸脱氢酶缺乏者慎用。"
       }
     }
   ]
