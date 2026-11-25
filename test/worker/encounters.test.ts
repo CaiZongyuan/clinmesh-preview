@@ -56,7 +56,7 @@ describe('starting an Encounter', () => {
     expect(read.status).toBe(200)
     expect(await read.json()).toEqual({ encounter })
     expect(await activeEncounter()).toEqual(encounter)
-    expect(await queueStatus()).toEqual(['in-encounter', 'waiting', 'waiting'])
+    expect(await queueStatus()).toEqual(['in-encounter', 'waiting', 'waiting', 'waiting'])
     expect(await auditEvents(encounter.encounterId)).toEqual([
       { eventType: 'encounter-started', practitionerId: PRACTITIONER_ID, occurredAt: encounter.startedAt },
     ])
@@ -66,12 +66,12 @@ describe('starting an Encounter', () => {
     const encounter = await startedEncounter()
     await evictDurableObject(env.CLINIC_WORKSPACE.getByName('default'))
     expect(await activeEncounter()).toEqual(encounter)
-    expect(await queueStatus()).toEqual(['in-encounter', 'waiting', 'waiting'])
+    expect(await queueStatus()).toEqual(['in-encounter', 'waiting', 'waiting', 'waiting'])
   })
 
   it('reports no active Encounter in a fresh workspace', async () => {
     expect(await activeEncounter()).toBeNull()
-    expect(await queueStatus()).toEqual(['waiting', 'waiting', 'waiting'])
+    expect(await queueStatus()).toEqual(['waiting', 'waiting', 'waiting', 'waiting'])
   })
 
   it('refuses an unknown Golden Case and a malformed request', async () => {
@@ -136,7 +136,7 @@ describe('Encounter Abandonment', () => {
 
     expect(await (await api(`/api/encounters/${encounter.encounterId}`)).json()).toEqual({ encounter: abandoned })
     expect(await activeEncounter()).toBeNull()
-    expect(await queueStatus()).toEqual(['waiting', 'waiting', 'waiting'])
+    expect(await queueStatus()).toEqual(['waiting', 'waiting', 'waiting', 'waiting'])
     expect(await auditEvents(encounter.encounterId)).toEqual([
       { eventType: 'encounter-started', practitionerId: PRACTITIONER_ID, occurredAt: encounter.startedAt },
       { eventType: 'encounter-abandoned', practitionerId: PRACTITIONER_ID, occurredAt: abandoned.endedAt },

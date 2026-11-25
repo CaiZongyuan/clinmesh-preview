@@ -50,8 +50,8 @@ describe('GET /api/golden-cases', () => {
       sql.exec("UPDATE golden_case SET queue_number = 15, patient_name = '旧患者' WHERE case_id = 'golden-case-04'")
       const insert = `INSERT INTO golden_case (case_id, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind)
                       VALUES (?, ?, ?, 'female', '1960-01-01', '旧主诉', '2026-11-24T08:46:00+08:00', 'return')`
-      sql.exec(insert, 'outpatient-cap-penicillin-anaphylaxis-v1', 11, '改名前的病例')
-      sql.exec(insert, 'retired-case', 12, '已移除患者')
+      sql.exec(insert, 'outpatient-cap-penicillin-anaphylaxis-v1', 16, '改名前的病例')
+      sql.exec(insert, 'retired-case', 17, '已移除患者')
     })
 
     await reloadWorkspace()
