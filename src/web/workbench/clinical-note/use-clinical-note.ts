@@ -138,10 +138,11 @@ export function useClinicalNote(encounter: EncounterView | null) {
     [edit],
   )
 
-  const sign = useCallback(async () => {
+  const sign = useCallback(async (confirmed: NoteSections) => {
     if (!encounterId) return
+    const signedSections = { ...confirmed }
     if (!(await flush())) throw new Error('草稿未能保存，请稍后再签署。')
-    const signing = queue.current.then(() => signClinicalNote(encounterId, latest.current))
+    const signing = queue.current.then(() => signClinicalNote(encounterId, signedSections))
     queue.current = signing.catch(() => {})
     setRevisions((await signing).revisions)
   }, [encounterId, flush])

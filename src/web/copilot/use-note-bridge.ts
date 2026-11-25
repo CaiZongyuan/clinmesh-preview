@@ -44,7 +44,12 @@ function view(agent: Agent) {
 }
 
 export function useNoteBridge(encounterId: string | null) {
-  const active = useRef<{ suggestionIds: string[]; runId: string | undefined } | null>(null)
+  const active = useRef<{
+    callId: string
+    controller: AbortController
+    suggestionIds: string[]
+    runId: string
+  } | null>(null)
 
   useEffect(() => {
     if (!encounterId) return
@@ -55,7 +60,7 @@ export function useNoteBridge(encounterId: string | null) {
     let delay = 500
     const agent = createAgent({
       allow(step) {
-        if (disposed) return false
+        if (disposed || active.current?.controller.signal.aborted) return false
         if (step.confirm) {
           denied = true
           return false
@@ -92,11 +97,15 @@ export function useNoteBridge(encounterId: string | null) {
         respond({ ok: false, outcome: 'denied', result: '被拦截：该操作需要医生本人的临床确认。' })
         return
       }
-      const recorded = { suggestionIds: [] as string[], runId: message.runId }
+      const recorded = { callId, controller: new AbortController(), suggestionIds: [] as string[], runId: message.runId }
       active.current = recorded
       denied = false
       try {
-        const result = await agent.act({ steps })
+        const result = await agent.act({ steps }, { signal: recorded.controller.signal })
+        if (recorded.controller.signal.aborted) {
+          respond({ ok: false, result: '已停止剩余界面操作。' })
+          return
+        }
         if (denied) {
           respond({ ok: false, outcome: 'denied', result: '被拦截：该操作需要医生本人的临床确认。' })
         } else if (recorded.suggestionIds.length) {
@@ -121,11 +130,18 @@ export function useNoteBridge(encounterId: string | null) {
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(String(event.data)) as ServerMessage
-          if (message.type === 'bridge.call' && typeof message.callId === 'string') void handle(ws, message)
+          if (disposed || socket !== ws) return
+          if (message.type === 'bridge.cancel' && active.current?.callId === message.callId) {
+            active.current.controller.abort()
+          } else if (message.type === 'bridge.call' && typeof message.callId === 'string') {
+            void handle(ws, message)
+          }
         } catch {}
       }
       ws.onclose = (event) => {
-        if (disposed || socket !== ws || event?.reason === 'Bridge replaced') return
+        if (disposed || socket !== ws) return
+        active.current?.controller.abort()
+        if (event?.reason === 'Bridge replaced') return
         timer = setTimeout(connect, delay)
         delay = Math.min(delay * 2, 8000)
       }
@@ -134,6 +150,7 @@ export function useNoteBridge(encounterId: string | null) {
     return () => {
       disposed = true
       clearTimeout(timer)
+      active.current?.controller.abort()
       active.current = null
       socket?.close()
     }

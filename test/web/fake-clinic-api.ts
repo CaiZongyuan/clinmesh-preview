@@ -635,8 +635,11 @@ export function createFakeClinicApi({
       }
     }
 
-    call(tool: 'ui_snapshot' | 'ui_act', args: unknown) {
-      const callId = crypto.randomUUID()
+    cancel(callId: string) {
+      this.onmessage?.({ data: JSON.stringify({ type: 'bridge.cancel', callId }) })
+    }
+
+    call(tool: 'ui_snapshot' | 'ui_act', args: unknown, callId: string = crypto.randomUUID()) {
       return new Promise<Extract<ClientMessage, { type: 'bridge.result' }>>((resolve) => {
         this.pending.set(callId, resolve)
         this.onmessage?.({ data: JSON.stringify({ type: 'bridge.call', callId, tool, args }) })

@@ -1,7 +1,8 @@
+import type { ServerMessage } from '../../src/shared/agent-wire'
 import { env, runDurableObjectAlarm } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { installScripted } from './support/scripted-llm'
-import { asked, send, settled, startEncounter } from './support/clinic'
+import { asked, api, eventsOf, openCopilotBridgeSocket, send, settled, startEncounter } from './support/clinic'
 import { expectNoCaseTruth } from './case-truth'
 import { prompt, serveBridge, snapshotWithConfirm } from './support/bridge'
 
@@ -46,6 +47,56 @@ const snapshotOf = async (encounterId: string) => {
 }
 
 describe('ui-sdk bridge (#14)', () => {
+  it('replays the patient viewer in sequence before delivering live events', async () => {
+    const encounterId = await startEncounter()
+    installScripted('patient').reply('我咳嗽三天了。')
+    const response = await api(`/api/encounters/${encounterId}/patient/socket`, { headers: { upgrade: 'websocket' } })
+    expect(response.status).toBe(101)
+    const ws = response.webSocket!
+    const received: ServerMessage[] = []
+    ws.addEventListener('message', (event) => {
+      received.push(JSON.parse(String(event.data)) as ServerMessage)
+    })
+    ws.accept()
+    try {
+      const turn = (await asked(encounterId, '咳了几天？')).patientTurn
+      await settled(encounterId, turn.turnId)
+      ws.send(JSON.stringify({ type: 'hello', afterSeq: 0 }))
+      await vi.waitFor(() => expect(received.some((message) => message.type === 'replay.done')).toBe(true))
+      const events = eventsOf(received)
+      expect(events[0]).toMatchObject({ type: 'run.started', ref: turn.turnId })
+      expect(events.map((event) => event.seq)).toEqual([...new Set(events.map((event) => event.seq))].sort((a, b) => a - b))
+    } finally {
+      ws.close()
+    }
+  })
+
+  it.each(['/copilot/stop', '/abandonment'])('cancels a pending browser action on %s', async (path) => {
+    const encounterId = await startEncounter()
+    const llm = installScripted('copilot')
+      .toolCall('ui_act', { steps: [{ ref: 'c1', action: 'setValue', args: ['晚到的草稿'] }] })
+      .reply('不应继续运行。')
+    const bridge = await openCopilotBridgeSocket(encounterId)
+    bridge.ws.addEventListener('message', (event) => {
+      const frame = JSON.parse(String(event.data)) as { type: string; callId: string; tool?: string }
+      if (frame.type === 'bridge.call' && frame.tool === 'ui_snapshot') {
+        bridge.ws.send(JSON.stringify({ type: 'bridge.result', callId: frame.callId, ok: true, result: snapshotWithConfirm() }))
+      }
+    })
+    try {
+      expect((await prompt(encounterId, 'pending-browser-action', '请编辑草稿')).status).toBe(201)
+      await bridge.waitFor((messages) => messages.some((frame) => frame.type === 'bridge.call' && frame.tool === 'ui_act'))
+      const call = bridge.messages.find((frame) => frame.type === 'bridge.call' && frame.tool === 'ui_act')!
+      expect((await send('POST', `/api/encounters/${encounterId}${path}`)).ok).toBe(true)
+      await bridge.waitFor((messages) => messages.some((frame) => (frame as { type: string }).type === 'bridge.cancel'), 1000)
+      expect(bridge.messages).toContainEqual({ type: 'bridge.cancel', callId: (call as { callId: string }).callId })
+      expect(llm.requests).toHaveLength(1)
+    } finally {
+      bridge.close()
+    }
+  })
+
+
   it('a finalized consultation turn starts a ~1.2s countdown; 立即 flushes it into a run; 跳过 discards it', async () => {
     const encounterId = await withConsultation('one')
     const snapshot = await snapshotOf(encounterId)

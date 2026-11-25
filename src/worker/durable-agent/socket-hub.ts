@@ -43,7 +43,7 @@ export class SocketHub {
       }
     }
     this.ctx.acceptWebSocket(server, [bridge ? BRIDGE : VIEWER])
-    server.serializeAttachment({ ready: !bridge } satisfies ViewerAttachment)
+    server.serializeAttachment({ ready: false } satisfies ViewerAttachment)
     if (bridge) this.onBridgeConnected()
     return new Response(null, { status: 101, webSocket: client })
   }
@@ -69,10 +69,14 @@ export class SocketHub {
         signal.removeEventListener('abort', onAbort)
         resolve(result)
       }
-      const onAbort = () => finish({ ok: false, result: '未执行：本轮已结束。' })
-      const timer = setTimeout(() => finish({
-        ok: false, result: '助手界面未在时限内响应（结果未知），请重新读取界面快照后再试。',
-      }), BRIDGE_CALL_TIMEOUT_MS)
+      const cancel = (result: string) => {
+        send(socket, { type: 'bridge.cancel', callId })
+        finish({ ok: false, result })
+      }
+      const onAbort = () => cancel('已停止剩余界面操作。')
+      const timer = setTimeout(() => cancel(
+        '助手界面未在时限内响应（结果未知），请重新读取界面快照后再试。',
+      ), BRIDGE_CALL_TIMEOUT_MS)
       signal.addEventListener('abort', onAbort, { once: true })
       this.pending.set(callId, { socket, finish })
       send(socket, { type: 'bridge.call', callId, runId, tool, args })

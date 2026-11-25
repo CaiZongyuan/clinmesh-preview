@@ -109,3 +109,51 @@ it('shows countdown and top-bar status and sends 立即 and 跳过 to the curren
   await user.click(within(await screen.findByRole('region', { name: '自动分析倒计时' })).getByRole('button', { name: '跳过' }))
   expect(fetch).toHaveBeenCalledWith(`/api/encounters/${id}/copilot/triggers/consultation%3Ay`, { method: 'DELETE' })
 })
+
+it('cancels the remaining browser steps when the Worker stops a bridge call', async () => {
+  const { bridge } = await openEncounter()
+  expect(await writeSection(bridge, '主诉', '已应用。')).toMatchObject({ ok: true })
+  const target = screen.getByRole('textbox', { name: '现病史' })
+  const ref = (await readSnapshot(bridge)).find((entry) => entry.label === '现病史')!.ref
+  const result = await act(async () => {
+    const pending = bridge.call('ui_act', { steps: [{ ref, action: 'setValue', args: ['晚到的草稿。'] }] }, 'stopped-call')
+    bridge.cancel('stopped-call')
+    return pending
+  })
+  expect(result.ok).toBe(false)
+  expect(target).toHaveValue('')
+  expect(screen.getByRole('textbox', { name: '主诉' })).toHaveValue('已应用。')
+})
+
+it('signs the displayed note and leaves a bridge change during the save as a draft', async () => {
+  const { api, bridge, fetch, user } = await openEncounter()
+  await user.type(screen.getByRole('textbox', { name: '主诉' }), '发热。')
+  await user.type(screen.getByRole('textbox', { name: '现病史' }), '三天前起病。')
+  const plan = (await readSnapshot(bridge)).find((item) => item.label === '处理意见与随访')!.ref
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  let saving = false
+  fetch.mockImplementation(async (url, init) => {
+    if (init?.method === 'PATCH' && String(url).endsWith('/clinical-note/draft')) {
+      saving = true
+      await gate
+    }
+    return api.handle(url, init)
+  })
+  try {
+    await user.click(screen.getByRole('button', { name: '签署病历' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).not.toHaveTextContent('晚到的建议。')
+    await user.click(within(dialog).getByRole('button', { name: '确认签署' }))
+    await waitFor(() => expect(saving).toBe(true))
+    const result = await act(async () =>
+      bridge.call('ui_act', { steps: [{ ref: plan, action: 'setValue', args: ['晚到的建议。'] }] }),
+    )
+    expect(result.ok).toBe(true)
+  } finally {
+    release()
+  }
+  await waitFor(() => expect(api.note(id).revisions).toHaveLength(1))
+  expect(api.note(id).revisions[0].sections.plan).toBe('')
+  await waitFor(() => expect(api.note(id).draft.find((section) => section.section === 'plan')?.content).toBe('晚到的建议。'))
+})

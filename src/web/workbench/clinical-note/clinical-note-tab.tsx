@@ -228,7 +228,7 @@ function SignNote({ note, encounter, writable }: { note: ClinicalNote; encounter
       title={first ? '签署门诊病历？' : `追加签署第 ${version} 版病历？`}
       confirmLabel="确认签署"
       intent={`签署${encounter.patient.name}本次就诊的门诊病历第 ${version} 版`}
-      onConfirm={note.sign}
+      onConfirm={() => note.sign(note.sections)}
     >
       <dl className="m-0 flex max-h-64 flex-col gap-1 overflow-y-auto">
         {NOTE_SECTIONS.map((section) => (

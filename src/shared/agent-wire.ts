@@ -39,3 +39,4 @@ export type ServerMessage =
   // The client is ahead of the server's log (its state was reset): reload the snapshot and say hello from 0.
   | { type: 'resync' }
   | { type: 'bridge.call'; callId: string; runId: string; tool: 'ui_snapshot' | 'ui_act'; args: unknown }
+  | { type: 'bridge.cancel'; callId: string }
