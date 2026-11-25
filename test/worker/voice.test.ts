@@ -1,5 +1,4 @@
-import { exports } from 'cloudflare:workers'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AskPatientResponse } from '../../src/shared/consultation'
 import type { VoiceServerMessage } from '../../src/shared/voice'
 import { expectNoCaseTruth } from './case-truth'
@@ -32,7 +31,7 @@ async function openVoiceSocket(encounterId: string): Promise<VoiceSocket> {
       vi.waitFor(() => expect(predicate(messages), JSON.stringify(messages)).toBe(true), { timeout, interval: 10 }),
     close: () => ws.close(),
   }
-  await socket.waitFor((m) => m.some((x) => x.type === 'welcome'))
+  await socket.waitFor((m) => m.some((x) => (x as { type: string }).type === 'welcome'))
   return socket
 }
 
@@ -45,10 +44,6 @@ const voiceTurn = (m: VoiceServerMessage[]) =>
   m.find((x): x is Extract<VoiceServerMessage, { type: 'clinmesh.voice-turn' }> => x.type === 'clinmesh.voice-turn')!
 
 describe('voice capture (ADR-0003: the doctor speaks, the pipeline asks the Simulated Patient)', () => {
-  afterEach(() => {
-    // Kept so a red run can show the raw frames; green runs stay quiet.
-  })
-
   it('offers Paraformer when the Worker has a Bailian token, and never the token itself', async () => {
     const response = await api('/api/voice')
     expect(response.status).toBe(200)
@@ -92,8 +87,7 @@ describe('voice capture (ADR-0003: the doctor speaks, the pipeline asks the Simu
       })
       expect(turn.latencyMs).toBeTypeOf('number')
     }
-    await socket.waitFor((m) => m.some((x) => x.type === 'transcript_interim'), 1).catch(() => {})
-    expect(socket.messages.some((x) => x.type === 'transcript_interim' && x.text === '您哪里')).toBe(true)
+    await socket.waitFor((m) => m.some((x) => x.type === 'transcript_interim' && x.text === '您哪里'))
     expect(socket.messages.some((x) => x.type === 'transcript' && x.role === 'user' && x.text === '您哪里不舒服？')).toBe(true)
 
     // The reply settles on the Simulated Patient's own socket, exactly like a typed question.
@@ -171,12 +165,13 @@ describe('voice capture (ADR-0003: the doctor speaks, the pipeline asks the Simu
     await socket.waitFor((m) => m.some((x) => x.type === 'clinmesh.voice-turn' && !x.ok))
     const refused = voiceTurn(socket.messages)
     expect(refused.ok).toBe(false)
-    if (!refused.ok) expect(refused.error.code).toBe('patient-turn-pending')
+    const clientTurnId = !refused.ok ? refused.clientTurnId : ''
+    expect(!refused.ok && refused.error.code).toBe('patient-turn-pending')
 
     // Once the held reply settles, asking again with the same id records the spoken sentence.
     held.release()
     await settled(encounterId, pending.patientTurn.turnId)
-    socket.send({ type: 'clinmesh.resubmit', clientTurnId: refused.clientTurnId })
+    socket.send({ type: 'clinmesh.resubmit', clientTurnId })
     await socket.waitFor((m) => m.some((x) => x.type === 'clinmesh.voice-turn' && x.ok))
     socket.close()
     // The resubmit's reply settles like any other patient turn.

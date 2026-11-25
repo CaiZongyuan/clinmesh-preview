@@ -9,9 +9,9 @@ import {
   ScrollAreaViewport,
 } from '@ui-sdk/react/scroll-area'
 import { SegmentedControl, SegmentedControlIndicator, SegmentedControlItem } from '@ui-sdk/react/segmented-control'
-import { ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon } from 'lucide-react'
+import { ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, MicIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
-import { MAX_QUESTION_LENGTH, type ConsultationTurn, type PatientTurnFailure } from '../../shared/consultation'
+import { MAX_QUESTION_LENGTH, type ConsultationTurn, type PatientTurnFailure, type Recognizer } from '../../shared/consultation'
 import type { EncounterView } from '../../shared/encounter'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import type { Consultation } from '../consultation/use-consultation'
@@ -19,6 +19,8 @@ import { QuoteMenu, quotedTurn } from './clinical-note/quote-menu'
 import { formatClockSeconds } from './format'
 import { badge, iconButton, pane, paneHeader } from './pane-styles'
 import { PhysicalExaminationPanel, PhysicalExaminationRow } from './physical-examination'
+import { useVoiceCapture } from '../voice/use-voice-capture'
+import { VoiceBar } from './voice-bar'
 
 export interface EncounterContext {
   encounter: EncounterView
@@ -60,6 +62,11 @@ const FAILURE_TEXT: Record<PatientTurnFailure, string> = {
   'encounter-ended': '就诊已结束，本轮未作答。',
 }
 
+const RECOGNIZER_LABEL: Record<Recognizer, string> = {
+  'paraformer-realtime-v2': 'Paraformer',
+  'web-speech': '网页识别',
+}
+
 interface ColumnProps {
   encounter?: EncounterContext
   consultation: Consultation
@@ -69,6 +76,7 @@ interface ColumnProps {
 export function ConsultationColumn({ encounter: context, consultation, onCollapse }: ColumnProps) {
   const [filter, setFilter] = useState<TranscriptFilter>('all')
   const encounter = context?.encounter
+  const voice = useVoiceCapture(encounter?.encounterId ?? null, consultation.accept)
   const visible = transcriptOf(consultation.turns, context?.examinations ?? []).filter(
     (entry) => filter === 'all' || entry.channel === filter,
   )
@@ -146,6 +154,7 @@ export function ConsultationColumn({ encounter: context, consultation, onCollaps
           </ScrollArea>
           <div className="flex flex-none flex-col gap-2 border-t px-3.5 py-2">
             <PhysicalExaminationPanel encounter={encounter} examinations={context.examinations} />
+            <VoiceBar encounter={encounter} voice={voice} />
             <QuestionComposer encounter={encounter} consultation={consultation} />
           </div>
         </>
@@ -206,6 +215,13 @@ function TurnRow({ turn, patientName, streamed, retry }: TurnRowProps) {
             <span className={`${badge} h-[18px] bg-muted px-[5px] text-[11px] font-normal`}>
               <KeyboardIcon aria-hidden="true" size={11} />
               键入
+            </span>
+          ) : turn.source === 'voice' ? (
+            <span className={`${badge} h-[18px] bg-muted px-[5px] text-[11px] font-normal`}>
+              <MicIcon aria-hidden="true" size={11} />
+              语音
+              {turn.voice && ` · ${(turn.voice.durationMs / 1000).toFixed(1)}s · ${RECOGNIZER_LABEL[turn.voice.recognizer]}`}
+              {turn.voice?.confidence != null && ` · ${(turn.voice.confidence * 100).toFixed(0)}%`}
             </span>
           ) : (
             <span className={`${badge} h-[18px] bg-muted px-[5px] text-[11px] font-normal`}>模拟患者</span>

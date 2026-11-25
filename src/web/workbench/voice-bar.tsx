@@ -1,0 +1,248 @@
+import { Button } from '@ui-sdk/react/button'
+import { MicIcon, MicOffIcon, HandIcon, CircleStopIcon } from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import type { EncounterView } from '../../shared/encounter'
+import type { VoiceCaptureController } from '../voice/use-voice-capture'
+import { badge } from './pane-styles'
+
+const ASR_LABEL: Record<VoiceCaptureController['asr'], string> = {
+  off: '未连接',
+  connecting: '识别服务连接中…',
+  ready: '识别服务已连接',
+  error: '识别服务出错',
+}
+
+// Pointer tracking for the hold button, kept across its remounts.
+interface HoldControls {
+  down(clientY: number): void
+  move(clientY: number): void
+  up(): void
+}
+
+function useHoldControls(voice: VoiceCaptureController, active: boolean): HoldControls {
+  const startY = useRef<number | null>(null)
+  useEffect(() => {
+    if (!voice.holding) startY.current = null
+  }, [voice.holding])
+  useEffect(() => {
+    if (!active) startY.current = null
+  }, [active])
+  return {
+    down: (clientY) => {
+      startY.current = clientY
+      voice.press()
+    },
+    move: (clientY) => {
+      if (startY.current !== null) voice.slide(clientY - startY.current)
+    },
+    up: () => {
+      if (startY.current === null) return
+      startY.current = null
+      voice.release()
+    },
+  }
+}
+
+// The doctor's voice capture bar: hands-free listening, push-to-talk, and the pause that guarantees privacy.
+// Hands-free is toggled (or M); push-to-talk is held with the pointer or Space, and sliding up while holding
+// cancels. While paused a persistent banner says nothing is being heard or transcribed.
+export function VoiceBar({ encounter, voice }: { encounter: EncounterView; voice: VoiceCaptureController }) {
+  const active = encounter.status === 'active'
+  useVoiceKeys(voice, active)
+  const hold = useHoldControls(voice, active)
+  return (
+    <div className="flex flex-col gap-1.5">
+      {voice.paused && (
+        <p role="status" aria-label="麦克风已暂停" className={`${badge} h-auto w-fit bg-warning/15 px-2 py-1 text-warning`}>
+          <MicOffIcon aria-hidden="true" size={12} />
+          麦克风已暂停：暂停期间不会收音，也不会转写任何内容。
+        </p>
+      )}
+      {voice.error && (
+        <p role="alert" className="m-0 text-xs text-destructive">
+          {voice.error}
+        </p>
+      )}
+      {voice.notice && !voice.error && (
+        <p role="status" className="m-0 text-xs text-muted-foreground">
+          {voice.notice}
+        </p>
+      )}
+      {voice.refused && (
+        <p role="alert" className="m-0 flex flex-wrap items-center gap-2 text-xs text-destructive">
+          语音提问未被记录（{voice.refused.message}）
+          <Button className="h-6 gap-1 px-2 text-xs" onClick={voice.resubmit}>
+            重新提交这句
+          </Button>
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2" data-testid="voice-bar">
+        {active && !voice.paused ? (
+          voice.holding ? (
+            <HoldButton voice={voice} hold={hold} />
+          ) : (
+            <>
+              <Button
+                aria-pressed={voice.capturing}
+                aria-label={voice.capturing ? '停止持续收音' : '开始持续收音'}
+                data-variant={voice.capturing ? 'solid' : undefined}
+                className="h-8 gap-1.5 px-3 text-xs"
+                onClick={voice.toggle}
+              >
+                <MicIcon aria-hidden="true" size={13} />
+                {voice.capturing ? '停止收音' : '持续收音'}
+                <kbd className="font-mono text-[10px] opacity-60">M</kbd>
+              </Button>
+              <HoldButton voice={voice} hold={hold} />
+              <Button aria-label="暂停收音" aria-pressed={false} className="h-8 gap-1.5 px-2.5 text-xs" onClick={voice.togglePause}>
+                <MicOffIcon aria-hidden="true" size={13} />
+                暂停
+              </Button>
+            </>
+          )
+        ) : (
+          <Button aria-label="恢复收音" data-variant="solid" className="h-8 gap-1.5 px-3 text-xs" onClick={voice.togglePause} disabled={!voice.paused}>
+            <MicIcon aria-hidden="true" size={13} />
+            恢复收音
+          </Button>
+        )}
+        {voice.capturing && !voice.holding && (
+          <span aria-label="正在收音" className="flex items-center gap-1 text-xs text-destructive">
+            <LevelDot level={voice.level} />
+            正在收音{voice.interim !== null && voice.interim !== '' ? ` · ${voice.interim}` : ''}
+          </span>
+        )}
+        <VoiceStatus voice={voice} />
+        {voice.devices.length > 1 && (
+          <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            麦克风
+            <select
+              aria-label="选择麦克风"
+              value={voice.devices.find((d) => d.label === voice.deviceLabel)?.deviceId ?? ''}
+              onChange={(event) => voice.selectDevice(event.target.value)}
+              className="h-6 max-w-40 rounded border bg-card px-1 text-[11px]"
+            >
+              {voice.devices.map((device) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label || '默认麦克风'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Hold-to-talk: press and hold (pointer or Space), with the elapsed time and a live level meter. Sliding up
+// arms cancellation; releasing under 600 ms discards the tap. The press and release are the browser's only
+// signals in this mode, so both arrive through the same button.
+// M toggles hands-free listening; Space is push-to-talk — only when the doctor isn't typing in a field.
+function useVoiceKeys(voice: VoiceCaptureController, active: boolean) {
+  const ref = useRef(voice)
+  ref.current = voice
+  useEffect(() => {
+    if (!active) return
+    const typing = (target: EventTarget | null) =>
+      target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+    const down = (event: KeyboardEvent) => {
+      if (typing(event.target)) return
+      if (event.code === 'KeyM' && !event.repeat) ref.current.toggle()
+      if (event.code === 'Space' && !event.repeat) {
+        event.preventDefault()
+        ref.current.press()
+      }
+    }
+    const up = (event: KeyboardEvent) => {
+      if (typing(event.target)) return
+      if (event.code === 'Space') {
+        event.preventDefault()
+        ref.current.release()
+      }
+    }
+    document.addEventListener('keydown', down)
+    document.addEventListener('keyup', up)
+    return () => {
+      document.removeEventListener('keydown', down)
+      document.removeEventListener('keyup', up)
+    }
+  }, [active])
+}
+
+function HoldButton({ voice, hold }: { voice: VoiceCaptureController; hold: HoldControls }) {
+  const down = (event: React.PointerEvent) => {
+    if (voice.capturing) return
+    event.preventDefault()
+    hold.down(event.clientY)
+  }
+
+  return (
+    <button
+      type="button"
+      aria-label={voice.holding ? (voice.cancelArmed ? '松开以取消' : '正在录音，松开结束') : '按住说话'}
+      data-holding={voice.holding || undefined}
+      data-cancel={voice.cancelArmed || undefined}
+      className={`flex h-8 select-none items-center gap-1.5 rounded-md border px-3 text-xs ${
+        voice.cancelArmed ? 'border-destructive bg-destructive/10 text-destructive' : voice.holding ? 'border-destructive text-destructive' : 'bg-card'
+      }`}
+      onPointerDown={down}
+      onPointerMove={(event) => hold.move(event.clientY)}
+      onPointerUp={() => hold.up()}
+      onPointerCancel={() => hold.up()}
+    >
+      {voice.holding ? <CircleStopIcon aria-hidden="true" size={13} /> : <HandIcon aria-hidden="true" size={13} />}
+      {voice.holding ? (
+        voice.cancelArmed ? (
+          '松开取消'
+        ) : (
+          <>
+            {formatHoldMs(voice.elapsedMs)}
+            <span aria-hidden="true" className="flex items-end gap-[1px]">
+              {[0.2, 0.5, 0.8, 0.5, 0.2].map((threshold, i) => (
+                <i
+                  key={i}
+                  className="w-[3px] rounded-sm bg-current"
+                  style={{ height: `${3 + Math.round(voice.level > threshold ? 9 * voice.level : 0)}px` }}
+                />
+              ))}
+            </span>
+          </>
+        )
+      ) : (
+        <>
+          按住说话
+          <kbd className="font-mono text-[10px] opacity-60">Space</kbd>
+        </>
+      )}
+    </button>
+  )
+}
+
+const formatHoldMs = (ms: number) => `${Math.floor(ms / 1000)}.${Math.floor((ms % 1000) / 100)}s`
+
+function LevelDot({ level }: { level: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="size-2 rounded-full"
+      style={{ opacity: 0.4 + 0.6 * level, backgroundColor: level > 0.05 ? 'var(--color-destructive)' : 'var(--color-muted-foreground)' }}
+    />
+  )
+}
+
+function VoiceStatus({ voice }: { voice: VoiceCaptureController }) {
+  const recognizerLabel = voice.recognizer === 'web-speech' ? '网页语音识别' : 'Bailian Paraformer'
+  const latency = voice.latencyMs !== null ? `延迟 ${voice.latencyMs}ms` : null
+  return (
+    <span role="status" aria-label="语音识别状态" className={`${badge} h-6 gap-1.5 bg-muted font-normal text-muted-foreground`}>
+      <span
+        aria-hidden="true"
+        className={`size-1.5 rounded-full ${voice.asr === 'ready' ? 'bg-success' : voice.asr === 'error' ? 'bg-destructive' : 'bg-warning'}`}
+      />
+      {ASR_LABEL[voice.asr]} · {recognizerLabel}
+      {latency && ` · ${latency}`}
+      {voice.deviceLabel && ` · ${voice.deviceLabel}`}
+    </span>
+  )
+}

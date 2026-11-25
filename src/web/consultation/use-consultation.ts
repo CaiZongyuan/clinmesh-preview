@@ -14,6 +14,8 @@ export interface Consultation {
   error: string | null
   ask(text: string): Promise<boolean>
   retry(turnId: string): Promise<void>
+  // A spoken turn the voice pipeline recorded in the workspace arrives here with its reply.
+  accept(doctorTurn: ConsultationTurn, patientTurn: ConsultationTurn): void
 }
 
 // Past a pending turn's deadline the workspace fails it within its grace period; look again a little after that.
@@ -179,5 +181,9 @@ export function useConsultation(encounterId: string | null, encounterStatus?: st
     }
   }
 
-  return { turns, streamed, pending, stream, error, ask, retry }
+  const accept = (doctorTurn: ConsultationTurn, patientTurn: ConsultationTurn) => {
+    setTurns((known) => merge(known, [doctorTurn, patientTurn]))
+  }
+
+  return { turns, streamed, pending, stream, error, ask, retry, accept }
 }
