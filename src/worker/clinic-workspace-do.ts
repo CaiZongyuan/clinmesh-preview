@@ -276,7 +276,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return active.ok ? { ok: true, practitionerId: DEMO_PRACTITIONER_ID } : active
   }
 
-  auditCopilotCommand(encounterId: string, eventType: AuditEventType, subject: string): void {
+  async auditCopilotCommand(encounterId: string, eventType: AuditEventType, subject: string): Promise<void> {
     this.ctx.storage.transactionSync(() => {
       if (this.encounters.requireActive(encounterId).ok) {
         this.encounters.audit(encounterId, eventType, DEMO_PRACTITIONER_ID, new Date().toISOString(), subject)
