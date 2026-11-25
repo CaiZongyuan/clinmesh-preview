@@ -1,4 +1,4 @@
-import { COMPLETION_GATE_LABELS, completionGates, type CaseDebriefReference, type ClinicalDrafts } from '../../src/shared/completion'
+import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebriefReference, type ClinicalDrafts } from '../../src/shared/completion'
 import type { AgentEvent, ClientMessage, ServerMessage } from '../../src/shared/agent-wire'
 import type { ConsultationTurn, PatientTurnFailure } from '../../src/shared/consultation'
 import type { EncounterError, EncounterView } from '../../src/shared/encounter'
@@ -279,6 +279,7 @@ export function createFakeClinicApi({
       examinations: state.examinations[encounterId] ?? [],
       prescriptions: fakePrescriptions.view(encounterId),
       questions: turnsOf(encounterId).filter((turn) => turn.speaker === 'doctor'),
+      dispositionRecorded: dispositionRecorded(clinicalNotes.note(encounterId).revisions.at(-1)?.sections.plan ?? ''),
     })
     if (method === 'POST' && action === 'completion') {
       if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')

@@ -13,7 +13,7 @@ function items(entries: { key: string; text: string }[]): ReactNode {
 }
 
 export function CaseDebriefPanel({ debrief }: { debrief: CaseDebrief }) {
-  const { reference, diagnoses, investigations, examinations, prescriptions, questions, signedNote } = debrief
+  const { reference, diagnoses, investigations, examinations, prescriptions, questions, signedNote, dispositionRecorded } = debrief
   const diagnosisItem = ({ code, name }: (typeof diagnoses)[number]) => ({ key: code, text: `${code} ${name}` })
   const rows = [
     { label: '主诊断', actual: items(diagnoses.filter((entry) => entry.primary).map(diagnosisItem)), reference: reference.primaryDiagnosis },
@@ -29,7 +29,12 @@ export function CaseDebriefPanel({ debrief }: { debrief: CaseDebrief }) {
     }))), reference: reference.medicationConclusion },
     { label: '关键问诊', actual: items(questions.map((turn) => ({ key: turn.turnId, text: turn.text }))), reference: reference.keyHistoryQuestions },
     { label: '严重程度评估', actual: signedNote.sections.assessment || '未记录', reference: reference.severityAssessment },
-    { label: '处置与随访', actual: signedNote.sections.plan || '未记录', reference: reference.disposition },
+    { label: '处置与随访', actual: (<>
+      {signedNote.sections.plan || '未记录'}
+      <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] ${dispositionRecorded ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
+        {dispositionRecorded ? '处置已记录' : '处置未记录'}
+      </span>
+    </>), reference: reference.disposition },
   ]
   return (
     <div className="px-3 py-2">

@@ -80,4 +80,12 @@ export interface CaseDebrief {
   prescriptions: PrescriptionsView
   questions: Pick<ConsultationTurn, 'turnId' | 'text'>[]
   signedNote: SignedNoteRevision
+  dispositionRecorded: boolean
+}
+
+// A plan records a disposition when it names where the patient goes next, whatever the case's diagnosis is.
+export const DISPOSITION_TERMS = ['转院', '转诊', '转上级', '住院', '收住', '留观', '随访', '复诊'] as const
+
+export function dispositionRecorded(plan: string): boolean {
+  return DISPOSITION_TERMS.some((term) => plan.includes(term))
 }
