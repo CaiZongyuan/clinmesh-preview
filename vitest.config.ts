@@ -9,13 +9,16 @@ export default defineConfig({
         plugins: [
           cloudflareTest({
             wrangler: { configPath: './wrangler.jsonc' },
-            // Tests drive the agents with a scripted LLM provider and short patient-turn deadlines.
+            // Tests drive the agents with a scripted LLM provider and short patient-turn deadlines, and voice capture
+            // with a fake Paraformer service behind a placeholder token.
             miniflare: {
               bindings: {
                 LLM_PROVIDER: 'scripted',
                 PATIENT_TURN_TIMEOUT_MS: '1500',
                 PATIENT_TURN_EXPIRY_GRACE_MS: '400',
                 AGENT_STALL_TIMEOUT_MS: '1500',
+                BAILIAN_TOKEN: 'test-bailian-token',
+                BAILIAN_UPSTREAM: 'scripted',
               },
             },
           }),

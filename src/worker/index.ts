@@ -2,6 +2,7 @@ import { app } from './app'
 
 export { ClinicalCopilotDO } from './clinical-copilot/clinical-copilot-do'
 export { ClinicWorkspaceDO } from './clinic-workspace-do'
+export { ConsultationVoiceAgent } from './voice/consultation-voice-agent'
 export { SimulatedPatientDO } from './simulated-patient/simulated-patient-do'
 
 export default {

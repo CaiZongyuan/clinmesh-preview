@@ -67,6 +67,7 @@ export function turnFor(overrides: Partial<ConsultationTurn> & Pick<Consultation
     source: doctor ? 'typed' : 'simulated',
     attribution: doctor ? 'workbench-input' : 'simulated-patient',
     text: '',
+    voice: null,
     status: 'final',
     replyTo: null,
     attempt: 1,

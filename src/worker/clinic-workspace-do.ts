@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
-import { MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
+import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
 import type { AuditEventType, EncounterError, EncounterView } from '../shared/encounter'
 import type { CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
 import { CopilotReadModel } from './copilot-read-model'
@@ -227,11 +227,15 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     })
   }
 
-  // Records the doctor's question and a pending patient turn in one transaction, then asks the Simulated Patient.
+  // Records the doctor's question, typed or spoken, and a pending patient turn in one transaction, then asks the
+  // Simulated Patient. Typed questions come over HTTP; spoken ones from the voice pipeline or the browser's recognizer.
   async askPatient(encounterId: string, question: AskPatientRequest): Promise<ExchangeResult> {
     const text = question.text.trim()
     if (!text || text.length > MAX_QUESTION_LENGTH || !question.clientTurnId || question.clientTurnId.length > 100) {
       return { ok: false, error: { code: 'invalid-request', message: `提问须为 1–${MAX_QUESTION_LENGTH} 个字符` } }
+    }
+    if (question.voice !== undefined && !isVoiceCapture(question.voice)) {
+      return { ok: false, error: { code: 'invalid-request', message: '语音识别信息无效' } }
     }
     const recorded = this.ctx.storage.transactionSync((): Recorded => {
       const ready = this.readyToAsk(encounterId)
@@ -245,7 +249,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       }
       const exchange = this.consultation.ask(
         encounterId,
-        { clientTurnId: question.clientTurnId, text, practitionerId: DEMO_PRACTITIONER_ID },
+        { clientTurnId: question.clientTurnId, text, practitionerId: DEMO_PRACTITIONER_ID, voice: question.voice },
         ready.now,
         new Date(ready.now.getTime() + this.turnTimeoutMs),
       )

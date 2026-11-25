@@ -11,15 +11,17 @@
     "bindings": [
       { "name": "CLINIC_WORKSPACE", "class_name": "ClinicWorkspaceDO" },
       { "name": "SIMULATED_PATIENT", "class_name": "SimulatedPatientDO" },
-      { "name": "CLINICAL_COPILOT", "class_name": "ClinicalCopilotDO" }
+      { "name": "CLINICAL_COPILOT", "class_name": "ClinicalCopilotDO" },
+      { "name": "CONSULTATION_VOICE", "class_name": "ConsultationVoiceAgent" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ClinicWorkspaceDO"] },
     { "tag": "v2", "new_sqlite_classes": ["SimulatedPatientDO"] },
-    { "tag": "v3", "new_sqlite_classes": ["ClinicalCopilotDO"] }
+    { "tag": "v3", "new_sqlite_classes": ["ClinicalCopilotDO"] },
+    { "tag": "v4", "new_sqlite_classes": ["ConsultationVoiceAgent"] }
   ],
-  // LLM_API_KEY is a secret: put it in .dev.vars locally (see README), never here.
+  // LLM_API_KEY and BAILIAN_TOKEN are secrets: put them in .dev.vars locally (see README), never here.
   "vars": {
     "LLM_PROVIDER": "openai-compatible",
     "LLM_BASE_URL": "https://open.bigmodel.cn/api/paas/v4",
