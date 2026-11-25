@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from './reasoning-effort'
+import type { CopilotCompactionEntry } from './copilot-context'
 
 export type { ReasoningEffort } from './reasoning-effort'
 
@@ -106,6 +107,8 @@ export interface CopilotSnapshot {
   model: CopilotModelSetting
   turns: CopilotTurn[]
   queued: CopilotQueuedItem[]
+  // Manual compaction markers (#13), newest first: each summarizes the turns before it.
+  compactions: CopilotCompactionEntry[]
 }
 
 export type CopilotPromptMode = 'queue' | 'steer'

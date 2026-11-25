@@ -18,9 +18,11 @@ export const COPILOT_SYSTEM_PROMPT = [
 export function encounterOverview(state: CopilotEncounterState): string {
   const { patient, triage } = state
   const lines = [
-    '## 当前就诊概况',
+    '## 患者与分诊（可见资料）',
     `- 患者：${patient.name}，${SEX[patient.sex]}，${patient.age} 岁；${patient.department}；主诉：${patient.chiefComplaint}`,
     `- 分诊（${triage.measuredAt}）：${triage.vitals.map((v) => `${v.kind} ${v.value}${v.unit}`).join('，')}`,
+    '',
+    '## 就诊状态（HIS）',
     `- 已查体部位：${state.examinedSystems.map((s) => BODY_SYSTEM_NAME[s]).join('、') || '无'}`,
     `- 已开立检查：${state.investigations.map((i) => `${i.name}（${i.stage}${i.releasedVersions ? `，已发布 ${i.releasedVersions} 版报告` : ''}）`).join('、') || '无'}`,
     '',

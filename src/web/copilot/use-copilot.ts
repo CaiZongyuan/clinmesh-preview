@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ServerMessage } from '../../shared/agent-wire'
+import type { CopilotCompactionEntry } from '../../shared/copilot-context'
 import type {
   CopilotFeedback,
   CopilotMention,
@@ -24,6 +25,7 @@ export type CopilotStreamState = 'connecting' | 'live' | 'reconnecting'
 export interface CopilotSession {
   turns: CopilotTurn[]
   queued: CopilotQueuedItem[]
+  compactions: CopilotCompactionEntry[]
   model: CopilotModelSetting | null
   stream: CopilotStreamState
   // Turns that finished, or steps that changed, while the panel was hidden.
@@ -159,6 +161,7 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
   return {
     turns: snapshot?.turns ?? [],
     queued: snapshot?.queued ?? [],
+    compactions: snapshot?.compactions ?? [],
     model: snapshot?.model ?? null,
     stream: encounterId ? stream : 'connecting',
     unread,

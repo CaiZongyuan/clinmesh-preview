@@ -1,4 +1,5 @@
 import type { AgentEvent } from '../../shared/agent-wire'
+import type { ContextItem } from '../../shared/agent-context'
 import type { LlmEnv, LlmOverride } from '../llm/config'
 import { resolveLlmProvider } from '../llm/registry'
 import { LlmError, type AgentKind, type LlmMessage, type LlmStreamEvent, type ToolCall, type ToolSpec } from '../llm/types'
@@ -75,6 +76,13 @@ export interface AgentDefinition {
   tools?: Readonly<Record<string, AgentTool>>
   // Announce steps, tool calls, steers and queued runs to viewers (the Clinical Copilot's session view).
   traceSteps?: boolean
+  // Per-request context accounting (#13): itemizes what the next LLM step would carry, by category. The
+  // items are stored with the step, so the doctor's context view can show and reconcile every request.
+  account?: (context: { run: AgentRun; messages: LlmMessage[]; tools: ToolSpec[] }) => ContextItem[]
+  // Finalizes a run durably, inside the closing transaction (the Clinical Copilot's compaction marks its
+  // summarized messages compacted and writes its marker here). Called only when a run completed; the
+  // returned events are appended to the log with the run's own closing event.
+  settle?: (run: AgentRun, outcome: Extract<RunOutcome, { status: 'done' }>) => AgentEvent[]
   // A run whose outcome another Durable Object must accept. Its reply stays `unsettled` (out of the context)
   // until `deliver` resolves true, and turns `void` when refused.
   settlement?: {
@@ -463,8 +471,9 @@ export class DurableAgentRuntime {
             this.agent.buildContext({ binding: this.binding(), run, messages: this.contextMessages(run.runId) }),
           )
           signal.throwIfAborted()
-          usage.estimatedInput += context.messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
-          this.beginStep(run.runId, step)
+          const items = this.agent.account?.({ run, messages: context.messages, tools: context.tools })
+          usage.estimatedInput += items ? items.reduce((sum, item) => sum + item.tokens, 0) : context.messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
+          this.beginStep(run.runId, step, items ?? null)
           const toolCalls: ToolCall[] = []
           const stepUsage = { input: 0, output: 0 }
           text = ''
@@ -599,11 +608,11 @@ export class DurableAgentRuntime {
     )
   }
 
-  private beginStep(runId: string, step: number): void {
+  private beginStep(runId: string, step: number, items: ContextItem[] | null): void {
     if (!this.agent.traceSteps) return
     this.sql.exec(
-      `INSERT OR REPLACE INTO agent_step (run_id, step, status, started_at) VALUES (?, ?, 'running', ?)`,
-      runId, step, Date.now(),
+      `INSERT OR REPLACE INTO agent_step (run_id, step, status, started_at, context_json) VALUES (?, ?, 'running', ?, ?)`,
+      runId, step, Date.now(), items === null ? null : JSON.stringify(items),
     )
     this.announce({ type: 'step.started', runId, step })
   }
@@ -759,6 +768,11 @@ export class DurableAgentRuntime {
         this.messageState(), now,
       )
     }
+    // A completed run's host finalization shares the closing transaction, so its effects are exactly as
+    // durable as the run itself: a crash before this point replays, after this point it is committed.
+    if (outcome.status === 'done' && this.agent.settle) {
+      for (const event of this.agent.settle(run, outcome)) published.push(this.events.append(event))
+    }
     // Every tool call the model made gets an answer, so the context stays well-formed for the next run.
     const unanswered = this.sql
       .exec<{ id: number; call_id: string }>(`SELECT id, call_id FROM agent_tool_call WHERE run_id = ? AND status = 'dispatched' ORDER BY id`, run.runId)
@@ -836,6 +850,15 @@ export class DurableAgentRuntime {
         this.outbox.failed(entry, Date.now(), String(error))
       }
     }
+  }
+
+  // Active messages, oldest first: exactly what the next LLM request would carry, so the doctor's
+  // context view (#13) and a compaction (#13) read the same rolling context the run loop does.
+  activeContextMessages(): LlmMessage[] {
+    return this.sql
+      .exec<{ content_json: string }>(`SELECT content_json FROM agent_message WHERE state = 'active' ORDER BY seq`)
+      .toArray()
+      .map((row) => JSON.parse(row.content_json) as LlmMessage)
   }
 
   private binding(): unknown {

@@ -1,20 +1,6 @@
-// Context accounting vocabulary shared by the agents. The Clinical Copilot's itemized breakdown (#13) builds on it.
-export type ContextCategory =
-  | 'system'
-  | 'tools'
-  | 'patient_visible'
-  | 'consultation'
-  | 'his_state_ui'
-  | 'replies_thinking'
-  | 'tool_results'
-
-export interface ContextItem {
-  id: string
-  category: ContextCategory
-  label: string
-  text: string
-  tokens: number
-}
+// Token estimation, and a re-export of the accounting vocabulary shared with the browser's 上下文 view.
+export { CONTEXT_CATEGORY_LABEL, type ContextCategory, type ContextItem } from '../../shared/agent-context'
+import type { ContextItem } from '../../shared/agent-context'
 
 const CJK = /[　-〿㐀-䶿一-鿿＀-￯]/g
 
@@ -24,3 +10,5 @@ export function estimateTokens(text: string): number {
   const cjk = text.match(CJK)?.length ?? 0
   return Math.ceil(cjk * 0.7 + (text.length - cjk) / 4)
 }
+
+export const contextItemTotal = (items: ContextItem[]): number => items.reduce((sum, item) => sum + item.tokens, 0)

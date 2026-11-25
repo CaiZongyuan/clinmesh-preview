@@ -226,6 +226,7 @@ export function openPatientSocket(encounterId: string): WebSocket {
 }
 
 // The Clinical Copilot: commands go over HTTP, its events stream over its socket.
+import type { CopilotCompactResponse, CopilotContextView } from '../shared/copilot-context'
 import type {
   CopilotConfigRequest,
   CopilotFeedback,
@@ -274,6 +275,14 @@ export function setCopilotFeedback(encounterId: string, turnId: string, value: C
 
 export function configureCopilot(encounterId: string, config: CopilotConfigRequest): Promise<CopilotModelSetting> {
   return request<CopilotModelSetting>(`${encounterPath(encounterId)}/copilot/config`, post(config))
+}
+
+export async function fetchCopilotContext(encounterId: string): Promise<CopilotContextView> {
+  return (await request<{ context: CopilotContextView }>(`${encounterPath(encounterId)}/copilot/context`)).context
+}
+
+export function compactCopilot(encounterId: string): Promise<CopilotCompactResponse> {
+  return request<CopilotCompactResponse>(`${encounterPath(encounterId)}/copilot/compact`, post())
 }
 
 export function openCopilotSocket(encounterId: string): WebSocket {

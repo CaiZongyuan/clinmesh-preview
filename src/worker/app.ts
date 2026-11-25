@@ -12,6 +12,7 @@ import {
   type CopilotResendRequest,
   type CopilotSnapshot,
 } from '../shared/copilot-turn'
+import type { CopilotCompactResponse, CopilotContextView } from '../shared/copilot-context'
 import { isVoiceCapture, type AskPatientResponse, type ConsultationResponse, type RetryPatientTurnResponse } from '../shared/consultation'
 import type {
   ActiveEncounterResponse,
@@ -82,6 +83,8 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'no-medication-conflict': 409,
   'copilot-busy': 409,
   'copilot-turn-not-found': 404,
+  'copilot-nothing-to-compact': 409,
+  'copilot-llm-unavailable': 503,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -485,6 +488,25 @@ app.post('/encounters/:encounterId/copilot/config', async (c) => {
   const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-model-changed', `${result.value.model}/${result.value.effort}`)
   if (!audited.ok) return refuse(c, audited.error)
   return c.json<CopilotModelSetting>(result.value)
+})
+
+// The 上下文 view (#13): read-only, available while the Encounter is frozen like the session snapshot.
+app.get('/encounters/:encounterId/copilot/context', async (c) => {
+  const found = await workspace(c).getEncounter(c.req.param('encounterId'))
+  if (!found.ok) return refuse(c, found.error)
+  return c.json<{ context: CopilotContextView }>({ context: await copilot(c).contextView(c.req.param('encounterId')) })
+})
+
+// Manual compaction (#13): authorized and audited like every Copilot command, since it rewrites its context.
+// The compaction is a serialized run: the response names the queued run and the marker lands when it completes.
+app.post('/encounters/:encounterId/copilot/compact', async (c) => {
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const result = await copilot(c).compact(c.req.param('encounterId'))
+  if (!result.ok) return refuse(c, result.error)
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-compacted', result.value.turnId)
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json<CopilotCompactResponse>(result.value, 202)
 })
 
 // Streams the Clinical Copilot's events for one Encounter.

@@ -38,6 +38,24 @@ const CATALOG_IDENTITY_KEYS = new Set(['id', 'catalogItem', 'codings', 'system',
 const STRUCTURAL_KEYS = new Set(['seq', 'index', 'count', 'usage', 'queueNumber', 'age', 'attempt', 'version'])
 const isStructuralKey = (key: string) => STRUCTURAL_KEYS.has(key) || key.startsWith('duration')
 
+// Context accounting numbers (#13): token counts and window sizes. Exempt only on the Copilot context
+// DTO shapes that own them (CopilotContextItem / CopilotRequestBreakdown / CopilotCompactionEntry /
+// CopilotContextView) — a bare `tokens` or `version` elsewhere is still checked.
+const CONTEXT_ACCOUNTING_KEYS = new Set([
+  'tokens', 'estimatedInput', 'providerInput', 'modelWindow', 'reserve', 'usable',
+  'summarizedMessages', 'tokensBefore', 'tokensAfter', 'markerId',
+])
+const isContextAccountingShape = (parent: unknown): boolean => {
+  if (parent === null || typeof parent !== 'object') return false
+  const shape = parent as Record<string, unknown>
+  return (
+    ('category' in shape && 'tokens' in shape) ||
+    ('estimatedInput' in shape && 'providerInput' in shape) ||
+    ('tokensBefore' in shape && 'tokensAfter' in shape) ||
+    ('usable' in shape && 'modelWindow' in shape)
+  )
+}
+
 const MIN_FRAGMENT_LENGTH = 4
 const CLAUSE_BREAK = /[，。；、：（）();,！？!?\n]+/
 
@@ -47,10 +65,10 @@ const NUMBER_TOKEN = /(?<![\w.:+%-])\d+(?:\.\d+)?(?![\w.:-])/g
 const standaloneNumber = (n: number) =>
   new RegExp(`(?<![\\w.:+%-])${String(n).replace('.', '\\.')}(?![\\w.:-])`)
 
-function leaves(value: unknown, skipKeys: { has: (key: string) => boolean } = new Set<string>()): unknown[] {
-  if (Array.isArray(value)) return value.flatMap((item) => leaves(item, skipKeys))
+function leaves(value: unknown, skipKey: (key: string, parent: unknown) => boolean = () => false): unknown[] {
+  if (Array.isArray(value)) return value.flatMap((item) => leaves(item, skipKey))
   if (value !== null && typeof value === 'object') {
-    return Object.entries(value).flatMap(([key, item]) => (skipKeys.has(key) ? [] : leaves(item, skipKeys)))
+    return Object.entries(value).flatMap(([key, item]) => (skipKey(key, value) ? [] : leaves(item, skipKey)))
   }
   return [value]
 }
@@ -75,7 +93,7 @@ export interface CaseTruthDenylist {
 // Case's visible fields, so one case's ordinary chart wording or triage value cannot make another case's
 // denylist) and anything in `revealed`: Case Truth the doctor has legitimately uncovered.
 export function caseTruthDenylist(goldenCase: GoldenCase, revealed: unknown = []): CaseTruthDenylist {
-  const truth = leaves(CASE_TRUTH_FIELDS.map((field) => goldenCase[field]), CATALOG_IDENTITY_KEYS)
+  const truth = leaves(CASE_TRUTH_FIELDS.map((field) => goldenCase[field]), (key) => CATALOG_IDENTITY_KEYS.has(key))
   const truthStrings = truth.filter((v): v is string => typeof v === 'string')
 
   const visible = leaves([
@@ -119,7 +137,7 @@ export function expectNoCaseTruth(label: string, body: string, revealed: unknown
   try {
     parsed = JSON.parse(body)
   } catch {}
-  const values = leaves(parsed, { has: isStructuralKey })
+  const values = leaves(parsed, (key, parent) => isStructuralKey(key) || (CONTEXT_ACCOUNTING_KEYS.has(key) && isContextAccountingShape(parent)))
   const strings = values.filter((v): v is string => typeof v === 'string')
   const denylists = casePack.cases.map((goldenCase) => caseTruthDenylist(goldenCase, revealed))
 

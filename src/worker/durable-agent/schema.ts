@@ -100,4 +100,6 @@ export const AGENT_RUNTIME_MIGRATIONS: readonly string[] = [
      consumed_at INTEGER,
      requeued_as TEXT
    );`,
+  // Context accounting (#13): the per-request itemized breakdown recorded when a step's context was built.
+  `ALTER TABLE agent_step ADD COLUMN context_json;`,
 ]

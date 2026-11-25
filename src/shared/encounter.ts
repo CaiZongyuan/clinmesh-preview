@@ -120,6 +120,7 @@ export type AuditEventType =
   | 'copilot-stopped'
   | 'copilot-feedback-given'
   | 'copilot-model-changed'
+  | 'copilot-compacted'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -164,6 +165,8 @@ export type EncounterErrorCode =
   | 'no-medication-conflict'
   | 'copilot-busy'
   | 'copilot-turn-not-found'
+  | 'copilot-nothing-to-compact'
+  | 'copilot-llm-unavailable'
 
 export interface EncounterError {
   code: EncounterErrorCode
