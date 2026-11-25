@@ -1,5 +1,17 @@
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import {
+  MAX_MENTIONS,
+  MAX_PROMPT_LENGTH,
+  type CopilotConfigRequest,
+  type CopilotFeedback,
+  type CopilotModelSetting,
+  type CopilotMention,
+  type CopilotPromptRequest,
+  type CopilotPromptResponse,
+  type CopilotResendRequest,
+  type CopilotSnapshot,
+} from '../shared/copilot-turn'
 import type { AskPatientResponse, ConsultationResponse, RetryPatientTurnResponse } from '../shared/consultation'
 import type {
   ActiveEncounterResponse,
@@ -63,6 +75,8 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   MEDICATION_ALLERGY_CONFLICT: 409,
   'medication-override-required': 422,
   'no-medication-conflict': 409,
+  'copilot-busy': 409,
+  'copilot-turn-not-found': 404,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -290,4 +304,123 @@ app.get('/encounters/:encounterId/patient/socket', async (c) => {
   const found = await workspace(c).getEncounter(encounterId)
   if (!found.ok) return refuse(c, found.error)
   return c.env.SIMULATED_PATIENT.getByName(encounterId).fetch(c.req.raw)
+})
+
+// The Clinical Copilot for one Encounter. Every command is authorized (the Encounter must be active) and
+// audited once done; reads and its socket need the Encounter to exist but work while it is frozen, so the
+// doctor can still read what the Copilot found after completion.
+const copilot = (c: AppContext) => c.env.CLINICAL_COPILOT.getByName(c.req.param('encounterId')!)
+
+const mentions = (value: unknown): CopilotMention[] | null => {
+  if (!Array.isArray(value) || value.length > MAX_MENTIONS) return null
+  return value.every(
+    (m): m is CopilotMention =>
+      typeof m === 'object' && m !== null && ['report', 'examination', 'note-section', 'draft'].includes((m as CopilotMention).kind) &&
+      typeof (m as CopilotMention).id === 'string' && typeof (m as CopilotMention).label === 'string',
+  )
+    ? value
+    : null
+}
+
+app.get('/encounters/:encounterId/copilot', async (c) => {
+  const found = await workspace(c).getEncounter(c.req.param('encounterId'))
+  if (!found.ok) return refuse(c, found.error)
+  const snapshot = await copilot(c).snapshot(c.req.param('encounterId'))
+  return c.json<{ snapshot: CopilotSnapshot }>({ snapshot })
+})
+
+app.post('/encounters/:encounterId/copilot/prompts', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as Partial<CopilotPromptRequest> | null
+  const listed = mentions(body?.mentions)
+  if (
+    typeof body?.clientPromptId !== 'string' ||
+    body.clientPromptId.length === 0 ||
+    typeof body.text !== 'string' ||
+    body.text.length === 0 ||
+    body.text.length > MAX_PROMPT_LENGTH ||
+    !listed ||
+    (body.mode !== 'queue' && body.mode !== 'steer')
+  ) {
+    return refuse(c, { code: 'invalid-request', message: `请求体须为 { clientPromptId, text（1-${MAX_PROMPT_LENGTH} 字）, mentions, mode: "queue" | "steer" }` })
+  }
+  const request: CopilotPromptRequest = {
+    clientPromptId: body.clientPromptId, text: body.text, mentions: listed, mode: body.mode,
+  } satisfies CopilotPromptRequest
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const response: CopilotPromptResponse = await copilot(c).prompt(c.req.param('encounterId'), request, { practitionerId: allowed.practitionerId })
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompted', body.text.slice(0, 80))
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json<CopilotPromptResponse>(response, 201)
+})
+
+app.post('/encounters/:encounterId/copilot/turns/:turnId/resend', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as Partial<CopilotPromptRequest> | null
+  const listed = mentions(body?.mentions)
+  if (
+    typeof body?.clientPromptId !== 'string' || body.clientPromptId.length === 0 ||
+    typeof body.text !== 'string' || body.text.length === 0 || body.text.length > MAX_PROMPT_LENGTH || !listed
+  ) {
+    return refuse(c, { code: 'invalid-request', message: `请求体须为 { clientPromptId, text（1-${MAX_PROMPT_LENGTH} 字）, mentions }` })
+  }
+  const request: CopilotResendRequest = { clientPromptId: body.clientPromptId, text: body.text, mentions: listed }
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const result = await copilot(c).resend(c.req.param('encounterId'), c.req.param('turnId'), request, { practitionerId: allowed.practitionerId })
+  if (!result.ok) return refuse(c, result.error)
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-prompt-resent', body.text.slice(0, 80))
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json<CopilotPromptResponse>(result.value, 201)
+})
+
+app.post('/encounters/:encounterId/copilot/stop', async (c) => {
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const stopped = await copilot(c).stop(c.req.param('encounterId'))
+  // A stop that actually stopped a turn must return success only with its audit; losing the audit to a freeze
+  // means the freeze won the race and the response reports it instead of success.
+  if (stopped.stoppedTurnId !== null) {
+    const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-stopped', stopped.stoppedTurnId)
+    if (!audited.ok) return refuse(c, audited.error)
+  }
+  return c.json(stopped)
+})
+
+app.post('/encounters/:encounterId/copilot/turns/:turnId/feedback', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { value?: unknown } | null
+  if (body?.value !== 'up' && body?.value !== 'down' && body?.value !== null) {
+    return refuse(c, { code: 'invalid-request', message: '请求体须为 { "value": "up" | "down" | null }' })
+  }
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const result = await copilot(c).setFeedback(c.req.param('encounterId'), c.req.param('turnId'), body.value as CopilotFeedback | null)
+  if (!result.ok) return refuse(c, result.error)
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-feedback-given', c.req.param('turnId'))
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json(result)
+})
+
+app.post('/encounters/:encounterId/copilot/config', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as Partial<CopilotConfigRequest> | null
+  if (typeof body?.model !== 'string' || !['off', 'low', 'medium', 'high'].includes(body.effort as string)) {
+    return refuse(c, { code: 'invalid-request', message: '请求体须为 { model: string, effort: "off" | "low" | "medium" | "high" }' })
+  }
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const result = await copilot(c).configure(c.req.param('encounterId'), body as CopilotConfigRequest)
+  if (!result.ok) return refuse(c, result.error)
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-model-changed', `${result.value.model}/${result.value.effort}`)
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json<CopilotModelSetting>(result.value)
+})
+
+// Streams the Clinical Copilot's events for one Encounter.
+app.get('/encounters/:encounterId/copilot/socket', async (c) => {
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json<ErrorResponse>({ error: { code: 'invalid-request', message: '需要 WebSocket 升级请求' } }, 426)
+  }
+  const encounterId = c.req.param('encounterId')
+  const found = await workspace(c).getEncounter(encounterId)
+  if (!found.ok) return refuse(c, found.error)
+  return copilot(c).fetch(c.req.raw)
 })

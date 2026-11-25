@@ -204,6 +204,7 @@ describe('LLM configuration', () => {
       effort: 'low',
       effortStyle: 'zhipu',
       contextWindow: 128_000,
+      modelOptions: ['patient-model'],
     })
     expect(resolveLlmConfig(env, 'copilot')).toMatchObject({ model: 'glm-5.3-flash', effort: 'high' })
     expect(resolveLlmConfig({}, 'patient')).toMatchObject({ model: 'glm-5.3-flash', effort: 'low', apiKey: undefined })

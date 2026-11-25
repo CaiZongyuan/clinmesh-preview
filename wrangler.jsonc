@@ -10,12 +10,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "CLINIC_WORKSPACE", "class_name": "ClinicWorkspaceDO" },
-      { "name": "SIMULATED_PATIENT", "class_name": "SimulatedPatientDO" }
+      { "name": "SIMULATED_PATIENT", "class_name": "SimulatedPatientDO" },
+      { "name": "CLINICAL_COPILOT", "class_name": "ClinicalCopilotDO" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ClinicWorkspaceDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["SimulatedPatientDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["SimulatedPatientDO"] },
+    { "tag": "v3", "new_sqlite_classes": ["ClinicalCopilotDO"] }
   ],
   // LLM_API_KEY is a secret: put it in .dev.vars locally (see README), never here.
   "vars": {
@@ -24,6 +26,10 @@
     "LLM_MODEL": "glm-5.3-flash",
     "LLM_REASONING_EFFORT": "low",
     "LLM_EFFORT_STYLE": "zhipu",
+    // What the Clinical Copilot's model chip offers (comma-separated); unverified without a key, like the URL above.
+    "LLM_MODEL_OPTIONS": "glm-5.3-flash,glm-5.3",
+    // A step that streams nothing for this long fails as stalled, even if the provider ignores the abort.
+    "AGENT_STALL_TIMEOUT_MS": "60000",
     "PATIENT_TURN_TIMEOUT_MS": "30000",
     "PATIENT_TURN_EXPIRY_GRACE_MS": "5000"
   }

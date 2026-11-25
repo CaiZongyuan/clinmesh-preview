@@ -7,6 +7,7 @@ import {
 } from '@ui-sdk/react/resizable'
 import { useState, type MouseEvent, type ReactNode } from 'react'
 import { useConsultation } from '../consultation/use-consultation'
+import type { CopilotSession } from '../copilot/use-copilot'
 import { ConsultationColumn, ConsultationStrip, type EncounterContext } from './consultation-column'
 import { CopilotPanel } from './copilot-panel'
 
@@ -31,7 +32,21 @@ const browserLayoutStorage: ResizableStorage = {
   },
 }
 
-export function WorkbenchColumns({ caseWorkspace, encounter }: { caseWorkspace: ReactNode; encounter?: EncounterContext }) {
+export function WorkbenchColumns({
+  caseWorkspace,
+  encounter,
+  copilot,
+  copilotHidden,
+  examinations,
+  onHideCopilot,
+}: {
+  caseWorkspace: ReactNode
+  encounter?: EncounterContext
+  copilot: CopilotSession
+  copilotHidden: boolean
+  examinations: EncounterContext['examinations']
+  onHideCopilot: () => void
+}) {
   const [columns] = useState(createResizableController)
   // Lives above the column so the collapsed strip still knows when the patient is answering.
   const consultation = useConsultation(encounter?.encounter.encounterId ?? null, encounter?.encounter.status)
@@ -82,14 +97,18 @@ export function WorkbenchColumns({ caseWorkspace, encounter }: { caseWorkspace: 
       <ResizablePanel id="case-workspace" minSize="440px">
         {caseWorkspace}
       </ResizablePanel>
-      <ResizableHandle
-        aria-label="调整临床助手宽度"
-        title="调整临床助手宽度（拖动或方向键调整，双击复位）"
-        onDoubleClick={resetCopilot}
-      />
-      <ResizablePanel id={COPILOT.id} defaultSize={COPILOT.defaultSize} minSize={COPILOT.minSize} maxSize={COPILOT.maxSize}>
-        <CopilotPanel />
-      </ResizablePanel>
+      {!copilotHidden && (
+        <>
+          <ResizableHandle
+            aria-label="调整临床助手宽度"
+            title="调整临床助手宽度（拖动或方向键调整，双击复位）"
+            onDoubleClick={resetCopilot}
+          />
+          <ResizablePanel id={COPILOT.id} defaultSize={COPILOT.defaultSize} minSize={COPILOT.minSize} maxSize={COPILOT.maxSize}>
+            <CopilotPanel copilot={copilot} encounter={encounter?.encounter} examinations={examinations} onHide={onHideCopilot} />
+          </ResizablePanel>
+        </>
+      )}
     </Resizable>
   )
 }

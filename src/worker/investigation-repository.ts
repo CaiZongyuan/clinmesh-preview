@@ -158,6 +158,10 @@ export class InvestigationRepository {
   // due at or before it ended: a past fact, not a write after the freeze.
   list(encounter: EncounterView, now: number): InvestigationView[] {
     this.settle(encounter, now)
+    return this.view(encounter, now)
+  }
+
+  private view(encounter: EncounterView, now: number): InvestigationView[] {
     const clock = clockOf(encounter, now)
     const released = this.releasedReports(encounter, now)
     return this.rows(encounter.encounterId).map((row): InvestigationView => {

@@ -233,11 +233,12 @@ describe('failed patient turns', () => {
 
   it('refuses a late reply once the workspace has expired the turn, and the patient forgets it', async () => {
     // The gate ignores the abort, like a provider that hangs: only the workspace's own expiry releases the lock.
+    // What streamed before the deadline stays on the failed turn (design: failed:timeout with partial text).
     const gate = installScripted('patient').gate('我', '发烧三天了。')
     const encounterId = await startEncounter()
     const { patientTurn } = await asked(encounterId, Q1)
     await gate.reached
-    expect(await settled(encounterId, patientTurn.turnId)).toMatchObject({ status: 'failed', failure: 'timeout', text: '' })
+    expect(await settled(encounterId, patientTurn.turnId)).toMatchObject({ status: 'failed', failure: 'timeout', text: '我' })
 
     const late = await env.CLINIC_WORKSPACE.getByName('default').settlePatientTurn({
       encounterId,
@@ -248,7 +249,7 @@ describe('failed patient turns', () => {
     gate.release()
     await runInDurableObjectUntil(encounterId, (sql) => sql.exec<{ status: string }>('SELECT status FROM agent_run').one().status === 'failed')
     expect(await assistantStates(encounterId)).toEqual([])
-    expect((await transcript(encounterId))[1]).toMatchObject({ status: 'failed', failure: 'timeout', text: '' })
+    expect((await transcript(encounterId))[1]).toMatchObject({ status: 'failed', failure: 'timeout', text: '我' })
   })
 
   it('fails the pending reply when the Encounter is abandoned, and the patient forgets the refused reply', async () => {

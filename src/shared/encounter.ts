@@ -113,6 +113,11 @@ export type AuditEventType =
   | 'diagnosis-confirmed'
   | 'prescription-issued'
   | 'no-medication-recorded'
+  | 'copilot-prompted'
+  | 'copilot-prompt-resent'
+  | 'copilot-stopped'
+  | 'copilot-feedback-given'
+  | 'copilot-model-changed'
 
 export interface AuditEvent {
   eventType: AuditEventType
@@ -153,6 +158,8 @@ export type EncounterErrorCode =
   | 'MEDICATION_ALLERGY_CONFLICT'
   | 'medication-override-required'
   | 'no-medication-conflict'
+  | 'copilot-busy'
+  | 'copilot-turn-not-found'
 
 export interface EncounterError {
   code: EncounterErrorCode

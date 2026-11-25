@@ -7,7 +7,7 @@ import { app } from '../../src/worker/app'
 import { goldenCase1Chart } from '../fixtures/golden-case-1'
 import { expectNoCaseTruth, goldenCaseDenylists } from './case-truth'
 import rawMedicationCatalog from '../../data/clinic-catalog/medication-catalog.json'
-import { asked, openPatientSocket, settled } from './support/clinic'
+import { asked, openCopilotSocket, openPatientSocket, settled } from './support/clinic'
 import { installScripted } from './support/scripted-llm'
 
 interface ProbeContext {
@@ -19,11 +19,21 @@ interface ProbeContext {
   releasedReportId: string
   failedPatientTurnId: string
   pendingInvestigationId: string
+  copilotTurnId: string | null
 }
+
+// Distinct clientPromptIds across the phases, so a resent probe never lands on a probe of an earlier phase.
+let copilotProbes = 0
 
 // The frames a viewer receives on connecting, as one body to check.
 async function patientSocketFrames(encounterId: string): Promise<Response> {
   const socket = await openPatientSocket(encounterId)
+  socket.close()
+  return new Response(socket.raw.join('\n'))
+}
+
+async function copilotSocketFrames(encounterId: string): Promise<Response> {
+  const socket = await openCopilotSocket(encounterId)
   socket.close()
   return new Response(socket.raw.join('\n'))
 }
@@ -128,6 +138,26 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     }),
   'POST /api/encounters/:encounterId/consultation/doctor-turns': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/consultation/doctor-turns`, { clientTurnId: 'probe', text: '晚上睡得好吗？' }),
+  'GET /api/encounters/:encounterId/copilot': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/copilot`),
+  'GET /api/encounters/:encounterId/copilot/socket': ({ encounterId }) => copilotSocketFrames(encounterId),
+  'POST /api/encounters/:encounterId/copilot/prompts': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/copilot/prompts`, {
+      clientPromptId: `probe-${++copilotProbes}`,
+      text: '请总结目前的问诊资料。',
+      mentions: [],
+      mode: 'queue',
+    }),
+  'POST /api/encounters/:encounterId/copilot/turns/:turnId/resend': ({ encounterId, copilotTurnId }) =>
+    request('POST', `/api/encounters/${encounterId}/copilot/turns/${copilotTurnId}/resend`, {
+      clientPromptId: `probe-resend-${copilotProbes}`,
+      text: '请换个说法再总结一次。',
+      mentions: [],
+    }),
+  'POST /api/encounters/:encounterId/copilot/stop': ({ encounterId }) => request('POST', `/api/encounters/${encounterId}/copilot/stop`),
+  'POST /api/encounters/:encounterId/copilot/turns/:turnId/feedback': ({ encounterId, copilotTurnId }) =>
+    request('POST', `/api/encounters/${encounterId}/copilot/turns/${copilotTurnId}/feedback`, { value: 'up' }),
+  'POST /api/encounters/:encounterId/copilot/config': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/copilot/config`, { model: 'glm-5.3-flash', effort: 'low' }),
   'POST /api/encounters/:encounterId/abandonment': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/abandonment`),
 }
@@ -139,7 +169,11 @@ async function probeEveryRoute(ctx: ProbeContext, phase: string, { keepActive = 
     if (keepActive && route === ABANDONMENT) continue
     const response = await probe(ctx)
     expect(response.status, `${phase}: ${route}`).toBeLessThan(500)
-    expectNoCaseTruth(`${phase}: ${route}`, await response.text(), ctx.revealed)
+    const body = await response.text()
+    expectNoCaseTruth(`${phase}: ${route}`, body, ctx.revealed)
+    if (route === 'POST /api/encounters/:encounterId/copilot/prompts' && response.status === 201) {
+      ctx.copilotTurnId = (JSON.parse(body) as { turnId: string }).turnId
+    }
   }
 }
 
@@ -189,6 +223,13 @@ describe('Case Truth denylist', () => {
       expect(caughtLeak(body), body).toBe(false)
     }
     for (const body of ['{"spo2":94}', '{"usage":{"in":30},"reading":"94"}', '{"seq":1,"text":"SpO₂ 94"}']) {
+      expect(caughtLeak(body), body).toBe(true)
+    }
+  })
+
+  it('skips the usage line\'s in/out only inside usage, not wherever they appear', () => {
+    expect(caughtLeak('{"usage":{"in":30,"out":72,"reasoning":14}}')).toBe(false)
+    for (const body of ['{"in":14.2}', '{"out":86}', '{"step":{"in":30},"text":"WBC 14.2"}']) {
       expect(caughtLeak(body), body).toBe(true)
     }
   })
@@ -277,6 +318,7 @@ describe('Case Truth isolation over HTTP', () => {
       releasedReportId: list[0].reports[0].reportId,
       failedPatientTurnId: failed.turnId,
       pendingInvestigationId: crp.investigationId,
+      copilotTurnId: null,
     }
     await probeEveryRoute(ctx, 'Report version 1 released', { keepActive: true })
     // The pinned catalog insert texts (revealed once, legitimately) don't count; only the three vitals
