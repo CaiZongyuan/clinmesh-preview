@@ -85,7 +85,16 @@ export const eventsOf = (messages: ServerMessage[]) =>
 
 // The Clinical Copilot's socket speaks the same wire protocol as the patient's.
 export async function openCopilotSocket(encounterId: string, afterSeq = 0): Promise<PatientSocket> {
-  const response = await api(`/api/encounters/${encounterId}/copilot/socket`, { headers: { upgrade: 'websocket' } })
+  return openCopilotSocketAt(`/api/encounters/${encounterId}/copilot/socket`, afterSeq)
+}
+
+// The ui-sdk bridge socket: same DO, same wire, but the bridge role the ui tools' calls go to.
+export async function openCopilotBridgeSocket(encounterId: string): Promise<PatientSocket> {
+  return openCopilotSocketAt(`/api/encounters/${encounterId}/copilot/bridge`, 0)
+}
+
+async function openCopilotSocketAt(path: string, afterSeq: number): Promise<PatientSocket> {
+  const response = await api(path, { headers: { upgrade: 'websocket' } })
   expect(response.status).toBe(101)
   const ws = response.webSocket!
   const raw: string[] = []

@@ -519,6 +519,7 @@ export function createFakeClinicApi({
       turns: structuredClone(session.turns),
       queued: structuredClone(session.queued),
       compactions: structuredClone(session.compactions ?? []),
+      countdown: null,
     }
   }
 

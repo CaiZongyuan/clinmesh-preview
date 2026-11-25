@@ -532,3 +532,36 @@ app.get('/encounters/:encounterId/voice', async (c) => {
   }
   return c.env.CONSULTATION_VOICE.getByName(encounterId).fetch(c.req.raw)
 })
+
+// The ui-sdk bridge socket: the browser answers the Copilot's ui_snapshot / ui_act calls here. Same fetch
+// path; SocketHub tells the two roles apart by the `/bridge` suffix.
+app.get('/encounters/:encounterId/copilot/bridge', async (c) => {
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json<ErrorResponse>({ error: { code: 'invalid-request', message: '需要 WebSocket 升级请求' } }, 426)
+  }
+  const encounterId = c.req.param('encounterId')
+  const found = await workspace(c).getEncounter(encounterId)
+  if (!found.ok) return refuse(c, found.error)
+  return copilot(c).fetch(c.req.raw)
+})
+
+// 立即 / 跳过 on the ambient countdown; both are doctor commands, so authorized and audited.
+app.post('/encounters/:encounterId/copilot/triggers/:ref/flush', async (c) => {
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const flushed = await copilot(c).flushCountdown(c.req.param('encounterId'), c.req.param('ref'))
+  if (!flushed.ok) return refuse(c, flushed.error)
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-trigger-flushed', c.req.param('ref'))
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.json<CopilotPromptResponse>(flushed.value, 201)
+})
+
+app.delete('/encounters/:encounterId/copilot/triggers/:ref', async (c) => {
+  const allowed = await workspace(c).authorizeCopilotCommand(c.req.param('encounterId'))
+  if (!allowed.ok) return refuse(c, allowed.error)
+  const skipped = await copilot(c).skipCountdown(c.req.param('encounterId'), c.req.param('ref'))
+  if (!skipped.ok) return refuse(c, skipped.error)
+  const audited = await workspace(c).auditCopilotCommand(c.req.param('encounterId'), 'copilot-trigger-skipped', c.req.param('ref'))
+  if (!audited.ok) return refuse(c, audited.error)
+  return c.body(null, 204)
+})

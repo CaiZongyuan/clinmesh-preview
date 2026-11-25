@@ -387,7 +387,23 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     const accepted = this.ctx.storage.transactionSync(() =>
       this.consultation.settle(settlement.encounterId, settlement.patientTurnId, settlement.outcome, new Date(), this.expiryGraceMs),
     )
+    if (accepted && settlement.outcome.status === 'final') this.triggerCopilot(settlement.encounterId, settlement.patientTurnId)
     return { accepted }
+  }
+
+  // A finalized consultation turn starts the Clinical Copilot's ambient countdown; the trigger is
+  // fire-and-forget, so a slow or absent Copilot never blocks settling the patient's reply.
+  private triggerCopilot(encounterId: string, patientTurnId: string): void {
+    try {
+      const doctorTurn = this.consultation.doctorTurnOf(patientTurnId)
+      if (!doctorTurn) return
+      void this.env.CLINICAL_COPILOT.getByName(encounterId).triggerAnalysis(encounterId, {
+        ref: `consultation:${doctorTurn.turnId}`,
+        text: `问诊定稿：${doctorTurn.text.slice(0, 80)}`,
+      })
+    } catch (error) {
+      console.error('Copilot trigger failed', error)
+    }
   }
 
   // The Clinical Copilot's only way into the workspace: read-only projections of what the doctor can see.

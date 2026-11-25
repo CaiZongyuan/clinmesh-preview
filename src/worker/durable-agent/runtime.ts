@@ -49,6 +49,8 @@ export interface ToolResult {
   // What the call looked at, in a few words, for the doctor reading the step.
   subject: string
   result: string
+  // How a bridged ui act ended: refused (`denied`) or turned into a Suggestion (`approval`).
+  outcome?: 'denied' | 'approval'
 }
 
 // A tool the runtime executes itself. Every tool an agent has today only reads.
@@ -68,8 +70,8 @@ export class RunHalted extends Error {
 export interface AgentDefinition {
   kind: AgentKind
   // The next LLM step's messages and tools, rebuilt from the session binding and the active messages every step.
-  buildContext(input: { binding: unknown; run: AgentRun; messages: LlmMessage[] }):
-    | { messages: LlmMessage[]; tools: ToolSpec[] }
+  buildContext(input: { binding: unknown; run: AgentRun; messages: LlmMessage[] }): 
+    | { messages: LlmMessage[]; tools: ToolSpec[] } 
     | Promise<{ messages: LlmMessage[]; tools: ToolSpec[] }>
   streamThinking: boolean
   // Tools the runtime executes by name; a call to any other tool gets an error the model can read.
@@ -83,6 +85,9 @@ export interface AgentDefinition {
   // summarized messages compacted and writes its marker here). Called only when a run completed; the
   // returned events are appended to the log with the run's own closing event.
   settle?: (run: AgentRun, outcome: Extract<RunOutcome, { status: 'done' }>) => AgentEvent[]
+  // The earliest future time the host wants waking for (e.g. a pending ambient trigger countdown), folded
+  // into the runtime's own alarm schedule.
+  wakeHint?: () => number | null
   // A run whose outcome another Durable Object must accept. Its reply stays `unsettled` (out of the context)
   // until `deliver` resolves true, and turns `void` when refused.
   settlement?: {
@@ -189,9 +194,14 @@ export class DurableAgentRuntime {
   ) {
     this.sql = ctx.storage.sql
     this.events = new EventLog(this.sql)
-    this.sockets = new SocketHub(ctx, this.events)
+    this.sockets = new SocketHub(ctx, this.events, () => void this.pump().catch(() => {}))
     this.outbox = new Outbox(this.sql)
     this.stallMs = positive(env.AGENT_STALL_TIMEOUT_MS, DEFAULT_STALL_MS)
+  }
+
+  // Runs whatever is claimable now (a bridge joining or a host wake can end a waiting period early).
+  wake(): Promise<void> {
+    return this.pump()
   }
 
   // Call inside the host's constructor transaction, before the agent's own migrations.
@@ -340,8 +350,12 @@ export class DurableAgentRuntime {
   }
 
   private nextWake(): number | null {
+    const hint = this.agent.wakeHint?.() ?? null
     const waiting = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_run WHERE status IN ('queued', 'running')`).one().n
-    return waiting > 0 ? Date.now() : this.outbox.nextAttemptAt()
+    const own = waiting > 0 ? Date.now() : this.outbox.nextAttemptAt()
+    if (own === null) return hint
+    if (hint === null) return own
+    return Math.min(own, hint)
   }
 
   private candidate(): RunRow | undefined {
@@ -675,8 +689,8 @@ export class DurableAgentRuntime {
       signal.throwIfAborted()
       const published = this.ctx.storage.transactionSync(() => {
         this.sql.exec(
-          `UPDATE agent_tool_call SET status = ?, subject = ?, result = ?, completed_at = ? WHERE id = ?`,
-          outcome.ok ? 'ok' : 'error', outcome.subject, outcome.result, Date.now(), call.id,
+          `UPDATE agent_tool_call SET status = ?, outcome = ?, subject = ?, result = ?, completed_at = ? WHERE id = ?`,
+          outcome.ok ? 'ok' : 'error', outcome.outcome ?? null, outcome.subject, outcome.result, Date.now(), call.id,
         )
         this.insertMessage(runId, { role: 'tool', toolCallId: call.call_id, content: outcome.result })
         return this.agent.traceSteps

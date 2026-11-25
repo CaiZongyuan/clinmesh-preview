@@ -109,9 +109,21 @@ export interface CopilotSnapshot {
   queued: CopilotQueuedItem[]
   // Manual compaction markers (#13), newest first: each summarizes the turns before it.
   compactions: CopilotCompactionEntry[]
+  // An ambient trigger counting down its ~1.2s debounce (立即 / 跳过); a newer finalized turn flushes it into the queue.
+  countdown: CopilotCountdown | null
+}
+
+export interface CopilotCountdown {
+  ref: string
+  text: string
+  fireAt: string
 }
 
 export type CopilotPromptMode = 'queue' | 'steer'
+
+// What a ui_act step became, as the browser reported it over the bridge: a written Draft, a Suggestion
+// waiting for the doctor's 采纳 / 不采用, or a refused data-agent-confirm control (被拦截).
+export type CopilotToolOutcome = 'denied' | 'approval'
 
 export interface CopilotPromptRequest {
   // Chosen by the browser, so resending a prompt after a dropped response records it once.

@@ -7,7 +7,7 @@ import { app } from '../../src/worker/app'
 import { goldenCase1Chart } from '../fixtures/golden-case-1'
 import { expectNoCaseTruth, goldenCaseDenylists } from './case-truth'
 import rawMedicationCatalog from '../../data/clinic-catalog/medication-catalog.json'
-import { asked, openCopilotSocket, openPatientSocket, settled } from './support/clinic'
+import { asked, openCopilotBridgeSocket, openCopilotSocket, openPatientSocket, settled } from './support/clinic'
 import { installScripted } from './support/scripted-llm'
 
 interface ProbeContext {
@@ -32,8 +32,8 @@ async function patientSocketFrames(encounterId: string): Promise<Response> {
   return new Response(socket.raw.join('\n'))
 }
 
-async function copilotSocketFrames(encounterId: string): Promise<Response> {
-  const socket = await openCopilotSocket(encounterId)
+async function copilotSocketFrames(encounterId: string, bridge = false): Promise<Response> {
+  const socket = bridge ? await openCopilotBridgeSocket(encounterId) : await openCopilotSocket(encounterId)
   socket.close()
   return new Response(socket.raw.join('\n'))
 }
@@ -169,6 +169,7 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'GET /api/encounters/:encounterId/copilot': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/copilot`),
   'GET /api/encounters/:encounterId/copilot/context': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/copilot/context`),
   'GET /api/encounters/:encounterId/copilot/socket': ({ encounterId }) => copilotSocketFrames(encounterId),
+  'GET /api/encounters/:encounterId/copilot/bridge': ({ encounterId }) => copilotSocketFrames(encounterId, true),
   'POST /api/encounters/:encounterId/copilot/prompts': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/copilot/prompts`, {
       clientPromptId: `probe-${++copilotProbes}`,
@@ -183,6 +184,10 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
       mentions: [],
     }),
   'POST /api/encounters/:encounterId/copilot/stop': ({ encounterId }) => request('POST', `/api/encounters/${encounterId}/copilot/stop`),
+  'POST /api/encounters/:encounterId/copilot/triggers/:ref/flush': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/copilot/triggers/consultation:probe/flush`),
+  'DELETE /api/encounters/:encounterId/copilot/triggers/:ref': ({ encounterId }) =>
+    request('DELETE', `/api/encounters/${encounterId}/copilot/triggers/consultation:probe`),
   'POST /api/encounters/:encounterId/copilot/turns/:turnId/feedback': ({ encounterId, copilotTurnId }) =>
     request('POST', `/api/encounters/${encounterId}/copilot/turns/${copilotTurnId}/feedback`, { value: 'up' }),
   'POST /api/encounters/:encounterId/copilot/config': ({ encounterId }) =>

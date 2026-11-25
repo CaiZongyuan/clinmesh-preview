@@ -102,4 +102,8 @@ export const AGENT_RUNTIME_MIGRATIONS: readonly string[] = [
    );`,
   // Context accounting (#13): the per-request itemized breakdown recorded when a step's context was built.
   `ALTER TABLE agent_step ADD COLUMN context_json;`,
+  // How a bridged ui act ended (the Clinical Copilot's ui_snapshot / ui_act): refused by the interception
+  // rules, or turned into a Suggestion the doctor must accept.
+  `ALTER TABLE agent_tool_call ADD COLUMN outcome TEXT;
+`,
 ]
