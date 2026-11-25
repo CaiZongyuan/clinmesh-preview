@@ -47,6 +47,8 @@ export interface VoiceCaptureController {
   press(): void
   slide(dy: number): void
   release(): void
+  // Discard the active hold without recording (pointercancel, lost capture, window blur).
+  cancel(): void
   togglePause(): void
   selectDevice(deviceId: string): void
   resubmit(): void
@@ -247,6 +249,14 @@ export function useVoiceCapture(
     else send({ type: 'clinmesh.commit' })
   }, [endSession, recognizer])
 
+  // A hold the browser interrupts (pointercancel, lost capture, window blur) is discarded: nothing
+  // is committed, and ending the session closes the mic.
+  const cancel = useCallback(() => {
+    const held = sessionRef.current
+    if (held?.mode !== 'hold') return
+    endSession('已取消，这段话没有记录。')
+  }, [endSession])
+
   const togglePause = useCallback(() => {
     setPaused((was) => !was)
     setInterim(null)
@@ -316,6 +326,7 @@ export function useVoiceCapture(
     press,
     slide,
     release,
+    cancel,
     togglePause,
     selectDevice,
     resubmit,

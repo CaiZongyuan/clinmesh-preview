@@ -256,6 +256,44 @@ describe('voice capture', () => {
     }
   })
 
+  it('discards a hold the browser interrupts (pointercancel or lost capture) without a commit, closing the mic', async () => {
+    stubMicrophone()
+    const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
+    await column()
+    const bar = await voiceBar()
+    const holdButton = await within(bar).findByRole('button', { name: '按住说话' })
+    fireEvent.pointerDown(holdButton)
+    const socket = await openVoiceSocket(api)
+    expect(socket.sent[0].mode).toBe('hold')
+
+    // The gesture is taken away: pointercancel (or capture lost without an up) must discard the hold,
+    // so the mic cannot stream forever. The holding button is a fresh element (the bar swaps controls),
+    // so re-query before the cancel.
+    fireEvent.pointerCancel(await within(await voiceBar()).findByRole('button', { name: /正在录音/ }))
+    await waitFor(async () => expect(within(await voiceBar()).getByRole('button', { name: '按住说话' })).toBeInTheDocument())
+    await waitFor(() => expect(api.voiceSockets()).toHaveLength(0)) // the mic's socket closed
+    expect(socket.sent.filter((m) => m.type === 'clinmesh.commit')).toHaveLength(0)
+    expect(screen.getByText('已取消，这段话没有记录。')).toBeInTheDocument()
+  })
+
+  it('cancels the hold when the window loses focus, without a commit or a turn', async () => {
+    stubMicrophone()
+    const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
+    await column()
+    const bar = await voiceBar()
+    fireEvent.pointerDown(within(bar).getByRole('button', { name: '按住说话' }))
+    const socket = await openVoiceSocket(api)
+    expect(within(await voiceBar()).getByRole('button', { name: /正在录音/ })).toBeInTheDocument()
+
+    // Alt-tab mid-hold: the release would never arrive, so the blur must discard the hold.
+    fireEvent(window, new Event('blur'))
+    await waitFor(async () => expect(within(await voiceBar()).getByRole('button', { name: '按住说话' })).toBeInTheDocument())
+    expect(api.voiceSockets()).toHaveLength(0)
+    expect(socket.sent.filter((m) => m.type === 'clinmesh.commit')).toHaveLength(0)
+    expect(api.turns(ENCOUNTER)).toHaveLength(0)
+    expect(screen.getByText('已取消，这段话没有记录。')).toBeInTheDocument()
+  })
+
   it('pausing releases the microphone and shows a persistent privacy banner', { timeout: 20_000 }, async () => {
     const mic = stubMicrophone()
     const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
