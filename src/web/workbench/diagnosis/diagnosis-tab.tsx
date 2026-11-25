@@ -166,10 +166,12 @@ function DraftTable({
 
 // The ICD-10 search: typing filters by name, code or pinyin initials (via item keywords); Enter adds the
 // highlighted entry, or the doctor clicks it. The selection resets so the field keeps acting as a search box.
+const DIAGNOSIS_OPTIONS = ICD_CATALOG.map((entry) => ({ value: entry.code, label: entry.name, keywords: [entry.code, ...entry.pinyin] }))
+
 function IcdSearch({ disabled, full, onAdd }: { disabled: boolean; full: boolean; onAdd: (code: string) => void }) {
   const proposal = useClinicalNoteContext()
   return (
-    <Combobox aria-label="ICD-10 搜索"
+    <Combobox aria-label="ICD-10 搜索" items={DIAGNOSIS_OPTIONS}
       onValueChange={(code, details) => {
         // The field stays a search box: refuse the selection so the typed query remains, and add the entry.
         details.cancel()
@@ -187,10 +189,10 @@ function IcdSearch({ disabled, full, onAdd }: { disabled: boolean; full: boolean
       <ComboboxContent>
         <ComboboxEmpty>没有匹配的诊断。</ComboboxEmpty>
         <ComboboxList>
-          {ICD_CATALOG.map((entry) => (
-            <ComboboxItem key={entry.code} value={entry.code} label={entry.name} keywords={[entry.code, ...entry.pinyin]}>
-              {entry.name}
-              <span className="font-mono text-xs text-muted-foreground">{entry.code}</span>
+          {({ items }) => (items as typeof DIAGNOSIS_OPTIONS).map((entry) => (
+            <ComboboxItem key={entry.value} value={entry.value} label={entry.label} keywords={entry.keywords}>
+              {entry.label}
+              <span className="font-mono text-xs text-muted-foreground">{entry.value}</span>
             </ComboboxItem>
           ))}
         </ComboboxList>

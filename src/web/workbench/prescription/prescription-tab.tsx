@@ -411,8 +411,13 @@ function MedicationSearch({
   onAdd: (drugId: string) => void
 }) {
   const proposal = useClinicalNoteContext()
+  const options = state.catalog.map((drug) => ({
+    value: drug.id,
+    label: drug.name,
+    keywords: [...drug.pinyinInitials, drug.drugClassName],
+  }))
   return (
-    <Combobox aria-label="搜索药品（本院药房）"
+    <Combobox aria-label="搜索药品（本院药房）" items={options}
       onValueChange={(drugId, details) => {
         // The field stays a search box: refuse the selection so the typed query remains, and add the drug.
         details.cancel()
@@ -428,7 +433,9 @@ function MedicationSearch({
       <ComboboxContent>
         <ComboboxEmpty>没有匹配的药品。</ComboboxEmpty>
         <ComboboxList>
-          {state.catalog.map((drug) => {
+          {({ items }) => (items as typeof options).map((item) => {
+            const drug = state.drugOf(item.value)
+            if (!drug) return null
             const tag = state.tagFor(drug)
             return (
               <ComboboxItem

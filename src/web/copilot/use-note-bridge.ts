@@ -10,7 +10,7 @@ type Step = Parameters<Agent['act']>[0]['steps'][number]
 type Answer = Extract<ClientMessage, { type: 'bridge.result' }>
 
 const noteLabels = new Set<string>(NOTE_SECTIONS.map((section) => NOTE_SECTION_NAME[section]))
-const draftSearchLabels = new Set(['ICD-10 搜索', '搜索药品（本院药房）'])
+const draftSearchLabels = new Set(['ICD-10 搜索', '搜索 ICD-10 诊断', '搜索药品（本院药房）', '搜索药品'])
 const draftButton = (label: string) => label.startsWith('加入待开立：') || label.startsWith('添加常用诊断 ')
 const draftTabs = new Set(['note', '病历记录', 'investigations', 'diagnosis', 'prescription', ...Object.values(DRAFT_MODULE_LABEL)])
 
