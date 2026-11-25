@@ -81,6 +81,18 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry': ({ encounterId, failedPatientTurnId }) =>
     request('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/retry`),
   'GET /api/encounters/:encounterId/clinical-note': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/clinical-note`),
+  'GET /api/encounters/:encounterId/diagnosis': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/diagnosis`),
+  'PUT /api/encounters/:encounterId/diagnosis/draft': ({ encounterId }) =>
+    request('PUT', `/api/encounters/${encounterId}/diagnosis/draft`, { entries: [{ code: 'I10', primary: true, source: 'doctor' }] }),
+  'POST /api/encounters/:encounterId/diagnosis/revisions': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/diagnosis/revisions`, {
+      entries: [
+        { code: 'I10', primary: true, source: 'doctor' },
+        { code: 'E11.9', primary: false, source: 'doctor' },
+      ],
+    }),
+  'POST /api/encounters/:encounterId/diagnosis/reopen': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/diagnosis/reopen`),
   'PATCH /api/encounters/:encounterId/clinical-note/draft': ({ encounterId }) =>
     request('PATCH', `/api/encounters/${encounterId}/clinical-note/draft`, { sections: { 'chief-complaint': '发热、咳嗽 3 天。' } }),
   'POST /api/encounters/:encounterId/clinical-note/revisions': ({ encounterId }) =>

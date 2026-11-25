@@ -30,7 +30,7 @@ const COMMON_PHRASES: Record<NoteSection, readonly string[]> = {
 
 const card = 'flex flex-col gap-3 rounded-lg border bg-card p-3'
 
-export function ClinicalNoteTab({ encounter }: { encounter: EncounterView }) {
+export function ClinicalNoteTab({ encounter, diagnosisSeq }: { encounter: EncounterView; diagnosisSeq?: number }) {
   const context = useClinicalNoteContext()
   if (!context) return null
   const { note, writable } = context
@@ -52,6 +52,11 @@ export function ClinicalNoteTab({ encounter }: { encounter: EncounterView }) {
               </span>
             )}
             {note.unsignedChanges && <span className={`${badge} bg-warning/15 text-warning`}>有未签署修改</span>}
+            {/* A diagnosis revision with a higher clinical revision sequence than the latest signature means the
+              signed note predates the current diagnosis and no longer satisfies completion. */}
+            {last && diagnosisSeq !== undefined && diagnosisSeq > last.seq && (
+              <span className={`${badge} bg-destructive/15 text-destructive`}>签署早于诊断修改</span>
+            )}
             <SigningHistory revisions={note.revisions} />
             <SignNote note={note} encounter={encounter} writable={writable} />
           </div>

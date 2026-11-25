@@ -20,6 +20,7 @@ import type {
 } from '../shared/investigation'
 
 import type { ClinicalNoteResponse, ClinicalNoteView, NoteSections } from '../shared/clinical-note'
+import type { DiagnosisDraftEntry, DiagnosisResponse, DiagnosisView } from '../shared/diagnosis'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
@@ -125,6 +126,24 @@ export async function saveClinicalNoteDraft(encounterId: string, sections: Parti
 
 export async function signClinicalNote(encounterId: string, sections: NoteSections): Promise<ClinicalNoteView> {
   return (await request<ClinicalNoteResponse>(`${clinicalNotePath(encounterId)}/revisions`, post({ sections }))).note
+}
+
+const diagnosisPath = (encounterId: string) => `${encounterPath(encounterId)}/diagnosis`
+
+export async function fetchDiagnosis(encounterId: string): Promise<DiagnosisView> {
+  return (await request<DiagnosisResponse>(diagnosisPath(encounterId))).diagnosis
+}
+
+export async function saveDiagnosisDraft(encounterId: string, entries: DiagnosisDraftEntry[]): Promise<DiagnosisView> {
+  return (await request<DiagnosisResponse>(`${diagnosisPath(encounterId)}/draft`, { ...post({ entries }), method: 'PUT' })).diagnosis
+}
+
+export async function confirmDiagnosis(encounterId: string, entries: DiagnosisDraftEntry[]): Promise<DiagnosisView> {
+  return (await request<DiagnosisResponse>(`${diagnosisPath(encounterId)}/revisions`, post({ entries }))).diagnosis
+}
+
+export async function reopenDiagnosis(encounterId: string): Promise<DiagnosisView> {
+  return (await request<DiagnosisResponse>(`${diagnosisPath(encounterId)}/reopen`, post())).diagnosis
 }
 
 export function openPatientSocket(encounterId: string): WebSocket {

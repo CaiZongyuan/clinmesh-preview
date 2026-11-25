@@ -8,6 +8,8 @@ import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { startEncounter } from '../api'
 import { AbandonEncounter } from './abandon-encounter'
 import { ClinicalNoteTab } from './clinical-note/clinical-note-tab'
+import { DiagnosisTab } from './diagnosis/diagnosis-tab'
+import { useDiagnosis } from './diagnosis/use-diagnosis'
 import { formatClock, SEX_LABEL, VISIT_KIND_LABEL } from './format'
 import { InvestigationsTab } from './investigations/investigations-tab'
 import { useInvestigations } from './investigations/use-investigations'
@@ -69,6 +71,7 @@ const tab =
 
 function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterView; examinations: PhysicalExaminationView[] }) {
   const investigations = useInvestigations(encounter)
+  const diagnosis = useDiagnosis(encounter)
   return (
     <main aria-label="病例工作区" className={pane}>
       <PatientBanner encounter={encounter} examinedVitals={examinations.find((e) => e.system === 'vitals')} />
@@ -90,13 +93,13 @@ function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterV
           </TabsTab>
         </TabsList>
         <TabsPanel value="note" className={paneBody}>
-          <ClinicalNoteTab encounter={encounter} />
+          <ClinicalNoteTab encounter={encounter} diagnosisSeq={diagnosis.view.revisions.at(-1)?.seq} />
         </TabsPanel>
         <TabsPanel value="investigations" className={paneBody}>
           <InvestigationsTab state={investigations} writable={encounter.status === 'active'} />
         </TabsPanel>
         <TabsPanel value="diagnosis" className={paneBody}>
-          <UpcomingTab>诊断</UpcomingTab>
+          <DiagnosisTab encounter={encounter} state={diagnosis} />
         </TabsPanel>
         <TabsPanel value="prescription" className={paneBody}>
           <UpcomingTab>处方</UpcomingTab>

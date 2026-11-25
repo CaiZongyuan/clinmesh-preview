@@ -26,6 +26,8 @@ import {
   type NoteSections,
 } from '../shared/clinical-note'
 import type { ClinicalNoteResult } from './clinical-note-repository'
+import { diagnosisEntries, type DiagnosisResult } from './diagnosis-repository'
+import type { DiagnosisResponse } from '../shared/diagnosis'
 
 import { WORKSPACE_NAME } from './workspace-name'
 
@@ -49,6 +51,8 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'patient-turn-pending': 409,
   'patient-turn-not-retryable': 409,
   'clinical-note-incomplete': 422,
+  'diagnosis-needs-primary': 422,
+  'diagnosis-not-confirmed': 409,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -84,6 +88,16 @@ async function noteSections(c: AppContext, all: boolean): Promise<Partial<NoteSe
 
 const noteShape = (which: string) =>
   `请求体须为 { "sections": { [section]: string } }，含${which}段落（${NOTE_SECTIONS.join('、')}），每段不超过 ${MAX_NOTE_SECTION_LENGTH} 字`
+
+const diagnosisOr = (c: AppContext, result: DiagnosisResult, status: ContentfulStatusCode = 200) =>
+  result.ok ? c.json<DiagnosisResponse>({ diagnosis: result.diagnosis }, status) : refuse(c, result.error)
+
+// Entry list under `entries` in the body, or null when malformed.
+async function diagnosisDraftEntries(c: AppContext): Promise<ReturnType<typeof diagnosisEntries> | null> {
+  const body: unknown = await c.req.json().catch(() => null)
+  const entries = (body as Record<string, unknown> | null)?.entries
+  return entries === undefined ? null : diagnosisEntries(entries)
+}
 
 export const app = new Hono<{ Bindings: Env }>().basePath('/api')
 
@@ -184,6 +198,24 @@ app.post('/encounters/:encounterId/clinical-note/revisions', async (c) => {
   if (!sections) return refuse(c, { code: 'invalid-request', message: noteShape('全部六个') })
   return noteOr(c, await workspace(c).signClinicalNote(c.req.param('encounterId'), sections as NoteSections), 201)
 })
+
+app.get('/encounters/:encounterId/diagnosis', async (c) => diagnosisOr(c, await workspace(c).getDiagnosis(c.req.param('encounterId'))))
+
+app.put('/encounters/:encounterId/diagnosis/draft', async (c) => {
+  const entries = await diagnosisDraftEntries(c)
+  if (!entries) return refuse(c, { code: 'invalid-request', message: '请求体须为 { "entries": [{ code, primary, source }] }，诊断编码须在目录中且不重复，最多 8 项' })
+  return diagnosisOr(c, await workspace(c).saveDiagnosisDraft(c.req.param('encounterId'), entries))
+})
+
+app.post('/encounters/:encounterId/diagnosis/revisions', async (c) => {
+  const entries = await diagnosisDraftEntries(c)
+  if (!entries) return refuse(c, { code: 'invalid-request', message: '请求体须为 { "entries": [{ code, primary, source }] }，诊断编码须在目录中且不重复，最多 8 项' })
+  return diagnosisOr(c, await workspace(c).confirmDiagnosis(c.req.param('encounterId'), entries), 201)
+})
+
+app.post('/encounters/:encounterId/diagnosis/reopen', async (c) =>
+  diagnosisOr(c, await workspace(c).reopenDiagnosis(c.req.param('encounterId'))),
+)
 
 app.get('/encounters/:encounterId/consultation', async (c) => {
   const result = await workspace(c).getConsultation(c.req.param('encounterId'))

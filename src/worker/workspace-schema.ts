@@ -133,6 +133,29 @@ const MIGRATIONS: readonly string[] = [
    BEGIN SELECT RAISE(ABORT, 'signed Clinical Note revisions are immutable'); END;
    CREATE TRIGGER clinical_note_revision_no_delete BEFORE DELETE ON clinical_note_revision
    BEGIN SELECT RAISE(ABORT, 'signed Clinical Note revisions are immutable'); END;`,
+  // The Diagnosis: one Draft row per Encounter holding the candidate entries, and confirmed revisions as
+  // immutable rows that take the next number of the Encounter's clinical revision sequence, shared with
+  // signed Clinical Note revisions, so the two can be ordered.
+  `CREATE TABLE diagnosis_draft (
+     encounter_id TEXT PRIMARY KEY REFERENCES encounter (encounter_id),
+     entries TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );
+   CREATE TABLE diagnosis_revision (
+     revision_id TEXT PRIMARY KEY,
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     version INTEGER NOT NULL,
+     seq INTEGER NOT NULL,
+     entries TEXT NOT NULL,
+     practitioner_id TEXT NOT NULL,
+     confirmed_at TEXT NOT NULL,
+     UNIQUE (encounter_id, version),
+     UNIQUE (encounter_id, seq)
+   );
+   CREATE TRIGGER diagnosis_revision_no_update BEFORE UPDATE ON diagnosis_revision
+   BEGIN SELECT RAISE(ABORT, 'confirmed Diagnosis revisions are immutable'); END;
+   CREATE TRIGGER diagnosis_revision_no_delete BEFORE DELETE ON diagnosis_revision
+   BEGIN SELECT RAISE(ABORT, 'confirmed Diagnosis revisions are immutable'); END;`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {
