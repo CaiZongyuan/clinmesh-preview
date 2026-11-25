@@ -193,6 +193,41 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     return this.ctx.storage.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_run WHERE status IN ('queued', 'running')`).one().n > 0
   }
 
+  // When a compaction run is superseded, its summary is void with it — but only the turns at or after the
+  // resend target were stale. Restore the compacted originals that (a) no surviving summary still covers and
+  // (b) belong to runs that are not themselves superseded. Runs' own superseded messages stay `void`.
+  private restoreUncoveredCompacted(sql: SqlStorage): void {
+    const voidedSummaries = sql
+      .exec<{ from_seq: number; upto_seq: number }>(
+        `SELECT c.from_seq, c.upto_seq FROM copilot_compaction c
+         JOIN agent_message m ON m.seq = c.summary_seq AND m.state = 'void'
+         JOIN agent_run r ON r.run_id = c.run_id AND r.superseded_by IS NOT NULL`,
+      )
+      .toArray()
+    if (voidedSummaries.length === 0) return
+    const surviving = sql
+      .exec<{ from_seq: number; upto_seq: number }>(
+        `SELECT c.from_seq, c.upto_seq FROM copilot_compaction c
+         JOIN agent_message m ON m.seq = c.summary_seq AND m.state = 'active'`,
+      )
+      .toArray()
+    const covered = (seq: number) => surviving.some((range) => seq >= range.from_seq && seq <= range.upto_seq)
+    for (const range of voidedSummaries) {
+      const candidates = sql
+        .exec<{ seq: number; run_id: string | null; superseded: number }>(
+          `SELECT m.seq, m.run_id, r.superseded_by IS NOT NULL AS superseded
+           FROM agent_message m LEFT JOIN agent_run r ON r.run_id = m.run_id
+           WHERE m.state = 'compacted' AND m.seq >= ? AND m.seq <= ?`,
+          range.from_seq, range.upto_seq,
+        )
+        .toArray()
+      for (const { seq, superseded } of candidates) {
+        if (superseded || covered(seq)) continue
+        sql.exec(`UPDATE agent_message SET state = 'active' WHERE seq = ? AND state = 'compacted'`, seq)
+      }
+    }
+  }
+
   async snapshot(encounterId: string): Promise<CopilotSnapshot> {
     this.bind(encounterId)
     return { seq: this.runtime.events.latestSeq(), model: this.modelSetting(), ...readSession(this.ctx.storage.sql) }
@@ -241,7 +276,13 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     if (sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_run WHERE status IN ('queued', 'running')`).one().n > 0) {
       return { ok: false, error: busy }
     }
-    this.ctx.storage.transactionSync(() => this.runtime.voidFrom(turnId, request.clientPromptId))
+    this.ctx.storage.transactionSync(() => {
+      this.runtime.voidFrom(turnId, request.clientPromptId)
+      // A voided compaction summary no longer covers the pre-target originals it replaced: restore the ones
+      // still valid (not themselves superseded, not covered by a surviving summary), so the valid prefix of a
+      // compacted history survives an edit-and-resend while the stale remainder stays out.
+      this.restoreUncoveredCompacted(this.ctx.storage.sql)
+    })
     const prompted = await this.prompt(encounterId, { ...request, mode: 'queue' }, context)
     return { ok: true, value: prompted }
   }

@@ -321,6 +321,7 @@ export function createFakeClinicApi({
       if (typeof requested?.text !== 'string' || !requested.text.trim()) return refuse('invalid-request', '请求体须为 { "text": string }')
       speechRequests.push({ encounterId: encounter.encounterId, turnId: speech[1], text: requested.text })
       return new Response(SPEECH_WAV.slice(0), { headers: { 'content-type': 'audio/wav' } })
+    }
     if (action === 'copilot/context') {
       const session = copilotOf(encounter.encounterId)
       const items = [
