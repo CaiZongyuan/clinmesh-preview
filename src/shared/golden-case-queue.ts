@@ -14,6 +14,7 @@ export interface GoldenCaseQueueEntry {
   registeredAt: string
   visitKind: VisitKind
   queueStatus: QueueStatus
+  completedEncounterId?: string
 }
 
 export interface GoldenCaseQueueResponse {

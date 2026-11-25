@@ -69,10 +69,17 @@ Request and response shapes live in `src/shared/`. Errors answer `{ "error": { "
 | `GET /api/voice` | Which recognizer turns speech into questions: `paraformer-realtime-v2` with a `BAILIAN_TOKEN`, else the browser's Web Speech API |
 | `GET /api/encounters/:encounterId/voice` | WebSocket: the doctor's voice capture for an active Encounter (`src/shared/voice.ts`, the `agents/voice` protocol); `426` without an upgrade, `409 encounter-not-active` once frozen |
 
+The workbench shows the same five Completion Gates in the patient banner and action bar. Investigation
+and Prescription drafts are saved on the Encounter and count toward the pending-draft gate. The
+`POST /api/encounters/:id/completion` command checks all gates in one transaction and returns failed gate
+IDs with HTTP 409 on refusal. Completion freezes clinical writes and unlocks the read-only
+`GET /api/encounters/:id/debrief` comparison. The replay action starts a fresh Encounter for the same
+Golden Case.
+
 Two Worker-seam tests enumerate the Hono app's routes and fail until a new route is listed:
 
 - `test/worker/truth-isolation.test.ts` probes every route for Case Truth with the shared denylist in `test/worker/case-truth.ts` (`expectNoCaseTruth`), which later tickets reuse for WebSocket frames, Simulated Patient replies and Copilot context.
-- `test/worker/write-freeze.test.ts` sends every write command under `/api/encounters/:encounterId` to an abandoned Encounter and expects `409 encounter-not-active`.
+- `test/worker/write-freeze.test.ts` sends every write command under `/api/encounters/:encounterId` to abandoned and completed Encounters and expects `409 encounter-not-active`.
 
 WebSocket routes must be registered on the same Hono app (not dispatched beside it in `src/worker/index.ts`), so the enumeration sees them.
 

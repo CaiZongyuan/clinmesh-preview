@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { ClinicalDraftState } from '../use-clinical-drafts'
 import type { EncounterView } from '../../../shared/encounter'
 import type { CatalogItemView, InvestigationView } from '../../../shared/investigation'
 import {
@@ -18,14 +19,14 @@ export const awaitingAcknowledgement = (investigation: InvestigationView) => {
   return !!report && !report.acknowledgement
 }
 
-// The 检验检查 tab's state: the catalog, the doctor's pending list (a local Draft until issued) and the
+// The 检验检查 tab's state: the catalog, the doctor's saved Draft and the
 // Encounter's issued Investigations, re-read while any is not cancelled: a Report can still be due, and an
 // amendment can publish at any time without the browser knowing one is scripted.
-export function useInvestigations(encounter: EncounterView) {
+export function useInvestigations(encounter: EncounterView, drafts: ClinicalDraftState) {
   const { encounterId, status } = encounter
   const [catalog, setCatalog] = useState<CatalogItemView[]>([])
   const [investigations, setInvestigations] = useState<InvestigationView[]>([])
-  const [pending, setPending] = useState<string[]>([])
+  const pending = drafts.drafts.investigations
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -69,12 +70,13 @@ export function useInvestigations(encounter: EncounterView) {
     pending,
     error,
     pendingCount: pending.length + investigations.filter(awaitingAcknowledgement).length,
-    add: (id: string) => setPending((list) => (list.includes(id) ? list : [...list, id])),
-    remove: (id: string) => setPending((list) => list.filter((item) => item !== id)),
-    clear: () => setPending([]),
+    add: (id: string) => drafts.change('investigations', (list) => (list.includes(id) ? list : [...list, id])),
+    remove: (id: string) => drafts.change('investigations', (list) => list.filter((item) => item !== id)),
+    clear: () => drafts.change('investigations', () => []),
     issue: async () => {
+      await drafts.flush()
       await run(() => issueInvestigations(encounterId, pending), '开立检查失败')
-      setPending([])
+      drafts.replace('investigations', (entries) => entries.filter((id) => !pending.includes(id)))
     },
     releaseNow: (investigationId: string) =>
       run(() => releaseInvestigationNow(encounterId, investigationId), '出报告失败').catch(() => {}),

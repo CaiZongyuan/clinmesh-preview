@@ -193,6 +193,16 @@ const MIGRATIONS: readonly string[] = [
   `ALTER TABLE consultation_turn ADD COLUMN voice_recognizer TEXT CHECK (voice_recognizer IN ('paraformer-realtime-v2', 'web-speech'));
    ALTER TABLE consultation_turn ADD COLUMN voice_duration_ms INTEGER;
    ALTER TABLE consultation_turn ADD COLUMN voice_confidence REAL;`,
+  `CREATE TABLE encounter_draft (
+     encounter_id TEXT NOT NULL REFERENCES encounter (encounter_id),
+     kind TEXT NOT NULL CHECK (kind IN ('investigations', 'prescriptions')),
+     entries TEXT NOT NULL,
+     PRIMARY KEY (encounter_id, kind)
+   );
+   CREATE TABLE case_debrief_reference (
+     encounter_id TEXT PRIMARY KEY REFERENCES encounter (encounter_id),
+     reference TEXT NOT NULL
+   );`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

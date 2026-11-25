@@ -103,9 +103,9 @@ describe('Physical Examination', () => {
     openEncounter()
     await user.click(within(await consultation()).getByRole('button', { name: '查体：腹部' }))
     await waitFor(transcriptRows)
-    expect(screen.queryByRole('button', { name: /已阅|确认/ })).not.toBeInTheDocument()
+    expect(within(await consultation()).queryByRole('button', { name: /已阅|确认/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(screen.getByRole('main', { name: '病例工作区' })).toHaveTextContent('完诊 0/5')
+    expect(screen.getByRole('button', { name: '完诊清单 2/5' })).toBeInTheDocument()
   })
 
   it('shows the server refusal when the body system was examined elsewhere in the meantime', async () => {

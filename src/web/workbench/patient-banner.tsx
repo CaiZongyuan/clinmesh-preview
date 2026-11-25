@@ -1,6 +1,6 @@
 import { Button } from '@ui-sdk/react/button'
 import { CheckIcon, ClockIcon, CopyIcon, TriangleAlertIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { EncounterStatus, EncounterView, VitalSign, VitalSignKind } from '../../shared/encounter'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { formatClock, formatDuration, SEX_LABEL, VISIT_KIND_LABEL } from './format'
@@ -22,9 +22,11 @@ const VITAL_LABEL: Record<VitalSignKind, { short: string; name: string }> = {
 export function PatientBanner({
   encounter,
   examinedVitals,
+  completion,
 }: {
   encounter: EncounterView
   examinedVitals?: PhysicalExaminationView
+  completion?: ReactNode
 }) {
   const { patient, triage, visibleSourceHistory: history } = encounter
   return (
@@ -57,6 +59,7 @@ export function PatientBanner({
         <div className="flex flex-none items-center gap-1.5">
           <EncounterTimer startedAt={encounter.startedAt} endedAt={encounter.endedAt} />
           <HealthRecordPopover history={history} />
+          {completion}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-muted-foreground">

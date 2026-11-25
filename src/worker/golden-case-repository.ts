@@ -12,7 +12,7 @@ type GoldenCaseRow = {
   visit_kind: VisitKind
 }
 
-type QueueRow = GoldenCaseRow & { in_encounter: number }
+type QueueRow = GoldenCaseRow & { in_encounter: number; completed_encounter_id: string | null }
 
 export class GoldenCaseRepository {
   constructor(private readonly sql: SqlStorage) {}
@@ -42,7 +42,9 @@ export class GoldenCaseRepository {
     const rows = this.sql
       .exec<QueueRow>(
         `SELECT case_id, queue_number, patient_name, sex, birth_date, chief_complaint, registered_at, visit_kind,
-           EXISTS (SELECT 1 FROM encounter WHERE encounter.case_id = golden_case.case_id AND status = 'active') AS in_encounter
+           EXISTS (SELECT 1 FROM encounter WHERE encounter.case_id = golden_case.case_id AND status = 'active') AS in_encounter,
+           (SELECT encounter_id FROM encounter WHERE encounter.case_id = golden_case.case_id AND status = 'completed'
+            ORDER BY ended_at DESC, rowid DESC LIMIT 1) AS completed_encounter_id
          FROM golden_case ORDER BY queue_number`,
       )
       .toArray()
@@ -56,7 +58,8 @@ export class GoldenCaseRepository {
       registeredAt: row.registered_at,
       visitKind: row.visit_kind,
       // An abandoned Encounter is not a completed one, so its Golden Case waits to be started afresh.
-      queueStatus: row.in_encounter ? 'in-encounter' : 'waiting',
+      queueStatus: row.in_encounter ? 'in-encounter' : row.completed_encounter_id ? 'completed' : 'waiting',
+      ...(row.completed_encounter_id && { completedEncounterId: row.completed_encounter_id }),
     }))
   }
 }

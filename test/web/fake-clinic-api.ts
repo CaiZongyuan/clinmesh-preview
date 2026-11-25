@@ -1,3 +1,4 @@
+import { COMPLETION_GATE_LABELS, completionGates, type CaseDebriefReference, type ClinicalDrafts } from '../../src/shared/completion'
 import type { AgentEvent, ClientMessage, ServerMessage } from '../../src/shared/agent-wire'
 import type { ConsultationTurn, PatientTurnFailure } from '../../src/shared/consultation'
 import type { EncounterError, EncounterView } from '../../src/shared/encounter'
@@ -26,6 +27,8 @@ const STATUS: Record<EncounterError['code'], number> = {
   'encounter-not-found': 404,
   'active-encounter-exists': 409,
   'encounter-not-active': 409,
+  'completion-gates-unmet': 409,
+  'debrief-locked': 409,
   'body-system-already-examined': 409,
   'case-version-retired': 409,
   'consultation-turn-not-found': 404,
@@ -97,6 +100,7 @@ export function createFakeClinicApi({
   notes = {} as Record<string, ClinicalNoteView>,
   diagnoses = {} as Record<string, DiagnosisView>,
   recognizer = 'web-speech' as 'web-speech' | 'paraformer-realtime-v2',
+  debriefReference = undefined as CaseDebriefReference | undefined,
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
   // The Clinical Copilot's session per Encounter, with its own event log for its socket.
@@ -127,9 +131,16 @@ export function createFakeClinicApi({
   const turnsOf = (encounterId: string) => turns.get(encounterId) ?? turns.set(encounterId, []).get(encounterId)!
   const pendingOf = (encounterId: string) => turnsOf(encounterId).find((t) => t.status === 'pending')
 
-  const queue = (): GoldenCaseQueueEntry[] => [
-    { ...goldenCase1QueueEntry, queueStatus: active()?.caseId === goldenCase1QueueEntry.caseId ? 'in-encounter' : 'waiting' },
-  ]
+  const draftsByEncounter = new Map<string, ClinicalDrafts>()
+  const draftsOf = (id: string) => draftsByEncounter.get(id) ?? { investigations: [], prescriptions: [] }
+  const queue = (): GoldenCaseQueueEntry[] => {
+    const completed = state.encounters.findLast((e) => e.status === 'completed')
+    return [{
+      ...goldenCase1QueueEntry,
+      queueStatus: active() ? 'in-encounter' : completed ? 'completed' : 'waiting',
+      ...(completed && { completedEncounterId: completed.encounterId }),
+    }]
+  }
 
   function emit(encounterId: string, event: AgentEvent) {
     const entry = { encounterId, seq: log.length + 1, event }
@@ -231,13 +242,47 @@ export function createFakeClinicApi({
       return Response.json({ encounter })
     }
     const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined
+    const drafts = draftsOf(encounterId)
+    if (method === 'GET' && action === 'clinical-drafts') return Response.json({ drafts })
+    if (method === 'PUT' && (action === 'investigations/draft' || action === 'prescriptions/draft')) {
+      if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
+      const next = { ...drafts, [action.split('/')[0]]: (body as { entries: unknown }).entries }
+      draftsByEncounter.set(encounterId, next)
+      return Response.json({ drafts: next })
+    }
+    const debriefRecord = () => ({
+      signedNote: clinicalNotes.note(encounterId).revisions.at(-1),
+      diagnoses: fakeDiagnoses.diagnosis(encounterId).revisions.at(-1)?.entries ?? [],
+      investigations: investigations.list(encounterId),
+      examinations: state.examinations[encounterId] ?? [],
+      prescriptions: fakePrescriptions.view(encounterId),
+      questions: turnsOf(encounterId).filter((turn) => turn.speaker === 'doctor'),
+    })
+    if (method === 'POST' && action === 'completion') {
+      if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
+      const record = debriefRecord()
+      const gates = completionGates(fakeDiagnoses.diagnosis(encounterId), record.investigations, record.prescriptions, record.signedNote, drafts)
+      const failed = gates.filter((gate) => !gate.met)
+      if (failed.length) return refuse('completion-gates-unmet', `未满足完诊条件：${failed.map((gate) => COMPLETION_GATE_LABELS[gate.id]).join('、')}`)
+      Object.assign(encounter, { status: 'completed', endedAt: new Date().toISOString() })
+      return Response.json({ encounter })
+    }
+    if (method === 'GET' && action === 'debrief') {
+      if (encounter.status !== 'completed' || !debriefReference) return refuse('debrief-locked', '完诊后才能查看病例复盘。')
+      return Response.json({ debrief: { ...debriefRecord(), reference: debriefReference } })
+    }
     const answered =
       action &&
       (investigations.handle(method, encounter, action, body) ??
         clinicalNotes.handle(method, encounter, action, body) ??
         fakeDiagnoses.handle(method, encounter, action, body) ??
         fakePrescriptions.handle(method, encounter, action, body))
-    if (answered) return answered
+    if (answered) {
+      if (answered.ok && method === 'POST' && (action === 'investigations' || action === 'prescriptions')) {
+        draftsByEncounter.set(encounterId, { ...drafts, [action]: [] })
+      }
+      return answered
+    }
     if (method === 'GET' && action === 'consultation') return Response.json({ turns: turnsOf(encounter.encounterId) })
     if (method === 'POST' && action === 'consultation/doctor-turns') return askPatient(encounter, JSON.parse(String(init?.body)))
     const retried = action?.match(/^consultation\/patient-turns\/([^/]+)\/retry$/)

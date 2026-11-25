@@ -1,11 +1,16 @@
+import { completionGates, type CaseDebrief } from '../../shared/completion'
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@ui-sdk/react/button'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@ui-sdk/react/tabs'
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { startEncounter } from '../api'
+import { CaseDebriefPanel } from './case-debrief'
+import { useClinicalNoteContext } from './clinical-note/clinical-note-context'
+import { CompleteEncounter, CompletionChecklist, type ClinicalTab } from './encounter-completion'
+import { useClinicalDrafts } from './use-clinical-drafts'
 import { AbandonEncounter } from './abandon-encounter'
 import { ClinicalNoteTab } from './clinical-note/clinical-note-tab'
 import { DiagnosisTab } from './diagnosis/diagnosis-tab'
@@ -20,7 +25,7 @@ import { PatientBanner } from './patient-banner'
 import type { CaseFocus } from './workbench'
 
 export function CaseWorkspace({ focus }: { focus: CaseFocus }) {
-  if (focus.kind === 'encounter') return <EncounterWorkspace encounter={focus.encounter} examinations={focus.examinations} />
+  if (focus.kind === 'encounter') return <EncounterWorkspace key={focus.encounter.encounterId} encounter={focus.encounter} examinations={focus.examinations} debrief={focus.debrief} />
   return (
     <main aria-label="病例工作区" className={pane}>
       <div className={paneHeader}>
@@ -35,7 +40,6 @@ export function CaseWorkspace({ focus }: { focus: CaseFocus }) {
           </p>
         )}
       </div>
-      <CompletionFooter />
     </main>
   )
 }
@@ -71,15 +75,40 @@ function Registration({ entry }: { entry: GoldenCaseQueueEntry }) {
 const tab =
   'h-9 gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 text-[13px] data-[selected]:border-foreground data-[selected]:font-semibold'
 
-function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterView; examinations: PhysicalExaminationView[] }) {
-  const investigations = useInvestigations(encounter)
+function EncounterWorkspace({
+  encounter, examinations, debrief,
+}: { encounter: EncounterView; examinations: PhysicalExaminationView[]; debrief?: CaseDebrief }) {
+  const drafts = useClinicalDrafts(encounter.encounterId)
+  const investigations = useInvestigations(encounter, drafts)
   const diagnosis = useDiagnosis(encounter)
-  const prescriptions = usePrescriptions(encounter)
+  const prescriptions = usePrescriptions(encounter, drafts)
+  const note = useClinicalNoteContext()?.note
+  const [selectedTab, selectTab] = useState<ClinicalTab>(debrief ? 'debrief' : 'note')
+  const gates = completionGates(
+    diagnosis.view, investigations.investigations, prescriptions.view, note?.revisions.at(-1), drafts.drafts,
+  )
+  const draftTabs = [
+    { tab: 'investigations', name: '检验检查', count: drafts.drafts.investigations.length },
+    { tab: 'diagnosis', name: '诊断', count: diagnosis.view.draft.length },
+    { tab: 'prescription', name: '处方', count: drafts.drafts.prescriptions.length },
+  ] as const
+  const checklist = { gates, draftTabs: draftTabs.filter(({ count }) => count > 0), onSelect: selectTab }
+  const active = encounter.status === 'active'
   return (
     <main aria-label="病例工作区" className={pane}>
-      <PatientBanner encounter={encounter} examinedVitals={examinations.find((e) => e.system === 'vitals')} />
-      {encounter.status === 'abandoned' && <AbandonedNotice caseId={encounter.caseId} />}
-      <Tabs defaultValue="note" className="flex min-h-0 flex-1 flex-col">
+      <PatientBanner
+        encounter={encounter}
+        examinedVitals={examinations.find((e) => e.system === 'vitals')}
+        completion={active && <CompletionChecklist location="banner" {...checklist} />}
+      />
+      {encounter.status === 'abandoned' && <ReplayNotice caseId={encounter.caseId} abandoned />}
+      {debrief && <ReplayNotice caseId={encounter.caseId} />}
+      {active && drafts.error && (
+        <p role="alert" className="m-0 px-4 py-2 text-xs text-destructive">
+          {drafts.error} {drafts.loaded && <Button onClick={drafts.retry} className="h-7 text-xs">重试保存草稿</Button>}
+        </p>
+      )}
+      <Tabs value={selectedTab === 'debrief' && !debrief ? 'note' : selectedTab} onValueChange={(value) => selectTab(value as ClinicalTab)} className="flex min-h-0 flex-1 flex-col">
         <TabsList aria-label="病例页签" className="flex flex-none gap-1 border-b px-2">
           <TabsTab value="note" className={tab}>
             病历记录
@@ -94,12 +123,13 @@ function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterV
           <TabsTab value="prescription" className={tab}>
             处方
           </TabsTab>
+          {debrief && <TabsTab value="debrief" className={tab}>病例复盘</TabsTab>}
         </TabsList>
         <TabsPanel value="note" className={paneBody}>
           <ClinicalNoteTab encounter={encounter} diagnosisSeq={diagnosis.view.revisions.at(-1)?.seq} />
         </TabsPanel>
         <TabsPanel value="investigations" className={paneBody}>
-          <InvestigationsTab state={investigations} writable={encounter.status === 'active'} />
+          <InvestigationsTab state={investigations} writable={active && drafts.loaded} />
         </TabsPanel>
         <TabsPanel value="diagnosis" className={paneBody}>
           <DiagnosisTab encounter={encounter} state={diagnosis} />
@@ -107,10 +137,23 @@ function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterV
         <TabsPanel value="prescription" className={paneBody}>
           <PrescriptionTab encounter={encounter} state={prescriptions} />
         </TabsPanel>
+        {debrief && <TabsPanel value="debrief" className={paneBody}><CaseDebriefPanel debrief={debrief} /></TabsPanel>}
       </Tabs>
-      <CompletionFooter>
-        <AbandonEncounter encounter={encounter} />
-      </CompletionFooter>
+      {encounter.status === 'abandoned' && <div className={paneFooter}><AbandonEncounter encounter={encounter} /></div>}
+      {active && (
+        <div className={paneFooter}>
+          <CompletionChecklist location="footer" {...checklist} />
+          <span className="flex-1" />
+          <AbandonEncounter encounter={encounter} />
+          <CompleteEncounter
+            encounter={encounter}
+            ready={gates.every((gate) => gate.met)}
+            saving={drafts.saving || !drafts.loaded || Boolean(drafts.error)}
+            flush={drafts.flush}
+            onCompleted={() => selectTab('debrief')}
+          />
+        </div>
+      )}
     </main>
   )
 }
@@ -127,11 +170,11 @@ function PendingCount({ count }: { count: number }) {
 }
 
 
-function AbandonedNotice({ caseId }: { caseId: string }) {
+function ReplayNotice({ caseId, abandoned = false }: { caseId: string; abandoned?: boolean }) {
   const { start, error } = useStartEncounter()
   return (
     <div className="flex flex-none flex-wrap items-center justify-center gap-2 border-b bg-muted px-4 py-2 text-[13px]">
-      <span>本次就诊已放弃：写入冻结，病例真值未解锁。</span>
+      <span>{abandoned ? '本次就诊已放弃：写入冻结，病例真值未解锁。' : '本次就诊已完诊，记录只读。'}</span>
       <Button className="h-7 px-2.5 text-xs" onClick={() => start(caseId)}>
         开始新的就诊
       </Button>
@@ -140,17 +183,6 @@ function AbandonedNotice({ caseId }: { caseId: string }) {
           {error}
         </p>
       )}
-    </div>
-  )
-}
-
-function CompletionFooter({ children }: { children?: ReactNode }) {
-  return (
-    <div className={paneFooter}>
-      <span className="flex-1">
-        完诊 <b className="font-mono text-foreground">0/5</b>
-      </span>
-      {children}
     </div>
   )
 }

@@ -15,7 +15,9 @@ export function QueueRail({ queue, focusedCaseId }: { queue: GoldenCaseQueueEntr
   const navigate = useNavigate()
   // The workbench root opens the active Encounter by itself; a waiting patient opens their registration.
   const open = (entry: GoldenCaseQueueEntry) =>
-    navigate({ to: '/', search: entry.queueStatus === 'in-encounter' ? {} : { case: entry.caseId } })
+    entry.queueStatus === 'completed' && entry.completedEncounterId
+      ? navigate({ to: '/encounters/$encounterId', params: { encounterId: entry.completedEncounterId } })
+      : navigate({ to: '/', search: entry.queueStatus === 'in-encounter' ? {} : { case: entry.caseId } })
   const groups = QUEUE_GROUPS.map((status) => ({
     status,
     label: STATUS_LABEL[status],

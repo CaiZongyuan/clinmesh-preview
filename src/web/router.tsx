@@ -7,7 +7,7 @@ import {
   type ErrorComponentProps,
   type RouterHistory,
 } from '@tanstack/react-router'
-import { fetchActiveEncounter, fetchEncounter, fetchGoldenCaseQueue, fetchPhysicalExaminations } from './api'
+import { fetchActiveEncounter, fetchCaseDebrief, fetchEncounter, fetchGoldenCaseQueue, fetchPhysicalExaminations } from './api'
 import { Workbench } from './workbench/workbench'
 
 const rootRoute = createRootRoute({ component: Outlet })
@@ -42,11 +42,12 @@ const encounterRoute = createRoute({
       fetchEncounter(params.encounterId),
       fetchPhysicalExaminations(params.encounterId),
     ])
-    return { queue, encounter, examinations }
+    const debrief = encounter.status === 'completed' ? await fetchCaseDebrief(encounter.encounterId) : undefined
+    return { queue, encounter, examinations, debrief }
   },
   component: function EncounterRoute() {
-    const { queue, encounter, examinations } = encounterRoute.useLoaderData()
-    return <Workbench queue={queue} focus={{ kind: 'encounter', encounter, examinations }} />
+    const { queue, encounter, examinations, debrief } = encounterRoute.useLoaderData()
+    return <Workbench queue={queue} focus={{ kind: 'encounter', encounter, examinations, debrief }} />
   },
   errorComponent: WorkbenchLoadError,
 })

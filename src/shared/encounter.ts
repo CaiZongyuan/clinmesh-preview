@@ -1,3 +1,4 @@
+import type { CompletionGateId } from './completion'
 import type { Sex, VisitKind } from './golden-case-queue'
 
 export type EncounterStatus = 'active' | 'abandoned' | 'completed'
@@ -102,6 +103,7 @@ export interface ActiveEncounterResponse {
 export type AuditEventType =
   | 'encounter-started'
   | 'encounter-abandoned'
+  | 'encounter-completed'
   | 'physical-examination-performed'
   | 'investigation-issued'
   | 'investigation-released-instantly'
@@ -137,6 +139,8 @@ export type EncounterErrorCode =
   | 'encounter-not-found'
   | 'active-encounter-exists'
   | 'encounter-not-active'
+  | 'completion-gates-unmet'
+  | 'debrief-locked'
   | 'body-system-already-examined'
   | 'case-version-retired'
   | 'catalog-item-not-found'
@@ -164,6 +168,7 @@ export type EncounterErrorCode =
 export interface EncounterError {
   code: EncounterErrorCode
   message: string
+  failedGates?: CompletionGateId[]
 }
 
 export interface ErrorResponse {

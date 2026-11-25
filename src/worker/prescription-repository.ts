@@ -45,15 +45,15 @@ type NoMedicationRow = { practitioner_id: string; recorded_at: string }
 const refuse = (error: EncounterError) => ({ ok: false, error }) as const
 
 // Line list from a request body: valid prescribable fields, no duplicate drugs. Null when malformed.
-export function prescriptionLines(list: unknown): PrescriptionLineRequest[] | null {
+export function prescriptionLines(list: unknown, { draft = false } = {}): PrescriptionLineRequest[] | null {
   if (!Array.isArray(list) || list.length === 0) return null
   const lines: PrescriptionLineRequest[] = []
   for (const item of list) {
     const { drugId, dose, route, frequency, days, override } = (item ?? {}) as Record<string, unknown>
     if (typeof drugId !== 'string') return null
-    if (typeof dose !== 'number' || !(dose > 0)) return null
+    if (typeof dose !== 'number' || !Number.isFinite(dose) || (draft ? dose < 0 : dose <= 0)) return null
     if (!MEDICATION_ROUTES.includes(route as MedicationRoute)) return null
-    if (typeof frequency !== 'string' || !(frequency in MEDICATION_FREQUENCIES)) return null
+    if (typeof frequency !== 'string' || !Object.hasOwn(MEDICATION_FREQUENCIES, frequency)) return null
     if (typeof days !== 'number' || !Number.isInteger(days) || days < MIN_MEDICATION_DAYS || days > MAX_MEDICATION_DAYS)
       return null
     let accepted: PrescriptionLineRequest['override']
