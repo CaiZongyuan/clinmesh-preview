@@ -55,6 +55,7 @@ export interface ClinicalNoteResponse {
 
 export interface SaveNoteDraftRequest {
   sections: Partial<NoteSections>
+  authors?: Partial<Record<NoteSection, DraftAuthor>>
 }
 
 // What the doctor confirmed in Clinical Confirmation: the revision records exactly this.

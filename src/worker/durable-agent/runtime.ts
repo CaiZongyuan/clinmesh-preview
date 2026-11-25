@@ -88,6 +88,7 @@ export interface AgentDefinition {
   // The earliest future time the host wants waking for (e.g. a pending ambient trigger countdown), folded
   // into the runtime's own alarm schedule.
   wakeHint?: () => number | null
+  startTool?: (run: AgentRun) => string | undefined
   // A run whose outcome another Durable Object must accept. Its reply stays `unsettled` (out of the context)
   // until `deliver` resolves true, and turns `void` when refused.
   settlement?: {
@@ -477,6 +478,23 @@ export class DurableAgentRuntime {
       if (!llm.ok) {
         outcome = { status: 'failed', error: llm.reason, text: '' }
       } else {
+        const startTool = this.agent.startTool?.(run)
+        if (step === 0 && startTool) {
+          this.beginStep(run.runId, step)
+          this.checkpointToolStep(run.runId, step++, {
+            text: '',
+            thinking: '',
+            toolCalls: [{ id: crypto.randomUUID(), name: startTool, argumentsJson: '{}' }],
+            usage: { input: 0, output: 0 },
+          })
+        }
+        if (startTool) {
+          await this.runDispatchedTools(run.runId, signal)
+          const initialSnapshot = this.sql.exec<{ status: string }>(
+            'SELECT status FROM agent_tool_call WHERE run_id = ? AND step = 0 AND name = ?', run.runId, startTool,
+          ).toArray()[0]
+          if (initialSnapshot?.status !== 'ok') throw new LlmError('protocol', 'The initial UI snapshot did not complete')
+        }
         outcome = { status: 'failed', error: 'too-many-steps', text: '' }
         for (; step < MAX_STEPS; step++) {
           await this.runDispatchedTools(run.runId, signal)

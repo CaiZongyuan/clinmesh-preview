@@ -36,6 +36,8 @@ import {
   MAX_NOTE_SECTION_LENGTH,
   NOTE_SECTIONS,
   type ClinicalNoteResponse,
+  type DraftAuthor,
+  type NoteSection,
   type NoteSections,
 } from '../shared/clinical-note'
 import type { ClinicalNoteResult } from './clinical-note-repository'
@@ -264,7 +266,16 @@ app.get('/encounters/:encounterId/clinical-note', async (c) => noteOr(c, await w
 app.patch('/encounters/:encounterId/clinical-note/draft', async (c) => {
   const sections = await noteSections(c, false)
   if (!sections) return refuse(c, { code: 'invalid-request', message: noteShape('至少一个') })
-  return noteOr(c, await workspace(c).saveClinicalNoteDraft(c.req.param('encounterId'), sections))
+  const body = await c.req.json<{ authors?: unknown }>()
+  const authors = body.authors ?? {}
+  if (typeof authors !== 'object' || Array.isArray(authors) || !Object.entries(authors).every(([section, author]) =>
+    isNoteSection(section) && Object.hasOwn(sections, section) && (author === 'doctor' || author === 'assistant'),
+  )) {
+    return refuse(c, { code: 'invalid-request', message: '草稿作者须为 doctor 或 assistant。' })
+  }
+  return noteOr(c, await workspace(c).saveClinicalNoteDraft(
+    c.req.param('encounterId'), sections, authors as Partial<Record<NoteSection, DraftAuthor>>,
+  ))
 })
 
 app.post('/encounters/:encounterId/clinical-note/revisions', async (c) => {

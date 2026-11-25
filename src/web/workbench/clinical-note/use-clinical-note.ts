@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   MAX_NOTE_SECTION_LENGTH,
   NOTE_SECTIONS,
+  type DraftAuthor,
   type NoteSection,
   type NoteSections,
   type SignedNoteRevision,
@@ -26,6 +27,8 @@ export function useClinicalNote(encounter: EncounterView | null) {
   const encounterId = encounter?.encounterId ?? null
   const [loaded, setLoaded] = useState(false)
   const [sections, setSections] = useState<NoteSections>(EMPTY)
+  const [authors, setAuthors] = useState<Partial<Record<NoteSection, DraftAuthor>>>({})
+  const latestAuthors = useRef<Partial<Record<NoteSection, DraftAuthor>>>({})
   const [revisions, setRevisions] = useState<SignedNoteRevision[]>([])
   const [save, setSave] = useState<SaveState>({ kind: 'idle' })
   const [error, setError] = useState<string | null>(null)
@@ -39,11 +42,19 @@ export function useClinicalNote(encounter: EncounterView | null) {
     clearTimeout(timer.current)
     if (!encounterId || dirty.current.size === 0) return queue.current.then(() => true)
     const changes = Object.fromEntries([...dirty.current].map((section) => [section, latest.current[section]]))
+    const authored = Object.fromEntries([...dirty.current].filter((section) => latestAuthors.current[section] === 'assistant').map((section) => [section, 'assistant' as const]))
     dirty.current.clear()
     setSave({ kind: 'saving' })
     const saved = queue.current.then(async () => {
       try {
-        const note = await saveClinicalNoteDraft(encounterId, changes)
+        const note = await saveClinicalNoteDraft(encounterId, changes, Object.keys(authored).length ? authored : undefined)
+        for (const { section, content, lastEditedBy } of note.draft) {
+          if (!authored[section] || dirty.current.has(section) || latestAuthors.current[section] !== 'assistant' || latest.current[section] !== changes[section]) continue
+          latest.current = { ...latest.current, [section]: content }
+          if (lastEditedBy) latestAuthors.current = { ...latestAuthors.current, [section]: lastEditedBy }
+        }
+        setSections(latest.current)
+        setAuthors(latestAuthors.current)
         setRevisions(note.revisions)
         if (dirty.current.size === 0) setSave({ kind: 'saved', at: new Date().toISOString() })
         return true
@@ -59,6 +70,8 @@ export function useClinicalNote(encounter: EncounterView | null) {
 
   useEffect(() => {
     latest.current = EMPTY
+    latestAuthors.current = {}
+    setAuthors({})
     dirty.current = new Set()
     setSections(EMPTY)
     setRevisions([])
@@ -72,6 +85,8 @@ export function useClinicalNote(encounter: EncounterView | null) {
         if (!current) return
         latest.current = Object.fromEntries(note.draft.map((d) => [d.section, d.content])) as NoteSections
         setSections(latest.current)
+        latestAuthors.current = Object.fromEntries(note.draft.filter((entry) => entry.lastEditedBy).map((entry) => [entry.section, entry.lastEditedBy]))
+        setAuthors(latestAuthors.current)
         setRevisions(note.revisions)
         setLoaded(true)
       })
@@ -92,7 +107,9 @@ export function useClinicalNote(encounter: EncounterView | null) {
   }, [flush])
 
   const edit = useCallback(
-    (section: NoteSection, text: string) => {
+    (section: NoteSection, text: string, author: DraftAuthor = 'doctor') => {
+      latestAuthors.current = { ...latestAuthors.current, [section]: author }
+      setAuthors(latestAuthors.current)
       latest.current = { ...latest.current, [section]: text }
       setSections(latest.current)
       dirty.current.add(section)
@@ -134,6 +151,9 @@ export function useClinicalNote(encounter: EncounterView | null) {
     loaded,
     error,
     sections,
+    authors,
+    authorOf: (section: NoteSection) => latestAuthors.current[section],
+    contentOf: (section: NoteSection) => latest.current[section],
     revisions,
     save,
     unsignedChanges: !!lastRevision && NOTE_SECTIONS.some((section) => lastRevision.sections[section] !== sections[section]),

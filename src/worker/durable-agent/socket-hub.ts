@@ -22,7 +22,7 @@ const BRIDGE_CALL_TIMEOUT_MS = 10_000
 // Hibernatable WebSockets for an agent: viewers replay the event log via `hello { afterSeq }` and then follow
 // live; the single bridge socket (latest wins) answers `bridge.call` from the agent's ui tools.
 export class SocketHub {
-  private readonly pending = new Map<string, { resolve: (result: BridgeResult) => void; timer: ReturnType<typeof setTimeout> }>()
+  private readonly pending = new Map<string, { socket: WebSocket; finish: (result: BridgeResult) => void }>()
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -37,51 +37,45 @@ export class SocketHub {
     }
     const bridge = new URL(request.url).pathname.endsWith('/bridge')
     const { 0: client, 1: server } = new WebSocketPair()
+    if (bridge) {
+      for (const existing of this.ctx.getWebSockets(BRIDGE)) {
+        this.onClose(existing, 1000, 'Bridge replaced')
+      }
+    }
     this.ctx.acceptWebSocket(server, [bridge ? BRIDGE : VIEWER])
     server.serializeAttachment({ ready: !bridge } satisfies ViewerAttachment)
     if (bridge) this.onBridgeConnected()
     return new Response(null, { status: 101, webSocket: client })
   }
 
-  // Whether a bridge is connected: a ui tool without one answers at once instead of holding the run.
-  bridgeConnected(): boolean {
-    return this.ctx.getWebSockets(BRIDGE).length > 0
+  private bridge(): WebSocket | undefined {
+    return this.ctx.getWebSockets(BRIDGE).find((socket) => socket.readyState === WebSocket.OPEN)
   }
 
-  // Sends one ui tool call to the bridge and waits for its `bridge.result`; a missing or silent bridge fails
-  // the call within the timeout so the run never hangs on the browser.
+  bridgeConnected(): boolean {
+    return Boolean(this.bridge())
+  }
+
   callBridge(tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal): Promise<BridgeResult> {
-    if (!this.bridgeConnected()) {
-      return Promise.resolve({ ok: false, result: '助手界面未连接，请稍后重试或直接给出文字回答。' })
-    }
+    const socket = this.bridge()
+    if (!socket) return Promise.resolve({ ok: false, result: '助手界面未连接，请稍后重试或直接给出文字回答。' })
+    if (signal.aborted) return Promise.resolve({ ok: false, result: '未执行：本轮已结束。' })
+
     const callId = crypto.randomUUID()
     return new Promise<BridgeResult>((resolve) => {
-      const timer = setTimeout(() => {
+      const finish = (result: BridgeResult) => {
         this.pending.delete(callId)
-        resolve({ ok: false, result: '助手界面未在时限内响应（结果未知），请重新读取界面快照后再试。' })
-      }, Math.min(BRIDGE_CALL_TIMEOUT_MS, 9_500))
-      if (signal.aborted) {
         clearTimeout(timer)
-        resolve({ ok: false, result: '未执行：本轮已结束。' })
-        return
+        signal.removeEventListener('abort', onAbort)
+        resolve(result)
       }
-      const onAbort = () => {
-        clearTimeout(timer)
-        this.pending.delete(callId)
-        resolve({ ok: false, result: '未执行：本轮已结束。' })
-      }
+      const onAbort = () => finish({ ok: false, result: '未执行：本轮已结束。' })
+      const timer = setTimeout(() => finish({
+        ok: false, result: '助手界面未在时限内响应（结果未知），请重新读取界面快照后再试。',
+      }), BRIDGE_CALL_TIMEOUT_MS)
       signal.addEventListener('abort', onAbort, { once: true })
-      this.pending.set(callId, {
-        resolve: (result) => {
-          signal.removeEventListener('abort', onAbort)
-          clearTimeout(timer)
-          resolve(result)
-        },
-        timer,
-      })
-      for (const ws of this.ctx.getWebSockets(BRIDGE)) {
-        send(ws, { type: 'bridge.call', callId, tool, args } satisfies ServerMessage)
-      }
+      this.pending.set(callId, { socket, finish })
+      send(socket, { type: 'bridge.call', callId, tool, args })
     })
   }
 
@@ -94,9 +88,11 @@ export class SocketHub {
     }
     if (typeof message !== 'object' || message === null) return
     if (message.type === 'bridge.result') {
-      if (typeof message.callId !== 'string') return
-      this.pending.get(message.callId)?.resolve({ ok: message.ok, result: message.result, outcome: message.outcome })
-      this.pending.delete(message.callId)
+      if (typeof message.callId !== 'string' || typeof message.ok !== 'boolean' ||
+        typeof message.result !== 'string' || message.result.length > 48_000 ||
+        (message.outcome !== undefined && message.outcome !== 'suggestion' && message.outcome !== 'denied')) return
+      const request = this.pending.get(message.callId)
+      if (request?.socket === ws) request.finish({ ok: message.ok, result: message.result, outcome: message.outcome })
       return
     }
     if (message.type !== 'hello' || typeof message.afterSeq !== 'number') return
@@ -111,6 +107,9 @@ export class SocketHub {
   }
 
   onClose(ws: WebSocket, code: number, reason: string): void {
+    for (const request of this.pending.values()) {
+      if (request.socket === ws) request.finish({ ok: false, result: '助手界面连接已关闭，请重新读取快照。' })
+    }
     try {
       ws.close(code, reason)
     } catch {}

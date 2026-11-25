@@ -161,6 +161,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
         return [{ type: 'session.updated', runId: null }]
       },
       wakeHint: () => this.pendingFireAt(),
+      startTool: (run) => run.kind === 'event' ? 'ui_snapshot' : undefined,
     }
     this.runtime = new DurableAgentRuntime(ctx, env as unknown as LlmEnv, agent)
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
@@ -266,16 +267,23 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     // A frozen Encounter takes no ambient analysis; the workspace also stops any countdown at its freeze hook.
     const state = await this.read({ kind: 'encounter-state' })
     if (!state.ok || state.data.status !== 'active') return
-    const sql = this.ctx.storage.sql
-    const flushIntoQueue = this.ctx.storage.transactionSync(() => {
+    const fireAt = Date.now() + COUNTDOWN_MS
+    const previous = this.ctx.storage.transactionSync(() => {
       const pending = this.pending()
-      this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger')
-      return pending && pending.ref !== trigger.ref ? pending : null
+      if (pending?.ref === trigger.ref) return null
+      this.ctx.storage.sql.exec(
+        `INSERT INTO copilot_pending_trigger (singleton, ref, text, fire_at) VALUES (1, ?, ?, ?)
+         ON CONFLICT (singleton) DO UPDATE SET ref = excluded.ref, text = excluded.text, fire_at = excluded.fire_at`,
+        trigger.ref, trigger.text, fireAt,
+      )
+      return pending
     })
-    if (flushIntoQueue) void this.enqueueTrigger(flushIntoQueue)
-    sql.exec('INSERT INTO copilot_pending_trigger (singleton, ref, text, fire_at) VALUES (1, ?, ?, ?)', trigger.ref, trigger.text, Date.now() + COUNTDOWN_MS)
     this.runtime.announce({ type: 'session.updated', runId: null })
-    void this.ctx.storage.setAlarm(Date.now() + COUNTDOWN_MS)
+    if (previous) await this.enqueueTrigger(previous)
+    else if (this.runtime.sockets.bridgeConnected()) {
+      const alarm = await this.ctx.storage.getAlarm()
+      if (alarm === null || alarm > fireAt) await this.ctx.storage.setAlarm(fireAt)
+    }
   }
 
   // 立即：the doctor pulls the countdown forward; idempotent once it has become a run.
@@ -306,21 +314,14 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   // Fires due countdowns from the alarm: enqueues a run only when a bridge is connected, so no provider call
   // is spent on a turn that cannot see the screen; otherwise the fire time slips until one joins.
   async fireDueTriggers(): Promise<void> {
+    if (!this.runtime.sockets.bridgeConnected()) return
     const due = this.ctx.storage.transactionSync(() => {
       const row = this.pending()
       if (!row || row.fire_at > Date.now()) return null
       this.ctx.storage.sql.exec('DELETE FROM copilot_pending_trigger')
       return row
     })
-    if (!due) return
-    if (!this.runtime.sockets.bridgeConnected()) {
-      this.ctx.storage.transactionSync(() => {
-        this.ctx.storage.sql.exec('INSERT INTO copilot_pending_trigger (singleton, ref, text, fire_at) VALUES (1, ?, ?, ?)', due.ref, due.text, Date.now() + COUNTDOWN_MS)
-      })
-      await this.ctx.storage.setAlarm(Date.now() + COUNTDOWN_MS)
-      return
-    }
-    await this.enqueueTrigger(due)
+    if (due) await this.enqueueTrigger(due)
   }
 
   private enqueueTrigger(trigger: { ref: string; text: string }): Promise<CopilotPromptResponse> {
@@ -332,7 +333,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
         trigger: copilotTrigger,
         deadlineAt: null,
         subject: trigger.ref,
-        messages: [{ originRef: trigger.ref, message: { role: 'user', content: `${trigger.text}\n请先读取界面快照（ui_snapshot），把本次对话轮的信息更新到病历草稿中；医生正在编辑的字段写成建议即可。` } }],
+        messages: [{ originRef: trigger.ref, message: { role: 'user', content: `${trigger.text}\n基于这一轮开始时的界面快照，把本次对话的信息更新到病历草稿中。可以使用 ui_act 写入草稿，医生正在编辑的字段会保留为建议。` } }],
       })
       .then(({ runId }) => ({ kind: 'run' as const, turnId: runId }))
   }
@@ -349,7 +350,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   }
 
   private pendingFireAt(): number | null {
-    return this.pending()?.fire_at ?? null
+    return this.runtime.sockets.bridgeConnected() ? this.pending()?.fire_at ?? null : null
   }
 
   private bridge() {

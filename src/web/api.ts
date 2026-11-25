@@ -22,7 +22,7 @@ import type {
 import type { VoiceConfigResponse } from '../shared/voice'
 import type { VoiceCapture } from '../shared/consultation'
 
-import type { ClinicalNoteResponse, ClinicalNoteView, NoteSections } from '../shared/clinical-note'
+import type { ClinicalNoteResponse, ClinicalNoteView, NoteSections, SaveNoteDraftRequest } from '../shared/clinical-note'
 import type { DiagnosisDraftEntry, DiagnosisResponse, DiagnosisView } from '../shared/diagnosis'
 import type {
   IssuePrescriptionRequest,
@@ -175,8 +175,10 @@ export async function fetchClinicalNote(encounterId: string): Promise<ClinicalNo
 }
 
 // keepalive lets the last autosave finish while the page unloads.
-export async function saveClinicalNoteDraft(encounterId: string, sections: Partial<NoteSections>): Promise<ClinicalNoteView> {
-  const init: RequestInit = { ...post({ sections }), method: 'PATCH', keepalive: true }
+export async function saveClinicalNoteDraft(
+  encounterId: string, sections: Partial<NoteSections>, authors?: SaveNoteDraftRequest['authors'],
+): Promise<ClinicalNoteView> {
+  const init: RequestInit = { ...post({ sections, authors }), method: 'PATCH', keepalive: true }
   return (await request<ClinicalNoteResponse>(`${clinicalNotePath(encounterId)}/draft`, init)).note
 }
 
@@ -285,7 +287,15 @@ export function compactCopilot(encounterId: string): Promise<CopilotCompactRespo
   return request<CopilotCompactResponse>(`${encounterPath(encounterId)}/copilot/compact`, post())
 }
 
-export function openCopilotSocket(encounterId: string): WebSocket {
+export function openCopilotSocket(encounterId: string, channel: 'socket' | 'bridge' = 'socket'): WebSocket {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/copilot/socket`)
+  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/copilot/${channel}`)
+}
+
+export function flushCopilotCountdown(encounterId: string, ref: string) {
+  return request(`${encounterPath(encounterId)}/copilot/triggers/${encodeURIComponent(ref)}/flush`, post())
+}
+
+export function skipCopilotCountdown(encounterId: string, ref: string) {
+  return request(`${encounterPath(encounterId)}/copilot/triggers/${encodeURIComponent(ref)}`, { method: 'DELETE' })
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ServerMessage } from '../../shared/agent-wire'
 import type { CopilotCompactionEntry } from '../../shared/copilot-context'
 import type {
+  CopilotCountdown,
   CopilotFeedback,
   CopilotMention,
   CopilotModelSetting,
@@ -13,6 +14,8 @@ import type {
 import {
   configureCopilot,
   fetchCopilotSnapshot,
+  flushCopilotCountdown,
+  skipCopilotCountdown,
   openCopilotSocket,
   promptCopilot,
   resendCopilotPrompt,
@@ -32,6 +35,9 @@ export interface CopilotSession {
   unread: number
   // Any Copilot turn is running or queued.
   busy: boolean
+  countdown: CopilotCountdown | null
+  flushCountdown(ref: string): Promise<boolean>
+  skipCountdown(ref: string): Promise<boolean>
   prompt(text: string, mentions: CopilotMention[], mode: CopilotPromptMode): Promise<boolean>
   resend(turnId: string, text: string, mentions: CopilotMention[]): Promise<boolean>
   stop(): Promise<void>
@@ -165,6 +171,9 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
     model: snapshot?.model ?? null,
     stream: encounterId ? stream : 'connecting',
     unread,
+    countdown: snapshot?.countdown ?? null,
+    flushCountdown: (ref) => apply(() => flushCopilotCountdown(encounterId!, ref)),
+    skipCountdown: (ref) => apply(() => skipCopilotCountdown(encounterId!, ref)),
     busy: (snapshot?.turns ?? []).some((turn) => turn.status === 'running') || (snapshot?.queued.length ?? 0) > 0,
     prompt: (text, mentions, mode) => {
       // A steer with nothing running is the same head-of-queue run on the server.

@@ -4,7 +4,7 @@ import type { ConsultationTurn, PatientTurnFailure } from '../../src/shared/cons
 import type { EncounterError, EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
 import type { CopilotCompactionEntry } from '../../src/shared/copilot-context'
-import type { CopilotSnapshot, CopilotTurn } from '../../src/shared/copilot-turn'
+import type { CopilotCountdown, CopilotSnapshot, CopilotTurn } from '../../src/shared/copilot-turn'
 import { BODY_SYSTEM_NAME, isBodySystem, type PhysicalExaminationView } from '../../src/shared/physical-examination'
 import { goldenCase1Chart, goldenCase1Findings, goldenCase1QueueEntry } from '../fixtures/golden-case-1'
 import type { ClinicalNoteView } from '../../src/shared/clinical-note'
@@ -140,6 +140,8 @@ export function createFakeClinicApi({
       })
       .get(encounterId)!
   const copilotSockets = new Set<FakeCopilotSocket>()
+  const bridgeSockets = new Map<string, FakeBridgeSocket>()
+  const countdowns = new Map<string, CopilotCountdown>()
   let copilotPromptCount = 0
   const turns = new Map(Object.entries(consultations).map(([id, list]) => [id, [...list]]))
   // Patient speech requests the workbench made to the Sambert endpoint.
@@ -372,6 +374,14 @@ export function createFakeClinicApi({
       emitCopilot(encounter.encounterId, { type: 'session.updated', runId: null })
       return Response.json({ turnId: `compaction-${marker.markerId}` }, { status: 202 })
     }
+    const trigger = action?.match(/^copilot\/triggers\/([^/]+)(\/flush)?$/)
+    if (trigger && (method === 'POST' || method === 'DELETE')) {
+      const countdown = countdowns.get(encounterId)
+      if (countdown?.ref !== decodeURIComponent(trigger[1])) return new Response(null, { status: 404 })
+      countdowns.delete(encounterId)
+      emitCopilot(encounterId, { type: 'session.updated', runId: null })
+      return new Response(null, { status: method === 'POST' ? 201 : 204 })
+    }
     if (action === 'copilot' || (method === 'POST' && action === 'copilot/prompts')) {
       const session = copilotOf(encounter.encounterId)
       if (method === 'GET') return Response.json({ snapshot: copilotSnapshotOf(encounter.encounterId) })
@@ -519,7 +529,7 @@ export function createFakeClinicApi({
       turns: structuredClone(session.turns),
       queued: structuredClone(session.queued),
       compactions: structuredClone(session.compactions ?? []),
-      countdown: null,
+      countdown: countdowns.get(encounterId) ?? null,
     }
   }
 
@@ -603,12 +613,50 @@ export function createFakeClinicApi({
     }
   }
 
+  class FakeBridgeSocket {
+    onopen: (() => void) | null = null
+    onmessage: ((event: { data: string }) => void) | null = null
+    onclose: (() => void) | null = null
+    readonly encounterId: string
+    readyState = 1
+    private pending = new Map<string, (result: Extract<ClientMessage, { type: 'bridge.result' }>) => void>()
+
+    constructor(url: string) {
+      this.encounterId = decodeURIComponent(url.match(/\/api\/encounters\/([^/]+)\/copilot\/bridge$/)![1])
+      bridgeSockets.set(this.encounterId, this)
+      setTimeout(() => this.onopen?.(), 0)
+    }
+
+    send(data: string) {
+      const message = JSON.parse(data) as ClientMessage
+      if (message.type === 'bridge.result') {
+        this.pending.get(message.callId)?.(message)
+        this.pending.delete(message.callId)
+      }
+    }
+
+    call(tool: 'ui_snapshot' | 'ui_act', args: unknown) {
+      const callId = crypto.randomUUID()
+      return new Promise<Extract<ClientMessage, { type: 'bridge.result' }>>((resolve) => {
+        this.pending.set(callId, resolve)
+        this.onmessage?.({ data: JSON.stringify({ type: 'bridge.call', callId, tool, args }) })
+      })
+    }
+
+    close() {
+      this.readyState = 3
+      bridgeSockets.delete(this.encounterId)
+      this.onclose?.()
+    }
+  }
+
   // One constructor dispatches to the transport selected by the browser.
   class FakeSocket {
-    private readonly inner: FakePatientSocket | FakeCopilotSocket | FakeVoiceSocket
+    private readonly inner: FakePatientSocket | FakeCopilotSocket | FakeVoiceSocket | FakeBridgeSocket
     constructor(url: string) {
       if (url.endsWith('/voice')) this.inner = new FakeVoiceSocket(url)
       else if (url.endsWith('/copilot/socket')) this.inner = new FakeCopilotSocket(url)
+      else if (url.endsWith('/copilot/bridge')) this.inner = new FakeBridgeSocket(url)
       else this.inner = new FakePatientSocket(url)
     }
     get onopen() { return this.inner.onopen }
@@ -617,6 +665,7 @@ export function createFakeClinicApi({
     set onmessage(value) { this.inner.onmessage = value }
     get onclose() { return this.inner.onclose }
     set onclose(value) { this.inner.onclose = value }
+    get readyState() { return this.inner instanceof FakeBridgeSocket ? this.inner.readyState : 1 }
     send(data: string) { this.inner.send(data) }
     close() { this.inner.close() }
   }
@@ -715,6 +764,11 @@ export function createFakeClinicApi({
     openSockets: () => [...sockets],
     copilot: {
       snapshot: copilotSnapshotOf,
+      bridge: (encounterId: string) => bridgeSockets.get(encounterId),
+      countdown: (encounterId: string, countdown: CopilotCountdown) => {
+        countdowns.set(encounterId, countdown)
+        emitCopilot(encounterId, { type: 'session.updated', runId: null })
+      },
       // The assistant answers the running turn: a think step, a tool read, then the reply.
       answer: (encounterId: string, text: string) => {
         const session = copilotOf(encounterId)

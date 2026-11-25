@@ -223,3 +223,18 @@
 [data-turn-superseded] {
   opacity: 0.55;
 }
+
+[data-agent-draft] textarea {
+  outline: 1px solid var(--info);
+  outline-offset: 1px;
+  animation: note-draft-halo 1.3s ease-out;
+}
+
+@keyframes note-draft-halo {
+  from { box-shadow: 0 0 0 4px color-mix(in srgb, var(--info) 30%, transparent); }
+  to { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-agent-draft] textarea { animation: none; }
+}

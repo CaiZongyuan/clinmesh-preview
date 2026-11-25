@@ -6,7 +6,7 @@ import type { CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-
 import { CopilotReadModel } from './copilot-read-model'
 import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
 import type { BodySystem } from '../shared/physical-examination'
-import type { NoteSections } from '../shared/clinical-note'
+import type { DraftAuthor, NoteSection, NoteSections } from '../shared/clinical-note'
 import { DiagnosisRepository, type DiagnosisResult } from './diagnosis-repository'
 import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
 import type { DiagnosisDraftEntry } from '../shared/diagnosis'
@@ -277,9 +277,9 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return this.clinicalNote.view(encounterId)
   }
 
-  saveClinicalNoteDraft(encounterId: string, sections: Partial<NoteSections>): ClinicalNoteResult {
+  saveClinicalNoteDraft(encounterId: string, sections: Partial<NoteSections>, authors: Partial<Record<NoteSection, DraftAuthor>> = {}): ClinicalNoteResult {
     return this.ctx.storage.transactionSync(() =>
-      this.clinicalNote.saveDraft(encounterId, sections, 'doctor', new Date().toISOString()),
+      this.clinicalNote.saveDraft(encounterId, sections, authors, new Date().toISOString()),
     )
   }
 
@@ -397,10 +397,10 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     try {
       const doctorTurn = this.consultation.doctorTurnOf(patientTurnId)
       if (!doctorTurn) return
-      void this.env.CLINICAL_COPILOT.getByName(encounterId).triggerAnalysis(encounterId, {
+      this.ctx.waitUntil(this.env.CLINICAL_COPILOT.getByName(encounterId).triggerAnalysis(encounterId, {
         ref: `consultation:${doctorTurn.turnId}`,
         text: `问诊定稿：${doctorTurn.text.slice(0, 80)}`,
-      })
+      }).catch((error) => console.error('Copilot trigger failed', error)))
     } catch (error) {
       console.error('Copilot trigger failed', error)
     }

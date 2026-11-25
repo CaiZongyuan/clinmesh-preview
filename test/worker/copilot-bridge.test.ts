@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { installScripted } from './support/scripted-llm'
 import { asked, send, settled, startEncounter } from './support/clinic'
+import { expectNoCaseTruth } from './case-truth'
 import { prompt, serveBridge, snapshotWithConfirm } from './support/bridge'
 
 // The doctor's question that sets up a scripted exchange, finalized like every real consultation turn.
@@ -8,9 +9,18 @@ async function withConsultation(exchange: 'none' | 'one' = 'none'): Promise<stri
   const encounterId = await startEncounter()
   if (exchange === 'one') {
     installScripted('patient').reply('我三天前开始发烧，一直咳嗽。')
-    await settled(encounterId, (await asked(encounterId, '您哪里不舒服？')).patientTurn.turnId)
+    await finalized(encounterId, '您哪里不舒服？')
   }
   return encounterId
+}
+
+async function finalized(encounterId: string, question: string) {
+  await settled(encounterId, (await asked(encounterId, question)).patientTurn.turnId)
+  return vi.waitFor(async () => {
+    const pending = (await snapshotOf(encounterId)).countdown
+    expect(pending?.text).toBe(`问诊定稿：${question}`)
+    return pending!
+  }, { timeout: 3000, interval: 20 })
 }
 
 const flush = (encounterId: string, ref: string) => send('POST', `/api/encounters/${encounterId}/copilot/triggers/${encodeURIComponent(ref)}/flush`)
@@ -54,8 +64,7 @@ describe('ui-sdk bridge (#14)', () => {
 
     // A second finalized turn: 跳过 discards the trigger without queueing a run.
     installScripted('patient').reply('还有点怕冷。')
-    const second = await settled(encounterId, (await asked(encounterId, '怕冷吗？')).patientTurn.turnId)
-    void second
+    await finalized(encounterId, '怕冷吗？')
     const before = await snapshotOf(encounterId)
     const countdown = before.countdown
     expect(countdown).not.toBeNull()
@@ -69,26 +78,42 @@ describe('ui-sdk bridge (#14)', () => {
 
   it('a newer finalized turn flushes the pending countdown into the queue and replaces it', async () => {
     const encounterId = await withConsultation('one')
+    const first = (await snapshotOf(encounterId)).countdown!
     installScripted('patient').reply('咳嗽有黄痰。')
-    installScripted('patient').reply('夜里也咳。')
-    const first = await settled(encounterId, (await asked(encounterId, '有痰吗？')).patientTurn.turnId)
-    const firstRef = ((await snapshotOf(encounterId)).countdown)!.ref
-    await settled(encounterId, (await asked(encounterId, '夜里咳吗？')).patientTurn.turnId)
-    // The first trigger was flushed into the queue (it runs to completion since no bridge is connected,
-    // so the run leaves the queue and the trigger text survives in the session); the countdown now belongs
-    // to the newer turn.
+    const second = await finalized(encounterId, '有痰吗？')
+    expect(second.ref).not.toBe(first.ref)
     await vi.waitFor(async () => {
       const snapshot = await snapshotOf(encounterId)
-      expect(snapshot.queued).toEqual([])
-      expect(snapshot.turns.some((t) => t.trigger.text === '问诊定稿：您哪里不舒服？')).toBe(true)
-    }, { timeout: 12000 })
-    expect((await snapshotOf(encounterId)).countdown!.ref).not.toBe(firstRef)
-    void first
-  }, 20000)
+      expect(snapshot.turns.some((turn) => turn.trigger.text === first.text) ||
+        snapshot.queued.some((turn) => turn.text === first.text)).toBe(true)
+    }, { timeout: 3000 })
+  })
+
+  it('automatically takes a UI snapshot before the ambient provider can request an action', async () => {
+    const encounterId = await withConsultation('none')
+    const llm = installScripted('copilot')
+      .toolCall('ui_act', { steps: [{ ref: 'c1', action: 'setValue', args: ['问诊三天。'] }] })
+      .reply('已更新草稿。')
+    const bridge = await serveBridge(encounterId, (tool) => ({
+      ok: true, result: tool === 'ui_snapshot' ? snapshotWithConfirm() : '已更新草稿。',
+    }))
+    try {
+      installScripted('patient').reply('从三天前开始。')
+      await finalized(encounterId, '何时开始的？')
+      await waitForTool(encounterId, 'ui_act')
+      expect(bridge.calls.map((call) => call.tool)).toEqual(['ui_snapshot', 'ui_act'])
+      expect(llm.requests[0].messages).toContainEqual(expect.objectContaining({
+        role: 'tool', content: expect.stringContaining('确认签署'),
+      }))
+      expectNoCaseTruth('ambient context', JSON.stringify(llm.requests), [])
+    } finally {
+      bridge.close()
+    }
+  }, 8000)
 
   it('ui_snapshot reaches the browser over the bridge and its result is recorded as a tool step', async () => {
     const encounterId = await withConsultation('one')
-    const llm = installScripted('copilot').toolCall('ui_snapshot', {}).reply('已读取界面。')
+    installScripted('copilot').toolCall('ui_snapshot', {}).reply('已读取界面。')
     const bridge = await serveBridge(encounterId, (tool) => {
       expect(tool).toBe('ui_snapshot')
       return { ok: true, result: snapshotWithConfirm() }
@@ -98,9 +123,6 @@ describe('ui-sdk bridge (#14)', () => {
     expect(bridge.calls.map((c) => c.tool)).toEqual(['ui_snapshot'])
     expect(step.state).toBe('ok')
     expect(step.result).toContain('确认签署')
-    expect(step.state).toBe('ok')
-    expect(step.result).toContain('确认签署')
-    void llm
     bridge.close()
   }, 20000)
 

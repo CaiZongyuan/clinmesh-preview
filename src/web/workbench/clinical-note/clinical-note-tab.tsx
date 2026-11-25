@@ -17,6 +17,7 @@ import { ClinicalConfirmation } from '../clinical-confirmation'
 import { formatClock, formatClockSeconds } from '../format'
 import { badge } from '../pane-styles'
 import { useClinicalNoteContext } from './clinical-note-context'
+import { NoteSuggestions } from './note-suggestions'
 import type { ClinicalNote, SaveState } from './use-clinical-note'
 
 const COMMON_PHRASES: Record<NoteSection, readonly string[]> = {
@@ -67,7 +68,7 @@ export function ClinicalNoteTab({ encounter, diagnosisSeq }: { encounter: Encoun
           </p>
         )}
         {NOTE_SECTIONS.map((section) => (
-          <NoteSectionField key={section} section={section} note={note} writable={writable} />
+          <NoteSectionField key={section} section={section} note={note} writable={writable} suggest={context.suggest} />
         ))}
       </section>
     </div>
@@ -101,12 +102,15 @@ function SaveStatus({ save, onRetry }: { save: SaveState; onRetry: () => void })
   )
 }
 
-function NoteSectionField({ section, note, writable }: { section: NoteSection; note: ClinicalNote; writable: boolean }) {
+function NoteSectionField({ section, note, writable, suggest }: {
+  section: NoteSection; note: ClinicalNote; writable: boolean; suggest(section: NoteSection, text: string): void
+}) {
   const name = NOTE_SECTION_NAME[section]
   const required = REQUIRED_NOTE_SECTIONS.includes(section)
   const text = note.sections[section]
+  const assistantDraft = note.authors[section] === 'assistant'
   return (
-    <Field disabled={!writable} className="flex flex-col gap-1">
+    <Field disabled={!writable} className="flex flex-col gap-1" data-agent-draft={assistantDraft || undefined}>
       <FieldLabel className="text-[13px] font-medium">
         {name}
         {required && (
@@ -115,9 +119,28 @@ function NoteSectionField({ section, note, writable }: { section: NoteSection; n
           </span>
         )}
       </FieldLabel>
+      {assistantDraft && <span className={`${badge} self-start border border-dashed border-info/65 text-info`}>助手</span>}
       <Textarea
         value={text}
-        onValueChange={(value) => note.edit(section, value)}
+        data-note-section={section}
+        data-note-author={note.authors[section]}
+        onValueChange={(value, details) => {
+          if (details.source !== 'agent') {
+            note.edit(section, value)
+            return
+          }
+          if (!writable || value.length > MAX_NOTE_SECTION_LENGTH) {
+            details.cancel()
+            return
+          }
+          const focused = document.activeElement?.getAttribute('data-note-section') === section
+          if (focused || note.authorOf(section) === 'doctor') {
+            details.cancel()
+            if (value !== note.contentOf(section)) suggest(section, value)
+            return
+          }
+          note.edit(section, value, 'assistant')
+        }}
         aria-required={required || undefined}
         maxLength={MAX_NOTE_SECTION_LENGTH}
         rows={section === 'chief-complaint' ? 2 : 3}
@@ -145,6 +168,7 @@ function NoteSectionField({ section, note, writable }: { section: NoteSection; n
           {text.length}/{MAX_NOTE_SECTION_LENGTH}
         </FieldDescription>
       </div>
+      <NoteSuggestions section={section} />
     </Field>
   )
 }

@@ -32,9 +32,12 @@ export function createFakeClinicalNotes(refuse: Refuse, notes: Record<string, Cl
     const now = new Date().toISOString()
 
     if (method === 'PATCH') {
-      for (const [section, content] of Object.entries((body as SaveNoteDraftRequest).sections)) {
+      const { sections, authors } = body as SaveNoteDraftRequest
+      for (const [section, content] of Object.entries(sections)) {
         const draft = note.draft.find((d) => d.section === section)!
-        if (draft.content !== content) Object.assign(draft, { content, lastEditedBy: 'doctor', updatedAt: now })
+        const author = authors?.[draft.section] ?? 'doctor'
+        if (author === 'assistant' && draft.lastEditedBy === 'doctor') continue
+        if (draft.content !== content) Object.assign(draft, { content, lastEditedBy: author, updatedAt: now })
       }
       return respond(encounterId)
     }
