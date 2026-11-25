@@ -146,7 +146,7 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     request('POST', `/api/encounters/${encounterId}/diagnosis/revisions`, {
       entries: [
         { code: 'I10', primary: true, source: 'doctor' },
-        { code: 'E11.9', primary: false, source: 'doctor' },
+        { code: 'E78.5', primary: false, source: 'doctor' },
       ],
     }),
   'POST /api/encounters/:encounterId/diagnosis/reopen': ({ encounterId }) =>

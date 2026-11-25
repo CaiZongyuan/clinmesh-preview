@@ -104,7 +104,7 @@ async function frozenEncounter(status: 'abandoned' | 'completed'): Promise<Froze
   await send('POST', `/api/encounters/${encounterId}/diagnosis/revisions`, {
     entries: [
       { code: 'I10', primary: true, source: 'doctor' },
-      { code: 'E11.9', primary: false, source: 'doctor' },
+      { code: 'E78.5', primary: false, source: 'doctor' },
     ],
   })
   await send('POST', `/api/encounters/${encounterId}/diagnosis/reopen`)

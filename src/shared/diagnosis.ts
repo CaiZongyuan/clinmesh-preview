@@ -68,6 +68,7 @@ export const ICD_CATALOG: readonly IcdEntry[] = [
   { code: 'R50.9', name: '发热', pinyin: ['fr'] },
   { code: 'I10', name: '原发性高血压', pinyin: ['yfxgxy', 'gxy'] },
   { code: 'E11.9', name: '2型糖尿病', pinyin: ['2xtnb', 'tnb'] },
+  { code: 'N39.0', name: '尿路感染', pinyin: ['nlgr', 'nlgm'] },
   { code: 'E78.5', name: '高脂血症', pinyin: ['gzxz'] },
   { code: 'K29.7', name: '慢性胃炎', pinyin: ['mxwy'] },
   { code: 'M54.5', name: '腰痛', pinyin: ['yt'] },

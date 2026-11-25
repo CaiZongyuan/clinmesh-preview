@@ -4,10 +4,11 @@ import { describe, expect, it } from 'vitest'
 import type { GoldenCaseQueueResponse } from '../../src/shared/golden-case-queue'
 import { goldenCase1QueueEntry } from '../fixtures/golden-case-1'
 import { goldenCase2QueueEntry } from '../fixtures/golden-case-2'
+import { goldenCase3QueueEntry } from '../fixtures/golden-case-3'
 import { goldenCase4QueueEntry } from '../fixtures/golden-case-4'
 
 const goldenCaseQueue: GoldenCaseQueueResponse = {
-  goldenCases: [goldenCase1QueueEntry, goldenCase2QueueEntry, goldenCase4QueueEntry],
+  goldenCases: [goldenCase1QueueEntry, goldenCase2QueueEntry, goldenCase3QueueEntry, goldenCase4QueueEntry],
 }
 
 const getGoldenCases = () => exports.default.fetch('http://clinmesh.test/api/golden-cases')
@@ -36,13 +37,14 @@ describe('GET /api/golden-cases', () => {
     const again = await getGoldenCases()
     expect(again.status).toBe(200)
     expect(await again.json()).toEqual(goldenCaseQueue)
-    expect(await storedCaseIds()).toEqual(['golden-case-01', 'golden-case-02', 'golden-case-04'])
+    expect(await storedCaseIds()).toEqual(['golden-case-01', 'golden-case-02', 'golden-case-03', 'golden-case-04'])
   })
 
   it('reconciles a workspace holding stale Golden Case rows back to the pinned case pack', async () => {
     await getGoldenCases()
     await runInDurableObject(workspace(), (_instance, state) => {
       const sql = state.storage.sql
+      sql.exec('UPDATE golden_case SET queue_number = 11 WHERE case_id = ?', 'golden-case-03')
       sql.exec("UPDATE golden_case SET queue_number = 13, patient_name = '旧患者' WHERE case_id = 'golden-case-01'")
       sql.exec("UPDATE golden_case SET queue_number = 14, patient_name = '旧患者' WHERE case_id = 'golden-case-02'")
       sql.exec("UPDATE golden_case SET queue_number = 15, patient_name = '旧患者' WHERE case_id = 'golden-case-04'")
@@ -56,7 +58,7 @@ describe('GET /api/golden-cases', () => {
     const response = await getGoldenCases()
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(goldenCaseQueue)
-    expect(await storedCaseIds()).toEqual(['golden-case-01', 'golden-case-02', 'golden-case-04'])
+    expect(await storedCaseIds()).toEqual(['golden-case-01', 'golden-case-02', 'golden-case-03', 'golden-case-04'])
   })
 
   it('upgrades a workspace created before schema migrations were tracked', async () => {

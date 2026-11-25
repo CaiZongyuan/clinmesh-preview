@@ -138,7 +138,7 @@ describe('investigation catalog', () => {
         expect(analyte, `${goldenCase.id} ${lab.id}`).toBeDefined()
         const band = bandFor(analyte!.baseline!, patient)!
         expect(band.referenceRange, lab.id).toEqual(lab.referenceRange)
-        const flag = { H: 'high', L: 'low', N: null }[lab.interpretation as 'H' | 'L' | 'N']
+        const flag = typeof lab.value === 'string' && lab.value !== band.referenceRange.text ? 'abnormal' : { H: 'high', L: 'low', N: null }[lab.interpretation as 'H' | 'L' | 'N']
         expect(flagFor(lab.value, band.referenceRange), lab.id).toBe(flag)
       }
       for (const text of goldenCase.textResults) {
