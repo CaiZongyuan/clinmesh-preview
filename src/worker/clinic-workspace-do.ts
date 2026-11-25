@@ -267,7 +267,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
 
   // The Clinical Copilot's only way into the workspace: read-only projections of what the doctor can see.
   readForCopilot<R extends CopilotRead>(encounterId: string, read: R): CopilotReadResult<R['kind']> {
-    return this.copilotReads.read(encounterId, read, Date.now())
+    return this.ctx.storage.transactionSync(() => this.copilotReads.read(encounterId, read, Date.now()))
   }
 
   // Copilot commands are writes on the Encounter's session: refused once it is frozen, and audited once done.

@@ -3,8 +3,8 @@ import type { BannerPatient, EncounterError, EncounterStatus, Triage, VisibleSou
 import type { CatalogItemView, InvestigationCategory, ReportBody } from '../../shared/investigation'
 import type { BodySystem, PhysicalExaminationView } from '../../shared/physical-examination'
 
-// Everything the Clinical Copilot can ever read, all of it shown to the doctor too. The workspace answers each
-// read without writing anything; nothing here reaches Case Truth beyond what the doctor has uncovered.
+// Everything the Clinical Copilot can ever read, all of it shown to the doctor too. Nothing here reaches Case
+// Truth beyond what the doctor has uncovered, and no read changes a formal record.
 export type CopilotRead =
   | { kind: 'encounter-state' }
   | { kind: 'visible-source-history' }
@@ -37,6 +37,8 @@ export interface CopilotReleasedReport {
   version: number
   latest: boolean
   releasedAt: string
+  // Why an amended version corrected the one before it; null for version 1.
+  correctionReason: string | null
   specimenOrSite: string
   body: ReportBody
   acknowledged: boolean

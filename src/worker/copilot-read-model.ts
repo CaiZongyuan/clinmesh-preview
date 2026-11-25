@@ -5,8 +5,10 @@ import { catalogView } from './investigation-catalog'
 import type { InvestigationRepository } from './investigation-repository'
 import type { PhysicalExaminationRepository } from './physical-examination-repository'
 
-// The workspace's answers to the Clinical Copilot's reads: projections of what the doctor can already see, read
-// with plain SELECTs. Nothing here writes (not even a lazy Report release or reply expiry) or reads Case Truth.
+// The workspace's answers to the Clinical Copilot's reads: projections of what the doctor can already see. The
+// only write a read can cause is the one a doctor's own read causes: releasing Reports that have come due by the
+// Encounter's clock. Report content is read only through `releasedReports`, so a scripted amendment written ahead
+// of its release time never reaches the Copilot. Callers run `read` inside one storage transaction.
 export class CopilotReadModel {
   constructor(
     private readonly encounters: EncounterRepository,
@@ -33,7 +35,7 @@ export class CopilotReadModel {
               .filter((turn) => turn.status === 'final')
               .map((turn) => ({ speaker: turn.speaker, text: turn.text, at: turn.settledAt ?? turn.createdAt })),
             examinedSystems: examined.ok ? examined.examinations.map((e) => e.system) : [],
-            investigations: this.investigations.view(encounter, now).map((i) => ({
+            investigations: this.investigations.list(encounter, now).map((i) => ({
               investigationId: i.investigationId,
               name: i.name,
               category: i.category,
@@ -50,23 +52,25 @@ export class CopilotReadModel {
           const all = examined.ok ? examined.examinations : []
           return read.system ? all.filter((e) => e.system === read.system) : all
         }
-        case 'released-reports':
-          return this.investigations
-            .view(encounter, now)
-            .filter((i) => !read.investigationId || i.investigationId === read.investigationId)
-            .flatMap((i) =>
-              i.reports.map((report) => ({
-                investigationId: i.investigationId,
-                name: i.name,
-                reportId: report.reportId,
-                version: report.version,
-                latest: report.version === Math.max(...i.reports.map((r) => r.version)),
-                releasedAt: report.releasedAt,
-                specimenOrSite: report.specimenOrSite,
-                body: report.body,
-                acknowledged: report.acknowledgement !== null,
-              })),
-            )
+        case 'released-reports': {
+          const names = new Map(this.investigations.list(encounter, now).map((i) => [i.investigationId, i.name]))
+          const released = this.investigations
+            .releasedReports(encounter, now)
+            .filter((report) => !read.investigationId || report.investigationId === read.investigationId)
+          const latest = new Map(released.map((report) => [report.investigationId, report.version]))
+          return released.map((report) => ({
+            investigationId: report.investigationId,
+            name: names.get(report.investigationId) ?? '',
+            reportId: report.reportId,
+            version: report.version,
+            latest: latest.get(report.investigationId) === report.version,
+            releasedAt: report.releasedAt,
+            correctionReason: report.correctionReason,
+            specimenOrSite: report.specimenOrSite,
+            body: report.body,
+            acknowledged: report.acknowledgement !== null,
+          }))
+        }
         case 'catalog': {
           const query = read.query?.trim().toLowerCase()
           return catalogView().filter(
