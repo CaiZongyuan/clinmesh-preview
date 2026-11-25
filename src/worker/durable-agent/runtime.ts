@@ -70,8 +70,8 @@ export class RunHalted extends Error {
 export interface AgentDefinition {
   kind: AgentKind
   // The next LLM step's messages and tools, rebuilt from the session binding and the active messages every step.
-  buildContext(input: { binding: unknown; run: AgentRun; messages: LlmMessage[] }): 
-    | { messages: LlmMessage[]; tools: ToolSpec[] } 
+  buildContext(input: { binding: unknown; run: AgentRun; messages: LlmMessage[] }):
+    | { messages: LlmMessage[]; tools: ToolSpec[] }
     | Promise<{ messages: LlmMessage[]; tools: ToolSpec[] }>
   streamThinking: boolean
   // Tools the runtime executes by name; a call to any other tool gets an error the model can read.

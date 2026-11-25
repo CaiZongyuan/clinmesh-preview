@@ -1,3 +1,4 @@
+import { env, runDurableObjectAlarm } from 'cloudflare:test'
 import { describe, expect, it, vi } from 'vitest'
 import { installScripted } from './support/scripted-llm'
 import { asked, send, settled, startEncounter } from './support/clinic'
@@ -90,6 +91,7 @@ describe('ui-sdk bridge (#14)', () => {
   })
 
   it('automatically takes a UI snapshot before the ambient provider can request an action', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
     const encounterId = await withConsultation('none')
     const llm = installScripted('copilot')
       .toolCall('ui_act', { steps: [{ ref: 'c1', action: 'setValue', args: ['问诊三天。'] }] })
@@ -99,7 +101,9 @@ describe('ui-sdk bridge (#14)', () => {
     }))
     try {
       installScripted('patient').reply('从三天前开始。')
-      await finalized(encounterId, '何时开始的？')
+      const countdown = await finalized(encounterId, '何时开始的？')
+      vi.setSystemTime(Date.parse(countdown.fireAt) + 1)
+      expect(await runDurableObjectAlarm(env.CLINICAL_COPILOT.getByName(encounterId))).toBe(true)
       await waitForTool(encounterId, 'ui_act')
       expect(bridge.calls.map((call) => call.tool)).toEqual(['ui_snapshot', 'ui_act'])
       expect(llm.requests[0].messages).toContainEqual(expect.objectContaining({
@@ -108,6 +112,7 @@ describe('ui-sdk bridge (#14)', () => {
       expectNoCaseTruth('ambient context', JSON.stringify(llm.requests), [])
     } finally {
       bridge.close()
+      vi.useRealTimers()
     }
   }, 8000)
 
