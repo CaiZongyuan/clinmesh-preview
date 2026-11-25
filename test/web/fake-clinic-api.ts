@@ -98,12 +98,13 @@ export function createFakeClinicApi({
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
   // The Clinical Copilot's session per Encounter, with its own event log for its socket.
-  const copilotSessions = new Map<string, { turns: CopilotTurn[]; seq: number; model: CopilotSnapshot['model']; events: { seq: number; event: AgentEvent }[] }>()
+  const copilotSessions = new Map<string, { turns: CopilotTurn[]; queued: { turnId: string; kind: 'doctor'; text: string }[]; seq: number; model: CopilotSnapshot['model']; events: { seq: number; event: AgentEvent }[] }>()
   const copilotOf = (encounterId: string) =>
     copilotSessions.get(encounterId) ??
     copilotSessions
       .set(encounterId, {
         turns: [],
+        queued: [],
         seq: 0,
         model: { model: 'glm-5.3-flash', effort: 'low', defaultModel: 'glm-5.3-flash', defaultEffort: 'low', options: ['glm-5.3-flash', 'glm-5.3'] },
         events: [],
@@ -243,7 +244,10 @@ export function createFakeClinicApi({
             emitCopilot(encounter.encounterId, { type: 'steer.added', runId: running.turnId })
             return Response.json({ kind: 'steer', turnId: running.turnId }, { status: 201 })
           }
-          return refuse('copilot-busy', '临床助手正在运行或有排队任务，请停止或等待后再重新发送。')
+          const queuedId = `copilot-turn-${++copilotPromptCount}`
+          session.queued.push({ turnId: queuedId, kind: 'doctor', text })
+          emitCopilot(encounter.encounterId, { type: 'run.queued', runId: queuedId, ref: null })
+          return Response.json({ kind: 'run', turnId: queuedId }, { status: 201 })
         }
         const turnId = `copilot-turn-${++copilotPromptCount}`
         session.turns.push({
@@ -371,7 +375,7 @@ export function createFakeClinicApi({
       checkpoint: 0,
       model: session.model,
       turns: structuredClone(session.turns),
-      queued: [],
+      queued: structuredClone(session.queued),
     }
   }
 
@@ -395,6 +399,25 @@ export function createFakeClinicApi({
     })
     emitCopilot(encounterId, { type: 'step.finished', runId: turnId, step: 0 })
     emitCopilot(encounterId, { type: 'run.finished', runId: turnId, ref: null, status, error: null })
+    const next = session.queued.shift()
+    if (next) {
+      session.turns.push({
+        turnId: next.turnId,
+        trigger: { kind: next.kind, text: next.text, mentions: [] },
+        status: 'running',
+        failure: null,
+        stopReason: null,
+        steps: [{ kind: 'think', text: '', state: 'running' }],
+        steers: [],
+        reply: '',
+        usage: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        feedback: null,
+        superseded: false,
+      })
+      emitCopilot(encounterId, { type: 'run.started', runId: next.turnId, ref: null })
+    }
   }
 
   class FakeCopilotSocket {
@@ -478,6 +501,12 @@ export function createFakeClinicApi({
         ]
         emitCopilot(encounterId, { type: 'text.delta', runId: running.turnId, text })
         finishCopilotTurn(encounterId, running.turnId, 'done', text, steps)
+      },
+      stream: (encounterId: string, text: string) => {
+        const running = copilotOf(encounterId).turns.find((turn) => turn.status === 'running')
+        if (!running) throw new Error('No running Copilot turn')
+        running.reply += text
+        emitCopilot(encounterId, { type: 'text.delta', runId: running.turnId, text })
       },
       stop: (encounterId: string) => {
         const running = copilotOf(encounterId).turns.find((t) => t.status === 'running')

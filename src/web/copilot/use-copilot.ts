@@ -40,8 +40,10 @@ export interface CopilotSession {
 
 const MIN_RECONNECT_MS = 500
 const MAX_RECONNECT_MS = 8_000
-// Structural events change the durable projection; deltas arrive between snapshots.
-const REFRESH_DEBOUNCE_MS = 60
+// Streaming updates are bounded both ways: a delta never waits longer than MAX_REFRESH_DELAY_MS, and a
+// burst of them coalesces into at most one snapshot fetch per MIN_REFRESH_INTERVAL_MS.
+const MIN_REFRESH_INTERVAL_MS = 120
+const MAX_REFRESH_DELAY_MS = 400
 
 const newPromptId = () => `prompt-${crypto.randomUUID()}`
 
@@ -83,15 +85,28 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
     let lastSeq = 0
     let timer: ReturnType<typeof setTimeout> | undefined
     let queuedRefresh: ReturnType<typeof setTimeout> | undefined
+    let lastRefreshAt = 0
+
+    // Leading-and-bounded throttle: an event burst refreshes at once when the last refresh is stale, and
+    // otherwise schedules one fetch no later than MAX_REFRESH_DELAY_MS, so streamed text keeps appearing.
+    const scheduleRefresh = () => {
+      const wait = Math.max(0, lastRefreshAt + MIN_REFRESH_INTERVAL_MS - Date.now())
+      clearTimeout(queuedRefresh)
+      queuedRefresh = setTimeout(
+        () => {
+          lastRefreshAt = Date.now()
+          void refresh()
+        },
+        Math.min(wait, MAX_REFRESH_DELAY_MS),
+      )
+    }
 
     const receive = (incoming: ServerMessage) => {
       if (incoming.type === 'event') {
         if (incoming.seq <= lastSeq) return
         lastSeq = incoming.seq
-        // Deltas between snapshots are cosmetic; the debounced refresh folds them in with the next
-        // structural event anyway, and a steady stream keeps the panel within one debounce of live.
-        clearTimeout(queuedRefresh)
-        queuedRefresh = setTimeout(() => void refresh(), REFRESH_DEBOUNCE_MS)
+        // Deltas between snapshots are cosmetic; the bounded refresh folds them in without losing text.
+        scheduleRefresh()
       } else if (incoming.type === 'replay.done') {
         delay = MIN_RECONNECT_MS
         lastSeq = Math.max(lastSeq, incoming.seq)

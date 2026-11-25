@@ -1,5 +1,5 @@
 import { createMemoryHistory, RouterProvider } from '@tanstack/react-router'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppRouter } from '../../src/web/router'
@@ -148,6 +148,53 @@ describe('Clinical Copilot panel', () => {
     await user.click(chip)
     expect(await panel()).toHaveTextContent('回答，但面板被隐藏。')
     await waitFor(() => expect(chip.parentElement).not.toHaveTextContent('1'))
+  })
+
+  it('reveals streamed text while deltas are arriving continuously', async () => {
+    const api = openEncounter()
+    await ask('分析目前资料')
+    const log = await screen.findByRole('log', { name: '临床助手会话' })
+    vi.useFakeTimers()
+    try {
+      await act(async () => vi.advanceTimersByTimeAsync(200))
+      for (let piece = 0; piece < 14; piece++) {
+        await act(async () => {
+          api.copilot.stream(ENCOUNTER, '正在分析')
+          await vi.advanceTimersByTimeAsync(20)
+        })
+      }
+      expect(log).toHaveTextContent('正在分析')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('lets the doctor switch back to queue while an active turn remains', async () => {
+    const api = openEncounter()
+    await ask('分析目前资料')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '发送为指引' }))
+    await ask('先看过敏史')
+    expect(api.copilot.snapshot(ENCOUNTER).turns[0].steers).toHaveLength(1)
+    // A steer is one turn only: the next prompt queues again without touching the controls.
+    await ask('另一个问题')
+    expect(api.copilot.snapshot(ENCOUNTER).queued).toContainEqual(expect.objectContaining({ text: '另一个问题' }))
+  })
+
+  it('opens the read-only context view from the typed slash command without losing the draft', async () => {
+    const api = openEncounter()
+    await ask('先跑一轮')
+    api.copilot.answer(ENCOUNTER, '已完成的回答。')
+    await waitFor(() => expect(screen.getByRole('log', { name: '临床助手会话' })).toHaveTextContent('已完成的回答。'))
+    const input = await composer()
+    const user = userEvent.setup()
+    await user.type(input, '/上下文')
+    await user.click(screen.getByRole('button', { name: '发送给临床助手' }))
+    const dialog = await screen.findByRole('dialog', { name: '助手上下文（只读）' })
+    expect(dialog).toHaveTextContent('累计用量')
+    expect(dialog).toHaveTextContent('输入 320')
+    expect(input).toHaveValue('/上下文')
+    expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/prompts`)).toHaveLength(1)
   })
 
   it('shows a reconnecting notice when the socket drops, and recovers', async () => {

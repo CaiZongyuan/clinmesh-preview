@@ -1,4 +1,5 @@
 import { Button } from '@ui-sdk/react/button'
+import { Dialog, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import { Select, SelectContent, SelectItem, SelectList, SelectTrigger, SelectValue } from '@ui-sdk/react/select'
 import {
   TriggerMenu,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { CONTEXT_COMMAND, COPILOT_COMMANDS, MENTION_KIND_LABEL, MAX_PROMPT_LENGTH } from '../../shared/copilot-turn'
+import { NOTE_SECTION_NAME, type NoteSection } from '../../shared/clinical-note'
 import type { EncounterView } from '../../shared/encounter'
 import type {
   CopilotMention,
@@ -33,7 +35,7 @@ import type {
   CopilotTurn,
 } from '../../shared/copilot-turn'
 import { BODY_SYSTEM_NAME } from '../../shared/physical-examination'
-import { fetchInvestigations } from '../api'
+import { fetchClinicalNote, fetchInvestigations } from '../api'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import type { CopilotSession } from '../copilot/use-copilot'
 import { formatClockSeconds } from './format'
@@ -268,17 +270,20 @@ type MentionItem = TriggerMenuDataItem<string> & { value: string; label: string 
 
 function mentionCandidates(encounterId: string, examinations: PhysicalExaminationView[]) {
   const item = (value: string, label: string): MentionItem => ({ value, label })
+  const queryItems = (items: MentionItem[], query: string) =>
+    items.filter((candidate) => candidate.label.toLowerCase().includes(query.toLowerCase()))
   const reports = async (query: string): Promise<TriggerMenuData<string>> => {
     const investigations = await fetchInvestigations(encounterId)
     return [
       {
         value: 'reports',
         label: '已发布报告',
-        items: investigations
-          .flatMap((investigation) =>
+        items: queryItems(
+          investigations.flatMap((investigation) =>
             investigation.reports.map((report) => item(`report:${report.reportId}`, `${investigation.name} 第${report.version}版`)),
-          )
-          .filter((candidate) => candidate.label.toLowerCase().includes(query.toLowerCase())),
+          ),
+          query,
+        ),
       },
     ]
   }
@@ -287,13 +292,46 @@ function mentionCandidates(encounterId: string, examinations: PhysicalExaminatio
     label: '查体',
     items: examinations.map((examination) => item(`examination:${examination.system}`, BODY_SYSTEM_NAME[examination.system])),
   }
-  return { reports, exams }
+  // What the doctor can see of the Clinical Note: signed sections from the latest revision, and the draft
+  // sections as they are on screen. Doctor-authored content only — nothing beyond the note's visible state.
+  const noteSections = async (query: string): Promise<TriggerMenuData<string>> => {
+    const note = await fetchClinicalNote(encounterId)
+    const signed = note.revisions.at(-1)?.sections
+    const signedItems = signed
+      ? (Object.entries(signed) as [NoteSection, string][])
+          .filter(([, content]) => content.trim() !== '')
+          .map(([section]) => item(`note-section:${section}`, NOTE_SECTION_NAME[section]))
+      : []
+    const draftItems = note.draft
+      .filter((draft) => draft.content.trim() !== '')
+      .map((draft) => item(`draft:${draft.section}`, `${NOTE_SECTION_NAME[draft.section]}（草稿）`))
+    return [
+      { value: 'note-sections', label: '病历（已签署）', items: queryItems(signedItems, query) },
+      { value: 'drafts', label: '病历草稿', items: queryItems(draftItems, query) },
+    ]
+  }
+  return { reports, exams, noteSections }
 }
 
 function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftChange, mentions, onMentionsChange, editing, onCancelEdit }: ComposerProps) {
   const [mode, setMode] = useState<CopilotPromptMode>('queue')
   const [menuOpen, setMenuOpen] = useState(false)
+  const [contextOpen, setContextOpen] = useState(false)
   const input = useRef<HTMLTextAreaElement>(null)
+
+  // What the doctor's assistant currently holds: its session configuration and the usage of its finished
+  // turns. Per-request accounting and compaction state arrive with #13; this is the read-only interim view.
+  const contextSummary = {
+    model: copilot.model,
+    turns: copilot.turns.length,
+    finished: copilot.turns.filter((turn) => turn.status !== 'running').length,
+    queued: copilot.queued.length,
+    usage: copilot.turns.reduce(
+      (total, turn) => ({ in: total.in + (turn.usage?.in ?? 0), out: total.out + (turn.usage?.out ?? 0) }),
+      { in: 0, out: 0 },
+    ),
+    checkpoint: copilot.turns.reduce((total, turn) => total + turn.steps.filter((step) => step.state !== 'running').length, 0),
+  }
 
   useEffect(() => {
     const focus = (event: globalThis.KeyboardEvent) => {
@@ -310,13 +348,15 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
     const text = draft.trim()
     if (!text || text.length > MAX_PROMPT_LENGTH) return
     if (text === CONTEXT_COMMAND) {
-      // The context view opens in the browser (#13); the command never reaches the Copilot.
-      onDraftChange('')
+      // A typed slash command opens the same read-only view the menu action does; what the doctor typed stays.
+      setContextOpen(true)
       return
     }
     const used = mentions.filter((mention) => text.includes(`@${mention.label}`))
     const sent = editing ? await copilot.resend(editing, text, used) : await copilot.prompt(text, used, mode)
     if (sent) {
+      // A steer applies to one turn only; the next prompt queues again unless the doctor opts back in.
+      if (mode === 'steer') setMode('queue')
       onDraftChange('')
       onMentionsChange([])
       onCancelEdit()
@@ -357,11 +397,12 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
     () => [
       {
         char: '/',
-        items: COPILOT_COMMANDS.filter((command) => command.prompt !== null).map((command) => ({
+        items: COPILOT_COMMANDS.map((command) => ({
           value: command.command,
           label: command.command,
           description: command.description,
-          after: 'compose' as const,
+          // /上下文 opens the local context view instead of composing text.
+          after: command.prompt === null ? ('submit' as const) : ('compose' as const),
         })),
         insert: (item: { value: string }) => `${item.value} `,
       },
@@ -372,7 +413,8 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
         items: async (query: string): Promise<TriggerMenuData<string>> => {
           const groups = await known.current.reports(query)
           lastInvestigations.current = await fetchInvestigations(encounterId)
-          return [...groups, known.current.exams]
+          const noteGroups = await known.current.noteSections(query)
+          return [...groups, known.current.exams, ...noteGroups]
         },
         insert: (item: { value: string; label: string }) => `@${item.label} `,
       },
@@ -380,7 +422,13 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
     [encounterId],
   )
 
-  const onSelect = (value: string) => {
+  const onSelect = (value: string, details?: { preventDefault?: () => void }) => {
+    if (value === CONTEXT_COMMAND) {
+      // Open the read-only context view; the composer keeps whatever the doctor had typed.
+      details?.preventDefault?.()
+      setContextOpen(true)
+      return
+    }
     const mention = mentionOf(value)
     if (mention) onMentionsChange([...mentions.filter((m) => m.id !== mention.id), mention])
   }
@@ -429,6 +477,24 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
           </TriggerMenuList>
         </TriggerMenuContent>
       </TriggerMenu>
+      <Dialog open={contextOpen} onOpenChange={setContextOpen}>
+        <DialogContent className="copilot-menu max-w-sm p-4" aria-label="助手上下文（只读）">
+          <DialogTitle className="m-0 text-sm font-semibold">助手上下文（只读）</DialogTitle>
+          <p className="m-0 mt-1 text-xs text-muted-foreground">当前会话信息；分项用量与压缩记录随 #13 提供。</p>
+          <dl className="m-0 mt-2 grid grid-cols-2 gap-1 text-[13px]">
+            <dt className="text-muted-foreground">模型</dt>
+            <dd className="m-0">{contextSummary.model ? `${contextSummary.model.model} · ${EFFORT_LABEL[contextSummary.model.effort]}` : '默认'}</dd>
+            <dt className="text-muted-foreground">轮数</dt>
+            <dd className="m-0">{contextSummary.turns}（已完成 {contextSummary.finished}）</dd>
+            <dt className="text-muted-foreground">排队</dt>
+            <dd className="m-0">{contextSummary.queued}</dd>
+            <dt className="text-muted-foreground">已完成步骤</dt>
+            <dd className="m-0">{contextSummary.checkpoint}</dd>
+            <dt className="text-muted-foreground">累计用量</dt>
+            <dd className="m-0">输入 {contextSummary.usage.in} · 输出 {contextSummary.usage.out}</dd>
+          </dl>
+        </DialogContent>
+      </Dialog>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           {copilot.busy ? (
@@ -440,6 +506,9 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
               <Button aria-label="发送为指引" aria-pressed={mode === 'steer'} className="h-7 px-2" onClick={() => setMode('steer')}>
                 <ListPlusIcon aria-hidden="true" size={14} />
                 指引当前轮
+              </Button>
+              <Button aria-label="回到排队" aria-pressed={mode === 'queue'} className="h-7 px-2" onClick={() => setMode('queue')}>
+                排队
               </Button>
             </>
           ) : (
