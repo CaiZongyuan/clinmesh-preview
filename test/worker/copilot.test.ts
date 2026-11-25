@@ -1,7 +1,9 @@
-import { abortAllDurableObjects, env, runDurableObjectAlarm } from 'cloudflare:test'
+import { abortAllDurableObjects, env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import casePack from '../../data/golden-cases/outpatient-golden-case-pack.json'
 import { describe, expect, it, vi } from 'vitest'
 import type { AuditEventsResponse, EncounterResponse } from '../../src/shared/encounter'
+import { ClinicWorkspaceDO } from '../../src/worker/clinic-workspace-do'
+import type { CopilotRead } from '../../src/worker/clinical-copilot/copilot-reads'
 import { copilotTools } from '../../src/worker/clinical-copilot/copilot-tools'
 import type { CopilotSnapshot } from '../../src/shared/copilot-turn'
 import { expectNoCaseTruth } from './case-truth'
@@ -26,6 +28,28 @@ const audits = async (encounterId: string) =>
   ((await (await send('GET', `/api/encounters/${encounterId}/audit-events`)).json()) as AuditEventsResponse).auditEvents
 
 const toolsOf = (snapshot: CopilotSnapshot) => snapshot.turns.flatMap((turn) => turn.steps.filter((s) => s.kind === 'tool'))
+
+function gateWorkspaceRead(encounterId: string, kind: CopilotRead['kind']) {
+  const original = ClinicWorkspaceDO.prototype.readForCopilot
+  let entered = false
+  let released = false
+  Object.defineProperty(ClinicWorkspaceDO.prototype, 'readForCopilot', {
+    async value(this: ClinicWorkspaceDO, id: string, read: CopilotRead) {
+      if (id === encounterId && read.kind === kind && !entered) {
+        entered = true
+        while (!released) await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      return original.call(this, id, read)
+    },
+  })
+  return {
+    reached: () => vi.waitFor(() => expect(entered).toBe(true)),
+    release() {
+      released = true
+      Object.defineProperty(ClinicWorkspaceDO.prototype, 'readForCopilot', { value: original })
+    },
+  }
+}
 
 describe('Copilot tools', () => {
   it('exposes exactly the read-only allowlist', () => {
@@ -178,6 +202,34 @@ describe('turn lifecycle', () => {
 
   it('delivers a steer to the running turn before its next step, and marks it read', async () => {
     const llm = installScripted('copilot')
+      .toolCall('read_released_reports', {})
+      .reply('好，我已经注意到补充的信息。')
+      .reply('我来回答排队的问题。')
+    const encounterId = await startEncounter()
+    const gate = gateWorkspaceRead(encounterId, 'released-reports')
+    try {
+      expect((await prompt(encounterId, 's1', '分析一下')).status).toBe(201)
+      await gate.reached()
+      expect((await prompt(encounterId, 's2', '排队的问题')).status).toBe(201)
+      expect((await prompt(encounterId, 's3', '重点看过敏史', 'steer')).status).toBe(201)
+    } finally {
+      gate.release()
+    }
+
+    const snapshot = await copilotSettled(encounterId)
+    expect(snapshot.turns.map((turn) => [turn.status, turn.trigger.text])).toEqual([
+      ['done', '分析一下'],
+      ['done', '排队的问题'],
+    ])
+    expect(snapshot.turns[0].steers).toEqual([{ text: '重点看过敏史', sentAt: expect.any(String), read: true }])
+    const usersOf = (request: (typeof llm.requests)[number]) =>
+      request.messages.filter((message) => message.role === 'user').map((message) => message.content)
+    expect(usersOf(llm.requests[1])).toEqual(['分析一下', '重点看过敏史'])
+    expect(usersOf(llm.requests[2])).toEqual(['分析一下', '重点看过敏史', '排队的问题'])
+  })
+
+  it('runs an unread steer separately when the first turn has already produced its final reply', async () => {
+    const llm = installScripted('copilot')
     const gate = llm.gate('', '')
     llm.reply('好，我已经注意到补充的信息。')
     const encounterId = await startEncounter()
@@ -213,6 +265,36 @@ describe('turn lifecycle', () => {
     ])
     expect((await audits(encounterId)).map((a) => a.eventType)).toContain('copilot-stopped')
   })
+
+  it.each([
+    ['encounter-state', 'stop'],
+    ['released-reports', 'stall'],
+  ] as const)('continues the queue after %s hangs until %s', async (kind, finish) => {
+    const llm = installScripted('copilot')
+    if (kind === 'released-reports') llm.toolCall('read_released_reports', {})
+    llm.reply('下一轮已回答')
+    const encounterId = await startEncounter()
+    const gate = gateWorkspaceRead(encounterId, kind)
+    try {
+      const first = await prompt(encounterId, 'hang-first', '等待工作区')
+      expect(first.status).toBe(201)
+      const { turnId } = (await first.json()) as { turnId: string }
+      await gate.reached()
+      expect((await prompt(encounterId, 'hang-next', '下一问')).status).toBe(201)
+      if (finish === 'stop') {
+        const stopped = await send('POST', `/api/encounters/${encounterId}/copilot/stop`)
+        expect(await stopped.json()).toMatchObject({ stoppedTurnId: turnId })
+      }
+      const snapshot = await copilotSettled(encounterId, 3000)
+      expect(snapshot.turns).toHaveLength(2)
+      expect(snapshot.turns[0]).toMatchObject(finish === 'stop'
+        ? { turnId, status: 'stopped', stopReason: 'stop-requested' }
+        : { turnId, status: 'failed', failure: 'stalled' })
+      expect(snapshot.turns[1]).toMatchObject({ status: 'done', reply: '下一轮已回答' })
+    } finally {
+      gate.release()
+    }
+  }, 8000)
 
   it('refuses a resend while running, and otherwise supersedes the old turn with a new one', async () => {
     const llm = installScripted('copilot')
@@ -320,6 +402,37 @@ describe('turn lifecycle', () => {
     ])
     socket.close()
     replay.close()
+  })
+
+  it('closes running steps and preserves unread steers when a turn fails to close', async () => {
+    const llm = installScripted('copilot')
+    const gate = llm.gate('开始分析', '分析结束')
+    llm.reply('回答引导').reply('回答排队问题')
+    const encounterId = await startEncounter()
+    await runInDurableObject(env.CLINICAL_COPILOT.getByName(encounterId), (_instance, state) => {
+      state.storage.sql.exec(`
+        CREATE TRIGGER refuse_first_run_close BEFORE UPDATE OF status ON agent_run
+        WHEN OLD.external_ref = 'failed-close' AND NEW.status = 'done'
+        BEGIN SELECT RAISE(ABORT, 'deliberate close failure'); END
+      `)
+    })
+
+    try {
+      expect((await prompt(encounterId, 'failed-close', '第一问')).status).toBe(201)
+      await gate.reached
+      expect((await prompt(encounterId, 'queued-after-close', '排队的问题')).status).toBe(201)
+      expect((await prompt(encounterId, 'unread-at-close', '看过敏史', 'steer')).status).toBe(201)
+    } finally {
+      gate.release()
+    }
+
+    const snapshot = await copilotSettled(encounterId)
+    expect(snapshot.turns[0]).toMatchObject({ status: 'failed', failure: 'crashed-repeatedly' })
+    expect(snapshot.turns[0].steps.every((step) => step.state !== 'running')).toBe(true)
+    expect(snapshot.turns.slice(1).map((turn) => [turn.trigger.text, turn.reply])).toEqual([
+      ['看过敏史', '回答引导'],
+      ['排队的问题', '回答排队问题'],
+    ])
   })
 
   it('streams the session over the socket: thinking, tool steps and deltas end when the turn does', async () => {

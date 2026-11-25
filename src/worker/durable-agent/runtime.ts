@@ -129,27 +129,34 @@ const positive = (value: unknown, fallback: number) => {
   return typeof value === 'string' && Number.isFinite(n) && n > 0 ? n : fallback
 }
 
+class RunStalled extends Error {}
+
+async function untilAborted<T>(pending: T | PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  let onAbort: () => void = () => {}
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason)
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([aborted, pending])
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
+}
+
 // Reads a provider's stream but gives up the moment `signal` aborts, even if the provider ignores the abort and
 // never yields again: a stuck provider must not hold the run (and the queue behind it) forever.
 async function* abortable<T>(iterable: AsyncIterable<T>, signal: AbortSignal): AsyncGenerator<T> {
   const iterator = iterable[Symbol.asyncIterator]()
-  let onAbort: () => void = () => {}
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(new LlmError('aborted', 'aborted'))
-    if (signal.aborted) onAbort()
-    else signal.addEventListener('abort', onAbort, { once: true })
-  })
-  aborted.catch(() => {})
   try {
     for (;;) {
-      const next = iterator.next()
-      next.catch(() => {})
-      const result = await Promise.race([next, aborted])
+      signal.throwIfAborted()
+      const result = await untilAborted(iterator.next(), signal)
       if (result.done) return
       yield result.value
     }
   } finally {
-    signal.removeEventListener('abort', onAbort)
     iterator.return?.()?.catch(() => {})
   }
 }
@@ -368,30 +375,43 @@ export class DurableAgentRuntime {
     return run
   }
 
-  // Fails the run that would be claimed next without reading more of it than its id. False when there is none.
-  private quarantine(): boolean {
-    const published = this.ctx.storage.transactionSync(() => {
-      const row = this.sql
-        .exec<{ run_id: string; external_ref: string | null }>(
-          `SELECT run_id, external_ref FROM agent_run WHERE status IN ('running', 'queued') ORDER BY status = 'running' DESC, queue_order LIMIT 1`,
-        )
-        .toArray()[0]
-      if (!row) return null
-      this.sql.exec(
-        `UPDATE agent_run SET status = 'failed', error = 'crashed-repeatedly', finished_at = ? WHERE run_id = ?`,
-        Date.now(), row.run_id,
+  private quarantine(runId?: string): boolean {
+    const row = runId === undefined
+      ? this.candidate()
+      : this.sql.exec<RunRow>(
+          `SELECT * FROM agent_run WHERE run_id = ? AND status = 'running'`,
+          runId,
+        ).toArray()[0]
+    if (!row) return false
+    let published: LoggedEvent[]
+    try {
+      published = this.ctx.storage.transactionSync(() =>
+        this.close(toRun(row), { status: 'failed', error: 'crashed-repeatedly', text: '' }, null),
       )
-      this.sql.exec(`UPDATE agent_message SET state = 'void' WHERE run_id = ? AND state = 'unsettled'`, row.run_id)
-      return this.events.append({
-        type: 'run.finished',
-        runId: row.run_id,
-        ref: row.external_ref,
-        status: 'failed',
-        error: 'crashed-repeatedly',
+    } catch {
+      // A corrupted run can fail normal close again. Drop its incomplete context so it cannot block the next run.
+      published = this.ctx.storage.transactionSync(() => {
+        const now = Date.now()
+        this.sql.exec(
+          `UPDATE agent_run SET status = 'failed', error = 'crashed-repeatedly', finished_at = ? WHERE run_id = ?`,
+          now, row.run_id,
+        )
+        this.sql.exec(`UPDATE agent_message SET state = 'void' WHERE run_id = ?`, row.run_id)
+        this.sql.exec(
+          `UPDATE agent_tool_call SET status = 'cancelled', completed_at = ? WHERE run_id = ? AND status = 'dispatched'`,
+          now, row.run_id,
+        )
+        this.events.dropDeltas(row.run_id)
+        return [...this.closeRunningSteps(row.run_id, 'failed', now), this.events.append({
+          type: 'run.finished',
+          runId: row.run_id,
+          ref: row.external_ref,
+          status: 'failed',
+          error: 'crashed-repeatedly',
+        })]
       })
-    })
-    if (!published) return false
-    this.publish([published])
+    }
+    this.publish(published)
     return true
   }
 
@@ -405,7 +425,6 @@ export class DurableAgentRuntime {
     let step = this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM agent_step WHERE run_id = ?`, run.runId).one().n
     let text = ''
     let thinking = ''
-    let stalled = false
     let outcome: RunOutcome
     try {
       const llm = resolveLlmProvider(this.env, this.agent.kind, this.sessionConfig())
@@ -416,7 +435,9 @@ export class DurableAgentRuntime {
         for (; step < MAX_STEPS; step++) {
           await this.runDispatchedTools(run.runId, signal)
           this.consumeSteers(run.runId)
-          const context = await this.agent.buildContext({ binding: this.binding(), run, messages: this.contextMessages(run.runId) })
+          const context = await this.withIdleLimit(signal, () =>
+            this.agent.buildContext({ binding: this.binding(), run, messages: this.contextMessages(run.runId) }),
+          )
           signal.throwIfAborted()
           usage.estimatedInput += context.messages.reduce((sum, m) => sum + estimateTokens(m.content), 0)
           this.beginStep(run.runId, step)
@@ -426,10 +447,11 @@ export class DurableAgentRuntime {
           thinking = ''
           // A step that streams nothing for the stall timeout is abandoned, even if the provider ignores the abort.
           const idle = new AbortController()
+          const stepSignal = AbortSignal.any([signal, idle.signal])
           let timer = setTimeout(() => idle.abort(), this.stallMs)
           try {
-            const stream = llm.provider.stream({ model: llm.model, effort: llm.effort, ...context }, AbortSignal.any([signal, idle.signal]))
-            for await (const event of abortable<LlmStreamEvent>(stream, AbortSignal.any([signal, idle.signal]))) {
+            const stream = llm.provider.stream({ model: llm.model, effort: llm.effort, ...context }, stepSignal)
+            for await (const event of abortable<LlmStreamEvent>(stream, stepSignal)) {
               clearTimeout(timer)
               timer = setTimeout(() => idle.abort(), this.stallMs)
               if (event.type === 'text.delta') {
@@ -450,7 +472,7 @@ export class DurableAgentRuntime {
               }
             }
           } catch (error) {
-            stalled = idle.signal.aborted && !signal.aborted
+            if (idle.signal.aborted && !signal.aborted) throw new RunStalled()
             throw error
           } finally {
             clearTimeout(timer)
@@ -474,7 +496,7 @@ export class DurableAgentRuntime {
         outcome = { status: 'stopped', reason: error.reason, text }
       } else if (deadline?.aborted) {
         outcome = { status: 'failed', error: 'timeout', text }
-      } else if (stalled) {
+      } else if (error instanceof RunStalled) {
         outcome = { status: 'failed', error: 'stalled', text }
       } else {
         outcome = { status: 'failed', error: 'llm-error', text }
@@ -487,14 +509,14 @@ export class DurableAgentRuntime {
     // A provider that ignores the abort and answers late has still missed the deadline.
     if (outcome.status === 'done' && deadline?.aborted) outcome = { status: 'failed', error: 'timeout', text: outcome.text }
     try {
-      const published = this.ctx.storage.transactionSync(() => {
-        this.endStep(run.runId, step, outcome, thinking)
-        return this.close(run, outcome, usage)
-      })
+      const published = this.ctx.storage.transactionSync(() => [
+        ...this.endStep(run.runId, step, outcome, thinking),
+        ...this.close(run, outcome, usage),
+      ])
       this.publish(published)
     } catch (error) {
       console.error('agent run could not be closed', run.runId, error)
-      if (!this.quarantine()) throw error
+      if (!this.quarantine(run.runId)) throw error
     }
   }
 
@@ -563,14 +585,22 @@ export class DurableAgentRuntime {
   }
 
   // Closes the step the run ended in, inside the closing transaction.
-  private endStep(runId: string, step: number, outcome: RunOutcome, thinking: string): void {
-    if (!this.agent.traceSteps) return
+  private endStep(runId: string, step: number, outcome: RunOutcome, thinking: string): LoggedEvent[] {
+    if (!this.agent.traceSteps) return []
     const status = outcome.status === 'done' ? 'done' : outcome.status
     const changed = this.sql.exec(
       `UPDATE agent_step SET status = ?, thinking = ?, text = ?, finished_at = ? WHERE run_id = ? AND step = ? AND status = 'running'`,
       status, thinking, outcome.text, Date.now(), runId, step,
     ).rowsWritten
-    if (changed > 0) this.publish([this.events.append({ type: 'step.finished', runId, step })])
+    return changed > 0 ? [this.events.append({ type: 'step.finished', runId, step })] : []
+  }
+
+  private closeRunningSteps(runId: string, status: RunOutcome['status'], now: number): LoggedEvent[] {
+    if (!this.agent.traceSteps) return []
+    return this.sql.exec<{ step: number }>(
+      `UPDATE agent_step SET status = ?, finished_at = ? WHERE run_id = ? AND status = 'running' RETURNING step`,
+      status, now, runId,
+    ).toArray().map(({ step }) => this.events.append({ type: 'step.finished', runId, step }))
   }
 
   // Checkpoint A: an LLM step that asked for tools. The calls are recorded as dispatched; each result is its own
@@ -608,7 +638,7 @@ export class DurableAgentRuntime {
     for (const call of calls) {
       signal.throwIfAborted()
       if (this.agent.traceSteps) this.announce({ type: 'tool.started', runId, callId: call.call_id, name: call.name })
-      const outcome = await this.executeTool(call, signal)
+      const outcome = await this.withIdleLimit(signal, (toolSignal) => this.executeTool(call, toolSignal))
       signal.throwIfAborted()
       const published = this.ctx.storage.transactionSync(() => {
         this.sql.exec(
@@ -621,6 +651,21 @@ export class DurableAgentRuntime {
           : []
       })
       this.publish(published)
+    }
+  }
+
+  private async withIdleLimit<T>(signal: AbortSignal, operation: (signal: AbortSignal) => T | PromiseLike<T>): Promise<T> {
+    const idle = new AbortController()
+    const operationSignal = AbortSignal.any([signal, idle.signal])
+    const timer = setTimeout(() => idle.abort(), this.stallMs)
+    try {
+      operationSignal.throwIfAborted()
+      return await untilAborted(operation(operationSignal), operationSignal)
+    } catch (error) {
+      if (idle.signal.aborted && !signal.aborted) throw new RunStalled()
+      throw error
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -664,7 +709,7 @@ export class DurableAgentRuntime {
   // Closes a run inside the caller's transaction and returns the events to publish once it commits.
   private close(run: AgentRun, outcome: RunOutcome, usage: RunUsage | null): LoggedEvent[] {
     const now = Date.now()
-    const published: LoggedEvent[] = []
+    const published = this.closeRunningSteps(run.runId, outcome.status, now)
     if (outcome.status === 'done') {
       // The run's input message already carries `external_ref`; the reply needs no origin of its own.
       this.sql.exec(
