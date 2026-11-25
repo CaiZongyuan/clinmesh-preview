@@ -80,6 +80,20 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'GET /api/encounters/:encounterId/patient/socket': ({ encounterId }) => patientSocketFrames(encounterId),
   'POST /api/encounters/:encounterId/consultation/patient-turns/:turnId/retry': ({ encounterId, failedPatientTurnId }) =>
     request('POST', `/api/encounters/${encounterId}/consultation/patient-turns/${failedPatientTurnId}/retry`),
+  'GET /api/encounters/:encounterId/clinical-note': ({ encounterId }) => request('GET', `/api/encounters/${encounterId}/clinical-note`),
+  'PATCH /api/encounters/:encounterId/clinical-note/draft': ({ encounterId }) =>
+    request('PATCH', `/api/encounters/${encounterId}/clinical-note/draft`, { sections: { 'chief-complaint': '发热、咳嗽 3 天。' } }),
+  'POST /api/encounters/:encounterId/clinical-note/revisions': ({ encounterId }) =>
+    request('POST', `/api/encounters/${encounterId}/clinical-note/revisions`, {
+      sections: {
+        'chief-complaint': '发热、咳嗽 3 天。',
+        'present-illness': '患者述三天前起病。',
+        'past-history': '',
+        findings: '',
+        assessment: '',
+        plan: '',
+      },
+    }),
   'POST /api/encounters/:encounterId/consultation/doctor-turns': ({ encounterId }) =>
     request('POST', `/api/encounters/${encounterId}/consultation/doctor-turns`, { clientTurnId: 'probe', text: '晚上睡得好吗？' }),
   'POST /api/encounters/:encounterId/abandonment': ({ encounterId }) =>

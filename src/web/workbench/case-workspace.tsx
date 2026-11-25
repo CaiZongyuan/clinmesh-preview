@@ -7,6 +7,7 @@ import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { startEncounter } from '../api'
 import { AbandonEncounter } from './abandon-encounter'
+import { ClinicalNoteTab } from './clinical-note/clinical-note-tab'
 import { formatClock, SEX_LABEL, VISIT_KIND_LABEL } from './format'
 import { InvestigationsTab } from './investigations/investigations-tab'
 import { useInvestigations } from './investigations/use-investigations'
@@ -89,7 +90,7 @@ function EncounterWorkspace({ encounter, examinations }: { encounter: EncounterV
           </TabsTab>
         </TabsList>
         <TabsPanel value="note" className={paneBody}>
-          <UpcomingTab>病历记录</UpcomingTab>
+          <ClinicalNoteTab encounter={encounter} />
         </TabsPanel>
         <TabsPanel value="investigations" className={paneBody}>
           <InvestigationsTab state={investigations} writable={encounter.status === 'active'} />

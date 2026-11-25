@@ -2,6 +2,7 @@ import type { EncounterView } from '../../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { CaseWorkspace } from './case-workspace'
+import { ClinicalNoteProvider } from './clinical-note/clinical-note-context'
 import { CLINIC_DEPARTMENT, QueueRail } from './queue-rail'
 import { WorkbenchColumns } from './workbench-columns'
 
@@ -27,10 +28,12 @@ export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; foc
       </header>
       <div className="flex min-h-0 flex-1 gap-2 py-3 pr-4 pl-3">
         <QueueRail queue={queue} focusedCaseId={focusedCaseId} />
-        <WorkbenchColumns
-          caseWorkspace={<CaseWorkspace focus={focus} />}
-          encounter={focus.kind === 'encounter' ? focus : undefined}
-        />
+        <ClinicalNoteProvider encounter={focus.kind === 'encounter' ? focus.encounter : null}>
+          <WorkbenchColumns
+            caseWorkspace={<CaseWorkspace focus={focus} />}
+            encounter={focus.kind === 'encounter' ? focus : undefined}
+          />
+        </ClinicalNoteProvider>
       </div>
     </div>
   )

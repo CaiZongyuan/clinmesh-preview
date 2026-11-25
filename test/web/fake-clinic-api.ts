@@ -4,6 +4,8 @@ import type { EncounterError, EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
 import { BODY_SYSTEM_NAME, isBodySystem, type PhysicalExaminationView } from '../../src/shared/physical-examination'
 import { goldenCase1Chart, goldenCase1Findings, goldenCase1QueueEntry } from '../fixtures/golden-case-1'
+import type { ClinicalNoteView } from '../../src/shared/clinical-note'
+import { createFakeClinicalNotes } from './fake-clinical-note'
 import { createFakeInvestigations, fakeCatalog } from './fake-investigations'
 
 const STATUS: Record<EncounterError['code'], number> = {
@@ -25,6 +27,7 @@ const STATUS: Record<EncounterError['code'], number> = {
   'consultation-turn-not-found': 404,
   'patient-turn-pending': 409,
   'patient-turn-not-retryable': 409,
+  'clinical-note-incomplete': 422,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })
@@ -79,6 +82,7 @@ export function createFakeClinicApi({
   encounters = [] as EncounterView[],
   examinations = {} as Record<string, PhysicalExaminationView[]>,
   consultations = {} as Record<string, ConsultationTurn[]>,
+  notes = {} as Record<string, ClinicalNoteView>,
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
   const turns = new Map(Object.entries(consultations).map(([id, list]) => [id, [...list]]))
@@ -87,6 +91,7 @@ export function createFakeClinicApi({
   const sockets = new Set<FakePatientSocket>()
   const active = () => state.encounters.find((e) => e.status === 'active') ?? null
   const investigations = createFakeInvestigations(refuse)
+  const clinicalNotes = createFakeClinicalNotes(refuse, notes)
   const turnsOf = (encounterId: string) => turns.get(encounterId) ?? turns.set(encounterId, []).get(encounterId)!
   const pendingOf = (encounterId: string) => turnsOf(encounterId).find((t) => t.status === 'pending')
 
@@ -182,7 +187,7 @@ export function createFakeClinicApi({
       return Response.json({ encounter })
     }
     const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined
-    const answered = action && investigations.handle(method, encounter, action, body)
+    const answered = action && (investigations.handle(method, encounter, action, body) ?? clinicalNotes.handle(method, encounter, action, body))
     if (answered) return answered
     if (method === 'GET' && action === 'consultation') return Response.json({ turns: turnsOf(encounter.encounterId) })
     if (method === 'POST' && action === 'consultation/doctor-turns') return askPatient(encounter, JSON.parse(String(init?.body)))
@@ -253,6 +258,7 @@ export function createFakeClinicApi({
     WebSocket: FakePatientSocket,
     encounters: () => state.encounters,
     investigations: investigations.list,
+    note: clinicalNotes.note,
     turns: (encounterId: string) => turnsOf(encounterId),
     amendReport: investigations.amend,
     // Another browser tab starting an Encounter behind this one's back.
