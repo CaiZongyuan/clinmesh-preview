@@ -29,7 +29,7 @@ Each lesson is a rule this repo learned from a recurring problem. Apply them whe
 - **Effects**: derive values during render and act in event handlers; reserve `useEffect` for syncing with an external system (socket, timer, media device).
 - **Comments**: let names, types and tests carry the intent; comment only a constraint the code cannot show (a platform quirk, a spec quote).
 - **Tests**: prove each invariant test by removing its guard once and watching it go red; a test that stays green is hollow.
-- **Case Truth**: read it only through `caseTruth(caseId, caseVersion)`, and Report content only through `releasedReports(encounter, now)`; keep ids and doctor-visible data diagnosis-neutral.
+- **Case Truth**: read it only through `caseTruth(caseId, caseVersion)`, and Report content only through `releasedReports(encounter, now)`; keep ids and doctor-visible data diagnosis-neutral. Scope test exemptions for runtime metrics to numeric fields on the matching message type.
 - **Schema**: append one migration to `src/worker/workspace-schema.ts`; when a rebase collides, renumber yours and reset local `.wrangler/state`.
 - **Worktrees**: push a WIP commit as soon as the branch exists; keep temp files and PR bodies in the worktree's `.scratch/issue-<N>/`.
 

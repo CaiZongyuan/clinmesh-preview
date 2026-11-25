@@ -105,13 +105,14 @@ describe('voice capture (ADR-0003: the doctor speaks, the pipeline asks the Simu
       { speaker: 'doctor', source: 'voice', text: '您哪里不舒服？' },
       { speaker: 'patient', source: 'simulated', text: '医生，我这三天一直发烧，咳嗽得厉害。' },
     ])
-    // The measured latency can equal a hidden clinical number purely by timing.
-    const messages = socket.messages.map((message) =>
-      message.type === 'clinmesh.voice-turn' && typeof message.latencyMs === 'number'
-        ? { ...message, latencyMs: null }
-        : message,
-    )
-    expectNoCaseTruth('voice socket', JSON.stringify(messages))
+    // Wall-clock timings can coincide with hidden clinical values.
+    const timingKeys = new Set(['turnTotalMs', 'speechStartToFirstInterimMs', 'speechStartToFinalMs', 'afterTranscribeMs'])
+    const body = JSON.stringify(socket.messages, function (this: { type?: string }, key, value: unknown) {
+      const timing = (this.type === 'clinmesh.voice-turn' && key === 'latencyMs') ||
+        (this.type === 'turn_metrics' && timingKeys.has(key))
+      return timing && typeof value === 'number' ? null : value
+    })
+    expectNoCaseTruth('voice socket', body)
     expect(tasks).toHaveLength(1)
     expect(tasks[0].actions.map((a) => a.header.action)).toEqual(['run-task', 'finish-task'])
   })
