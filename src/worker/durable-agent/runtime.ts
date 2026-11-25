@@ -666,9 +666,10 @@ export class DurableAgentRuntime {
     const now = Date.now()
     const published: LoggedEvent[] = []
     if (outcome.status === 'done') {
+      // The run's input message already carries `external_ref`; the reply needs no origin of its own.
       this.sql.exec(
-        `INSERT INTO agent_message (run_id, role, content_json, origin_ref, state, created_at) VALUES (?, 'assistant', ?, ?, ?, ?)`,
-        run.runId, JSON.stringify({ role: 'assistant', content: outcome.text } satisfies LlmMessage), run.externalRef,
+        `INSERT INTO agent_message (run_id, role, content_json, origin_ref, state, created_at) VALUES (?, 'assistant', ?, NULL, ?, ?)`,
+        run.runId, JSON.stringify({ role: 'assistant', content: outcome.text } satisfies LlmMessage),
         this.messageState(), now,
       )
     }

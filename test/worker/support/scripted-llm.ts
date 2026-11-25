@@ -62,6 +62,18 @@ export class ScriptedLlm implements LlmProvider {
     }
   }
 
+  // Streams a thinking fragment, asks for one tool call, and ends the step.
+  toolCall(name: string, argsJson: Record<string, unknown> | string, { thinking }: { thinking?: string } = {}): this {
+    const argumentsJson = typeof argsJson === 'string' ? argsJson : JSON.stringify(argsJson)
+    this.scripts.push(async function* () {
+      if (thinking) yield { type: 'thinking.delta', text: thinking }
+      yield { type: 'tool_call', id: `call-${Math.random().toString(36).slice(2, 8)}`, name, argumentsJson }
+      yield { type: 'usage', input: 50, output: 10 }
+      yield { type: 'done', finishReason: 'tool_calls' }
+    })
+    return this
+  }
+
   // Never answers; ends only when the agent aborts the call (its deadline).
   hang(partial = ''): this {
     this.scripts.push(async function* (signal) {

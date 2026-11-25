@@ -2,6 +2,7 @@ import type { AgentEvent, ClientMessage, ServerMessage } from '../../src/shared/
 import type { ConsultationTurn, PatientTurnFailure } from '../../src/shared/consultation'
 import type { EncounterError, EncounterView } from '../../src/shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../src/shared/golden-case-queue'
+import type { CopilotSnapshot, CopilotTurn } from '../../src/shared/copilot-turn'
 import { BODY_SYSTEM_NAME, isBodySystem, type PhysicalExaminationView } from '../../src/shared/physical-examination'
 import { goldenCase1Chart, goldenCase1Findings, goldenCase1QueueEntry } from '../fixtures/golden-case-1'
 import type { ClinicalNoteView } from '../../src/shared/clinical-note'
@@ -96,6 +97,20 @@ export function createFakeClinicApi({
   diagnoses = {} as Record<string, DiagnosisView>,
 } = {}) {
   const state = { encounters: [...encounters], examinations: structuredClone(examinations), started: 0, runs: 0 }
+  // The Clinical Copilot's session per Encounter, with its own event log for its socket.
+  const copilotSessions = new Map<string, { turns: CopilotTurn[]; seq: number; model: CopilotSnapshot['model']; events: { seq: number; event: AgentEvent }[] }>()
+  const copilotOf = (encounterId: string) =>
+    copilotSessions.get(encounterId) ??
+    copilotSessions
+      .set(encounterId, {
+        turns: [],
+        seq: 0,
+        model: { model: 'glm-5.3-flash', effort: 'low', defaultModel: 'glm-5.3-flash', defaultEffort: 'low', options: ['glm-5.3-flash', 'glm-5.3'] },
+        events: [],
+      })
+      .get(encounterId)!
+  const copilotSockets = new Set<FakeCopilotSocket>()
+  let copilotPromptCount = 0
   const turns = new Map(Object.entries(consultations).map(([id, list]) => [id, [...list]]))
   const log: { encounterId: string; seq: number; event: AgentEvent }[] = []
   const runOf = new Map<string, string>()
@@ -214,6 +229,81 @@ export function createFakeClinicApi({
     if (method === 'POST' && action === 'consultation/doctor-turns') return askPatient(encounter, JSON.parse(String(init?.body)))
     const retried = action?.match(/^consultation\/patient-turns\/([^/]+)\/retry$/)
     if (method === 'POST' && retried) return retry(encounter, retried[1])
+    if (action === 'copilot' || (method === 'POST' && action === 'copilot/prompts')) {
+      const session = copilotOf(encounter.encounterId)
+      if (method === 'GET') return Response.json({ snapshot: copilotSnapshotOf(encounter.encounterId) })
+      if (method === 'POST') {
+        const kind = (body as { mode?: string })?.mode
+        if (kind !== 'queue' && kind !== 'steer') throw new Error('fake copilot prompts need mode')
+        const text = (body as { text: string }).text
+        if (session.turns.some((t) => t.status === 'running')) {
+          if (kind === 'steer') {
+            const running = session.turns.find((t) => t.status === 'running')!
+            running.steers.push({ text, sentAt: new Date().toISOString(), read: false })
+            emitCopilot(encounter.encounterId, { type: 'steer.added', runId: running.turnId })
+            return Response.json({ kind: 'steer', turnId: running.turnId }, { status: 201 })
+          }
+          return refuse('copilot-busy', '临床助手正在运行或有排队任务，请停止或等待后再重新发送。')
+        }
+        const turnId = `copilot-turn-${++copilotPromptCount}`
+        session.turns.push({
+          turnId,
+          trigger: { kind: 'doctor', text, mentions: ((body as { mentions?: CopilotTurn['trigger']['mentions'] })?.mentions ?? []) },
+          status: 'running',
+          failure: null,
+          stopReason: null,
+          steps: [{ kind: 'think', text: '', state: 'running' }],
+          steers: [],
+          reply: '',
+          usage: null,
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+          feedback: null,
+          superseded: false,
+        })
+        emitCopilot(encounter.encounterId, { type: 'run.started', runId: turnId, ref: null })
+        emitCopilot(encounter.encounterId, { type: 'step.started', runId: turnId, step: 0 })
+        return Response.json({ kind: 'run', turnId }, { status: 201 })
+      }
+    }
+    const stopped = action === 'copilot/stop'
+    if (stopped) {
+      const session = copilotOf(encounter.encounterId)
+      if (encounter.status !== 'active') return refuse('encounter-not-active', '该就诊已结束，写入已冻结。')
+      const running = session.turns.find((t) => t.status === 'running')
+      if (!running) return Response.json({ stoppedTurnId: null })
+      finishCopilotTurn(encounter.encounterId, running.turnId, 'stopped')
+      return Response.json({ stoppedTurnId: running.turnId })
+    }
+    const resend = action?.match(/^copilot\/turns\/([^/]+)\/resend$/)
+    if (method === 'POST' && resend) {
+      const session = copilotOf(encounter.encounterId)
+      const original = session.turns.find((t) => t.turnId === resend[1])
+      if (!original) return refuse('copilot-turn-not-found', `找不到临床助手轮 ${resend[1]}`)
+      const text = (body as { text: string }).text
+      const turnId = `copilot-turn-${++copilotPromptCount}`
+      original.superseded = true
+      session.turns.push({ ...structuredClone(original), turnId, trigger: { ...original.trigger, text }, status: 'running', reply: '', startedAt: new Date().toISOString(), steers: [] })
+      emitCopilot(encounter.encounterId, { type: 'run.started', runId: turnId, ref: null })
+      return Response.json({ kind: 'run', turnId }, { status: 201 })
+    }
+    const feedback = action?.match(/^copilot\/turns\/([^/]+)\/feedback$/)
+    if (method === 'POST' && feedback) {
+      const session = copilotOf(encounter.encounterId)
+      const turn = session.turns.find((t) => t.turnId === feedback[1])
+      if (!turn) return refuse('copilot-turn-not-found', `找不到临床助手轮 ${feedback[1]}`)
+      turn.feedback = (body as { value: CopilotTurn['feedback'] }).value
+      emitCopilot(encounter.encounterId, { type: 'session.updated', runId: null })
+      return Response.json({ ok: null })
+    }
+    if (method === 'POST' && action === 'copilot/config') {
+      const session = copilotOf(encounter.encounterId)
+      const { model, effort } = body as { model: string; effort: CopilotSnapshot['model']['effort'] }
+      if (!session.model.options.includes(model)) return refuse('invalid-request', `模型 ${model} 不在可选列表中`)
+      session.model = { ...session.model, model, effort }
+      emitCopilot(encounter.encounterId, { type: 'session.updated', runId: null })
+      return Response.json(session.model)
+    }
     throw new Error(`The fake clinic API has no route for ${method} ${path}`)
   }
 
@@ -274,9 +364,97 @@ export function createFakeClinicApi({
 
   const pendingRun = (encounterId: string) => runOf.get(pendingOf(encounterId)!.turnId)!
 
+  function copilotSnapshotOf(encounterId: string): CopilotSnapshot {
+    const session = copilotOf(encounterId)
+    return {
+      seq: session.events.at(-1)?.seq ?? 0,
+      checkpoint: 0,
+      model: session.model,
+      turns: structuredClone(session.turns),
+      queued: [],
+    }
+  }
+
+  function emitCopilot(encounterId: string, event: AgentEvent) {
+    const session = copilotOf(encounterId)
+    const entry = { seq: ++session.seq, event }
+    session.events.push(entry)
+    for (const socket of copilotSockets) if (socket.encounterId === encounterId) socket.deliver(entry)
+  }
+
+  function finishCopilotTurn(encounterId: string, turnId: string, status: 'done' | 'stopped', reply = '', steps: CopilotTurn['steps'] = []) {
+    const session = copilotOf(encounterId)
+    const turn = session.turns.find((t) => t.turnId === turnId)!
+    Object.assign(turn, {
+      status,
+      reply,
+      steps: steps.length > 0 ? steps : turn.steps.map((step) => ({ ...step, state: status === 'done' ? ('done' as const) : ('stopped' as const) })),
+      usage: status === 'done' ? { in: 320, out: 96 } : null,
+      finishedAt: new Date().toISOString(),
+      stopReason: status === 'stopped' ? ('stop-requested' as const) : null,
+    })
+    emitCopilot(encounterId, { type: 'step.finished', runId: turnId, step: 0 })
+    emitCopilot(encounterId, { type: 'run.finished', runId: turnId, ref: null, status, error: null })
+  }
+
+  class FakeCopilotSocket {
+    onopen: (() => void) | null = null
+    onmessage: ((event: { data: string }) => void) | null = null
+    onclose: (() => void) | null = null
+    readonly encounterId: string
+    private ready = false
+    private closed = false
+
+    constructor(url: string) {
+      this.encounterId = decodeURIComponent(url.match(/\/api\/encounters\/([^/]+)\/copilot\/socket$/)![1])
+      copilotSockets.add(this)
+      setTimeout(() => !this.closed && this.onopen?.(), 0)
+    }
+
+    send(data: string) {
+      const message = JSON.parse(data) as ClientMessage
+      if (message.type !== 'hello') return
+      const session = copilotOf(this.encounterId)
+      for (const entry of session.events) if (entry.seq > message.afterSeq) this.push({ type: 'event', seq: entry.seq, event: entry.event })
+      this.push({ type: 'replay.done', seq: session.events.at(-1)?.seq ?? 0 })
+      this.ready = true
+    }
+
+    deliver(entry: { seq: number; event: AgentEvent }) {
+      if (this.ready) this.push({ type: 'event', seq: entry.seq, event: entry.event })
+    }
+
+    close() {
+      if (this.closed) return
+      this.closed = true
+      copilotSockets.delete(this)
+      setTimeout(() => this.onclose?.(), 0)
+    }
+
+    private push(message: ServerMessage) {
+      setTimeout(() => !this.closed && this.onmessage?.({ data: JSON.stringify(message) }), 0)
+    }
+  }
+
+  // One constructor for both sockets: it dispatches on the path and forwards to the real fake.
+  class FakeSocket {
+    private readonly inner: FakePatientSocket | FakeCopilotSocket
+    constructor(url: string) {
+      this.inner = url.endsWith('/copilot/socket') ? new FakeCopilotSocket(url) : new FakePatientSocket(url)
+    }
+    get onopen() { return this.inner.onopen }
+    set onopen(value) { this.inner.onopen = value }
+    get onmessage() { return this.inner.onmessage }
+    set onmessage(value) { this.inner.onmessage = value }
+    get onclose() { return this.inner.onclose }
+    set onclose(value) { this.inner.onclose = value }
+    send(data: string) { this.inner.send(data) }
+    close() { this.inner.close() }
+  }
+
   return {
     handle,
-    WebSocket: FakePatientSocket,
+    WebSocket: FakeSocket as unknown as typeof FakePatientSocket,
     encounters: () => state.encounters,
     investigations: investigations.list,
     note: clinicalNotes.note,
@@ -287,6 +465,28 @@ export function createFakeClinicApi({
     // Another browser tab starting an Encounter behind this one's back.
     startElsewhere: (caseId: string) => startEncounter(caseId),
     openSockets: () => [...sockets],
+    copilot: {
+      snapshot: copilotSnapshotOf,
+      // The assistant answers the running turn: a think step, a tool read, then the reply.
+      answer: (encounterId: string, text: string) => {
+        const session = copilotOf(encounterId)
+        const running = session.turns.find((t) => t.status === 'running')
+        if (!running) throw new Error('No copilot turn is running')
+        const steps = [
+          { kind: 'think' as const, text: '先看问诊记录。', state: 'done' as const, dur: 0.4 },
+          { kind: 'tool' as const, callId: 'call-1', name: 'read_encounter_state', subject: '就诊状态', args: {}, result: '{}', state: 'ok' as const, dur: 0.2 },
+        ]
+        emitCopilot(encounterId, { type: 'text.delta', runId: running.turnId, text })
+        finishCopilotTurn(encounterId, running.turnId, 'done', text, steps)
+      },
+      stop: (encounterId: string) => {
+        const running = copilotOf(encounterId).turns.find((t) => t.status === 'running')
+        if (!running) throw new Error('No copilot turn is running')
+        finishCopilotTurn(encounterId, running.turnId, 'stopped')
+      },
+      // A network drop: every socket closes, and the page has to reconnect.
+      dropConnections: () => [...copilotSockets].forEach((socket) => socket.close()),
+    },
     patient: {
       stream: (encounterId: string, text: string) => emit(encounterId, { type: 'text.delta', runId: pendingRun(encounterId), text }),
       answer: (encounterId: string, text: string) => {

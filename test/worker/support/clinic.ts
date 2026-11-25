@@ -82,3 +82,67 @@ export async function openPatientSocket(encounterId: string, afterSeq = 0): Prom
 
 export const eventsOf = (messages: ServerMessage[]) =>
   messages.flatMap((m) => (m.type === 'event' ? [{ seq: m.seq, ...m.event }] : []))
+
+// The Clinical Copilot's socket speaks the same wire protocol as the patient's.
+export async function openCopilotSocket(encounterId: string, afterSeq = 0): Promise<PatientSocket> {
+  const response = await api(`/api/encounters/${encounterId}/copilot/socket`, { headers: { upgrade: 'websocket' } })
+  expect(response.status).toBe(101)
+  const ws = response.webSocket!
+  const raw: string[] = []
+  const messages: ServerMessage[] = []
+  ws.addEventListener('message', (event) => {
+    raw.push(String(event.data))
+    messages.push(JSON.parse(String(event.data)) as ServerMessage)
+  })
+  ws.accept()
+  ws.send(JSON.stringify({ type: 'hello', afterSeq }))
+  const socket: PatientSocket = {
+    messages,
+    raw,
+    waitFor: (predicate, timeout = 4000) =>
+      vi.waitFor(() => expect(predicate(messages), JSON.stringify(messages)).toBe(true), { timeout, interval: 10 }),
+    close: () => ws.close(),
+  }
+  await socket.waitFor((m) => m.some((x) => x.type === 'replay.done' || x.type === 'resync'))
+  return socket
+}
+
+import type { CopilotSnapshot, CopilotTurn } from '../../../src/shared/copilot-turn'
+
+export const promptCopilot = (
+  encounterId: string,
+  clientPromptId: string,
+  text: string,
+  mode: 'queue' | 'steer' = 'queue',
+  mentions: unknown[] = [],
+) => send('POST', `/api/encounters/${encounterId}/copilot/prompts`, { clientPromptId, text, mentions, mode })
+
+export async function copilotSnapshot(encounterId: string): Promise<CopilotSnapshot> {
+  const response = await api(`/api/encounters/${encounterId}/copilot`)
+  expect(response.status, await response.clone().text()).toBe(200)
+  return ((await response.json()) as { snapshot: CopilotSnapshot }).snapshot
+}
+
+// Waits until no Copilot turn is running or queued, as the browser does after socket events.
+export async function copilotSettled(encounterId: string, timeout = 6000): Promise<CopilotSnapshot> {
+  return vi.waitFor(
+    async () => {
+      const snapshot = await copilotSnapshot(encounterId)
+      expect(snapshot.turns.every((t: CopilotTurn) => t.status !== 'running')).toBe(true)
+      expect(snapshot.queued).toEqual([])
+      return snapshot
+    },
+    { timeout, interval: 20 },
+  )
+}
+
+export async function promptAndSettle(
+  encounterId: string,
+  clientPromptId: string,
+  text: string,
+  mode: 'queue' | 'steer' = 'queue',
+): Promise<{ response: Response; snapshot: CopilotSnapshot }> {
+  const response = await promptCopilot(encounterId, clientPromptId, text, mode)
+  if (!response.ok) return { response, snapshot: await copilotSnapshot(encounterId) }
+  return { response, snapshot: await copilotSettled(encounterId) }
+}

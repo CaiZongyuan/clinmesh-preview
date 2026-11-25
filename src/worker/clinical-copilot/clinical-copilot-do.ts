@@ -74,7 +74,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     })
   }
 
-  snapshot(encounterId: string): CopilotSnapshot {
+  async snapshot(encounterId: string): Promise<CopilotSnapshot> {
     this.bind(encounterId)
     return { seq: this.runtime.events.latestSeq(), model: this.modelSetting(), ...readSession(this.ctx.storage.sql) }
   }

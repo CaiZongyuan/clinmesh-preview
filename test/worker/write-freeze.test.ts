@@ -31,6 +31,7 @@ interface FrozenEncounter {
   pendingInvestigationId: string
   releasedReportId: string
   failedPatientTurnId: string
+  copilotTurnId: string
 }
 
 // Every command that writes to one Encounter, each with a request that would succeed on an active Encounter.
@@ -67,6 +68,15 @@ const writeProbes: Record<string, (frozen: FrozenEncounter) => Promise<Response>
     }),
   'POST /api/encounters/:encounterId/no-medication': ({ encounterId }) =>
     send('POST', `/api/encounters/${encounterId}/no-medication`),
+  'POST /api/encounters/:encounterId/copilot/prompts': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/copilot/prompts`, { clientPromptId: 'frozen', text: '总结一下', mentions: [], mode: 'queue' }),
+  'POST /api/encounters/:encounterId/copilot/turns/:turnId/resend': ({ encounterId, copilotTurnId }) =>
+    send('POST', `/api/encounters/${encounterId}/copilot/turns/${copilotTurnId}/resend`, { clientPromptId: 'frozen-resend', text: '再总结一次', mentions: [] }),
+  'POST /api/encounters/:encounterId/copilot/stop': ({ encounterId }) => send('POST', `/api/encounters/${encounterId}/copilot/stop`),
+  'POST /api/encounters/:encounterId/copilot/turns/:turnId/feedback': ({ encounterId, copilotTurnId }) =>
+    send('POST', `/api/encounters/${encounterId}/copilot/turns/${copilotTurnId}/feedback`, { value: 'up' }),
+  'POST /api/encounters/:encounterId/copilot/config': ({ encounterId }) =>
+    send('POST', `/api/encounters/${encounterId}/copilot/config`, { model: 'glm-5.3-flash', effort: 'low' }),
 }
 
 // An Encounter with one released, unacknowledged Report, one pending Investigation, one failed patient reply
@@ -89,12 +99,17 @@ async function frozenEncounter(): Promise<FrozenEncounter> {
     ],
   })
   await send('POST', `/api/encounters/${encounterId}/diagnosis/reopen`)
+  const prompted = await send('POST', `/api/encounters/${encounterId}/copilot/prompts`, {
+    clientPromptId: 'frozen-setup', text: '总结一下', mentions: [], mode: 'queue',
+  })
+  const copilotTurnId = prompted.ok ? ((await prompted.json()) as { turnId: string }).turnId : 'missing'
   await send('POST', `/api/encounters/${encounterId}/abandonment`)
   return {
     encounterId,
     pendingInvestigationId: crp.investigationId,
     releasedReportId: cbcReleased.reports[0].reportId,
     failedPatientTurnId: failed.turnId,
+    copilotTurnId,
   }
 }
 

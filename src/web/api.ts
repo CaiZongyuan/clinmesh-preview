@@ -175,3 +175,59 @@ export function openPatientSocket(encounterId: string): WebSocket {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/patient/socket`)
 }
+
+// The Clinical Copilot: commands go over HTTP, its events stream over its socket.
+import type {
+  CopilotConfigRequest,
+  CopilotFeedback,
+  CopilotModelSetting,
+  CopilotMention,
+  CopilotPromptMode,
+  CopilotPromptResponse,
+  CopilotResendRequest,
+  CopilotSnapshot,
+  CopilotStopResponse,
+} from '../shared/copilot-turn'
+
+export async function fetchCopilotSnapshot(encounterId: string): Promise<CopilotSnapshot> {
+  return (await request<{ snapshot: CopilotSnapshot }>(`${encounterPath(encounterId)}/copilot`)).snapshot
+}
+
+export function promptCopilot(
+  encounterId: string,
+  clientPromptId: string,
+  text: string,
+  mentions: CopilotMention[],
+  mode: CopilotPromptMode,
+): Promise<CopilotPromptResponse> {
+  return request<CopilotPromptResponse>(`${encounterPath(encounterId)}/copilot/prompts`, post({ clientPromptId, text, mentions, mode }))
+}
+
+export function resendCopilotPrompt(
+  encounterId: string,
+  turnId: string,
+  clientPromptId: string,
+  text: string,
+  mentions: CopilotMention[],
+): Promise<CopilotPromptResponse> {
+  const path = `${encounterPath(encounterId)}/copilot/turns/${encodeURIComponent(turnId)}/resend`
+  return request<CopilotPromptResponse>(path, post({ clientPromptId, text, mentions } satisfies CopilotResendRequest))
+}
+
+export function stopCopilot(encounterId: string): Promise<CopilotStopResponse> {
+  return request<CopilotStopResponse>(`${encounterPath(encounterId)}/copilot/stop`, post())
+}
+
+export function setCopilotFeedback(encounterId: string, turnId: string, value: CopilotFeedback | null): Promise<null> {
+  const path = `${encounterPath(encounterId)}/copilot/turns/${encodeURIComponent(turnId)}/feedback`
+  return request<null>(path, post({ value }))
+}
+
+export function configureCopilot(encounterId: string, config: CopilotConfigRequest): Promise<CopilotModelSetting> {
+  return request<CopilotModelSetting>(`${encounterPath(encounterId)}/copilot/config`, post(config))
+}
+
+export function openCopilotSocket(encounterId: string): WebSocket {
+  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/copilot/socket`)
+}

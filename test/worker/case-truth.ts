@@ -26,9 +26,10 @@ const DIAGNOSIS_TOKENS: Record<string, readonly string[]> = {
 const CATALOG_IDENTITY_KEYS = new Set(['id', 'catalogItem', 'codings', 'system', 'version', 'unit', 'unitDisplay', 'referenceRange'])
 
 // Response keys whose numbers count or order things rather than describe the patient: sequence and turn
-// positions, token usage, durations, the queue number, age and versions. Hidden-value checks skip them;
+// positions, token usage (its whole subtree, so the usage line's `in`/`out` are skipped only there),
+// durations, the queue number, age and versions. Hidden-value checks skip them;
 // fragment and diagnosis-word checks still read the whole body.
-const STRUCTURAL_KEYS = new Set(['seq', 'index', 'count', 'usage', 'in', 'out', 'queueNumber', 'age', 'attempt', 'version'])
+const STRUCTURAL_KEYS = new Set(['seq', 'index', 'count', 'usage', 'queueNumber', 'age', 'attempt', 'version'])
 const isStructuralKey = (key: string) => STRUCTURAL_KEYS.has(key) || key.startsWith('duration')
 
 const MIN_FRAGMENT_LENGTH = 4
