@@ -9,8 +9,8 @@ import {
   ScrollAreaViewport,
 } from '@ui-sdk/react/scroll-area'
 import { SegmentedControl, SegmentedControlIndicator, SegmentedControlItem } from '@ui-sdk/react/segmented-control'
-import { ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, MicIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon, RotateCcwIcon, Volume2Icon, VolumeXIcon } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
+import { ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, MicIcon, MicOffIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon, RotateCcwIcon, Volume2Icon, VolumeXIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
 import { MAX_QUESTION_LENGTH, type ConsultationTurn, type PatientTurnFailure, type Recognizer } from '../../shared/consultation'
 import type { EncounterView } from '../../shared/encounter'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
@@ -19,9 +19,9 @@ import { QuoteMenu, quotedTurn } from './clinical-note/quote-menu'
 import { formatClockSeconds } from './format'
 import { badge, iconButton, pane, paneHeader } from './pane-styles'
 import { PhysicalExaminationPanel, PhysicalExaminationRow } from './physical-examination'
-import { useVoiceCapture } from '../voice/use-voice-capture'
+import { useVoiceCapture, type VoiceCaptureController } from '../voice/use-voice-capture'
 import { usePatientSpeech } from '../voice/use-patient-speech'
-import { VoiceBar } from './voice-bar'
+import { useVoiceKeys, VoiceBar } from './voice-bar'
 
 export interface EncounterContext {
   encounter: EncounterView
@@ -68,18 +68,64 @@ const RECOGNIZER_LABEL: Record<Recognizer, string> = {
   'web-speech': '网页识别',
 }
 
+interface ConsultationPaneProps {
+  encounter?: EncounterContext
+  consultation: Consultation
+  collapsed: boolean
+  onToggle: () => void
+}
+
+export function ConsultationPane({ encounter, consultation, collapsed, onToggle }: ConsultationPaneProps) {
+  const active = encounter?.encounter.status === 'active'
+  const liveEncounterId = active ? encounter.encounter.encounterId : null
+  const speech = usePatientSpeech(liveEncounterId, consultation)
+  const voice = useVoiceCapture(liveEncounterId, consultation.accept, speech.interrupt)
+  const holdButton = useRef<HTMLButtonElement>(null)
+  const toggleButton = useRef<HTMLButtonElement>(null)
+  const restoreFocus = useRef(false)
+  useVoiceKeys(voice, active, holdButton)
+
+  const toggle = () => {
+    restoreFocus.current = true
+    onToggle()
+  }
+
+  useEffect(() => {
+    if (!restoreFocus.current) return
+    restoreFocus.current = false
+    toggleButton.current?.focus()
+  }, [collapsed])
+
+  if (collapsed) {
+    return <ConsultationStrip consultation={consultation} voice={voice} toggleButton={toggleButton} onExpand={toggle} />
+  }
+  return (
+    <ConsultationColumn
+      encounter={encounter}
+      consultation={consultation}
+      voice={voice}
+      speech={speech}
+      holdButton={holdButton}
+      toggleButton={toggleButton}
+      onCollapse={toggle}
+    />
+  )
+}
+
 interface ColumnProps {
   encounter?: EncounterContext
   consultation: Consultation
+  voice: VoiceCaptureController
+  speech: ReturnType<typeof usePatientSpeech>
+  holdButton: RefObject<HTMLButtonElement | null>
+  toggleButton: RefObject<HTMLButtonElement | null>
   onCollapse: () => void
 }
 
-export function ConsultationColumn({ encounter: context, consultation, onCollapse }: ColumnProps) {
+function ConsultationColumn({ encounter: context, consultation, voice, speech, holdButton, toggleButton, onCollapse }: ColumnProps) {
   const [filter, setFilter] = useState<TranscriptFilter>('all')
   const encounter = context?.encounter
   const liveEncounterId = encounter?.status === 'active' ? encounter.encounterId : null
-  const speech = usePatientSpeech(liveEncounterId, consultation)
-  const voice = useVoiceCapture(liveEncounterId, consultation.accept, speech.interrupt)
   const visible = transcriptOf(consultation.turns, context?.examinations ?? []).filter(
     (entry) => filter === 'all' || entry.channel === filter,
   )
@@ -93,7 +139,7 @@ export function ConsultationColumn({ encounter: context, consultation, onCollaps
             {encounter ? `模拟患者 · ${encounter.patient.name} · ` : ''}只按版本固定的 Patient Persona 应答
           </p>
         </div>
-        <Button aria-label="收起问诊记录" className={iconButton} onClick={onCollapse}>
+        <Button ref={toggleButton} aria-label="收起问诊记录" className={iconButton} onClick={onCollapse}>
           <PanelLeftCloseIcon aria-hidden="true" size={16} />
         </Button>
       </div>
@@ -181,7 +227,7 @@ export function ConsultationColumn({ encounter: context, consultation, onCollaps
           </ScrollArea>
           <div className="flex flex-none flex-col gap-2 border-t px-3.5 py-2">
             <PhysicalExaminationPanel encounter={encounter} examinations={context.examinations} />
-            <VoiceBar encounter={encounter} voice={voice} />
+            <VoiceBar encounter={encounter} voice={voice} holdButton={holdButton} />
             <QuestionComposer encounter={encounter} consultation={consultation} />
           </div>
         </>
@@ -401,16 +447,31 @@ function QuestionComposer({ encounter, consultation }: { encounter: EncounterVie
   )
 }
 
-export function ConsultationStrip({ consultation, onExpand }: { consultation: Consultation; onExpand: () => void }) {
+function ConsultationStrip({ consultation, voice, toggleButton, onExpand }: {
+  consultation: Consultation
+  voice: VoiceCaptureController
+  toggleButton: RefObject<HTMLButtonElement | null>
+  onExpand: () => void
+}) {
   const questions = consultation.turns.filter((turn) => turn.speaker === 'doctor').length
   return (
     <section aria-label="问诊记录（已收起）" className={`${pane} items-center gap-2.5 py-2`}>
-      <Button aria-label="展开问诊记录" className={iconButton} onClick={onExpand}>
+      <Button ref={toggleButton} aria-label="展开问诊记录" className={iconButton} onClick={onExpand}>
         <PanelLeftOpenIcon aria-hidden="true" size={16} />
       </Button>
       <span aria-hidden="true" className="text-[13px] tracking-[2px] text-muted-foreground [writing-mode:vertical-rl]">
         问诊记录{questions > 0 ? ` · ${questions} 问` : ''}
       </span>
+      {voice.capturing && !voice.paused && (
+        <span role="status" aria-label="问诊正在录音" title="问诊正在录音" className="text-destructive">
+          <MicIcon aria-hidden="true" size={15} />
+        </span>
+      )}
+      {voice.paused && (
+        <span role="status" aria-label="问诊麦克风已暂停" title="问诊麦克风已暂停" className="text-warning">
+          <MicOffIcon aria-hidden="true" size={15} />
+        </span>
+      )}
       {consultation.pending && (
         <span role="status" aria-label="等待患者回答" title="等待患者回答" className="text-muted-foreground">
           <TypingDots />

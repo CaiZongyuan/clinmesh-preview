@@ -26,7 +26,7 @@ import { awaitingAcknowledgement, latestReport, type Investigations } from './us
 type CategoryFilter = InvestigationCategory | 'all'
 
 const FILTERS: { value: CategoryFilter; label: string }[] = [
-  { value: 'all', label: '全部' },
+  { value: 'all', label: '全部检查' },
   ...(Object.entries(CATEGORY_LABEL) as [InvestigationCategory, string][]).map(([value, label]) => ({ value, label })),
 ]
 

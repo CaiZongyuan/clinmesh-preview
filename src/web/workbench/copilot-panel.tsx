@@ -72,7 +72,7 @@ const TOOL_STATE_TEXT: Record<string, string> = {
 
 const seconds = (dur: number) => `${dur.toFixed(1)}s`
 
-function ToolStep({ step }: { step: Extract<CopilotStep, { kind: 'tool' }> }) {
+function ToolStep({ step, label }: { step: Extract<CopilotStep, { kind: 'tool' }>; label: string }) {
   const status = TOOL_STATE_TEXT[step.state]
   return (
     <li className="flex items-center gap-1.5 text-xs text-muted-foreground" data-tool-state={step.state}>
@@ -80,7 +80,7 @@ function ToolStep({ step }: { step: Extract<CopilotStep, { kind: 'tool' }> }) {
       <span>{step.subject}</span>
       {status && <span className="text-info">{status}</span>}
       <details className="min-w-0">
-        <summary className="cursor-pointer list-none underline decoration-dotted">详情</summary>
+        <summary aria-label={`详情 · ${label} · ${step.subject}`} className="cursor-pointer list-none underline decoration-dotted">详情</summary>
         <pre className="copilot-args overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-[11px]">
           {JSON.stringify(step.args)}
           {'\n────\n'}
@@ -92,7 +92,7 @@ function ToolStep({ step }: { step: Extract<CopilotStep, { kind: 'tool' }> }) {
   )
 }
 
-function TurnSteps({ turn }: { turn: CopilotTurn }) {
+function TurnSteps({ turn, label }: { turn: CopilotTurn; label: string }) {
   const [open, setOpen] = useState(false)
   const steps = turn.steps
   if (steps.length === 0) return null
@@ -103,6 +103,7 @@ function TurnSteps({ turn }: { turn: CopilotTurn }) {
         type="button"
         className="flex items-center gap-1 text-xs text-muted-foreground"
         aria-expanded={open}
+        aria-label={`思考与读取（${steps.length}） · ${label}`}
         onClick={() => setOpen((value) => !value)}
       >
         <Icon aria-hidden="true" size={13} />
@@ -117,7 +118,7 @@ function TurnSteps({ turn }: { turn: CopilotTurn }) {
                 {step.dur !== undefined && <span> · {seconds(step.dur)}</span>}
               </li>
             ) : (
-              <ToolStep key={step.callId} step={step} />
+              <ToolStep key={step.callId} step={step} label={`${label}步骤 ${i + 1}`} />
             ),
           )}
         </ol>
@@ -126,7 +127,7 @@ function TurnSteps({ turn }: { turn: CopilotTurn }) {
   )
 }
 
-function TurnActions({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot: CopilotSession; onEdit: (text: string) => void }) {
+function TurnActions({ turn, label, copilot, onEdit }: { turn: CopilotTurn; label: string; copilot: CopilotSession; onEdit: (text: string) => void }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -137,20 +138,20 @@ function TurnActions({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot: Co
   }
   return (
     <div className="flex items-center gap-0.5 text-muted-foreground">
-      <Button aria-label="复制回答" title="复制回答" className={iconButton} onClick={() => void copy()}>
+      <Button aria-label={`复制回答 · ${label}`} title="复制回答" className={iconButton} onClick={() => void copy()}>
         <CopyIcon aria-hidden="true" size={14} />
       </Button>
       {copied && <span className="text-[11px]">已复制</span>}
       {turn.status === 'done' && (
         <>
-          <Button aria-label="重新生成" title="重新生成" className={iconButton} onClick={() => void copilot.resend(turn.turnId, turn.trigger.text, turn.trigger.mentions)}>
+          <Button aria-label={`重新生成 · ${label}`} title="重新生成" className={iconButton} onClick={() => void copilot.resend(turn.turnId, turn.trigger.text, turn.trigger.mentions)}>
             <RefreshCwIcon aria-hidden="true" size={14} />
           </Button>
-          <Button aria-label="编辑并重发" title="编辑并重发" className={iconButton} onClick={() => onEdit(turn.trigger.text)}>
+          <Button aria-label={`编辑并重发 · ${label}`} title="编辑并重发" className={iconButton} onClick={() => onEdit(turn.trigger.text)}>
             <PencilIcon aria-hidden="true" size={14} />
           </Button>
           <Button
-            aria-label="有帮助"
+            aria-label={`有帮助 · ${label}`}
             aria-pressed={turn.feedback === 'up'}
             className={iconButton}
             onClick={() => void copilot.setFeedback(turn.turnId, turn.feedback === 'up' ? null : 'up')}
@@ -158,7 +159,7 @@ function TurnActions({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot: Co
             <ThumbsUpIcon aria-hidden="true" size={14} />
           </Button>
           <Button
-            aria-label="没有帮助"
+            aria-label={`没有帮助 · ${label}`}
             aria-pressed={turn.feedback === 'down'}
             className={iconButton}
             onClick={() => void copilot.setFeedback(turn.turnId, turn.feedback === 'down' ? null : 'down')}
@@ -171,8 +172,9 @@ function TurnActions({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot: Co
   )
 }
 
-function CopilotTurnView({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot: CopilotSession; onEdit: (text: string) => void }) {
+function CopilotTurnView({ turn, index, copilot, onEdit }: { turn: CopilotTurn; index: number; copilot: CopilotSession; onEdit: (text: string) => void }) {
   const live = turn.status === 'running'
+  const label = `第 ${index + 1} 轮`
   return (
     <li className="flex flex-col gap-1.5 border-b pb-3" data-turn-status={turn.status} data-turn-superseded={turn.superseded || undefined}>
       <p className="m-0 text-xs text-muted-foreground">
@@ -189,7 +191,7 @@ function CopilotTurnView({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot
           ))}
         </p>
       )}
-      <TurnSteps turn={turn} />
+      <TurnSteps turn={turn} label={label} />
       <NoteSuggestions runId={turn.turnId} />
       {turn.steers.length > 0 && (
         <p className="m-0 text-xs text-muted-foreground">
@@ -210,7 +212,7 @@ function CopilotTurnView({ turn, copilot, onEdit }: { turn: CopilotTurn; copilot
           <span className="text-[11px] text-muted-foreground">
             {turn.usage ? `用量 输入 ${turn.usage.in} · 输出 ${turn.usage.out}` : ''}
           </span>
-          <TurnActions turn={turn} copilot={copilot} onEdit={onEdit} />
+          <TurnActions turn={turn} label={label} copilot={copilot} onEdit={onEdit} />
         </div>
       )}
     </li>
@@ -340,17 +342,6 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
   const [contextOpen, setContextOpen] = useState(false)
   const input = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => {
-    const focus = (event: globalThis.KeyboardEvent) => {
-      if (event.ctrlKey && event.key === '/') {
-        event.preventDefault()
-        input.current?.focus()
-      }
-    }
-    window.addEventListener('keydown', focus)
-    return () => window.removeEventListener('keydown', focus)
-  }, [])
-
   const submit = async () => {
     const text = draft.trim()
     if (!text || text.length > MAX_PROMPT_LENGTH) return
@@ -371,12 +362,9 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Escape' && !menuOpen) {
-      if (editing) {
-        onCancelEdit()
-        return
-      }
-      if (copilot.busy) void copilot.stop()
+    if (event.key === 'Escape' && (editing || menuOpen)) {
+      event.stopPropagation()
+      if (editing && !menuOpen) onCancelEdit()
       return
     }
     if (event.key === 'Enter' && !event.shiftKey && !menuOpen) {
@@ -458,6 +446,7 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
         <TriggerMenuInput
           ref={input}
           aria-label="问临床助手"
+          data-copilot-composer
           placeholder={copilot.busy ? '助手正在运行：发送可指引（steer）或排队' : '输入问题，/ 唤出命令，@ 引用报告与查体'}
           value={draft}
           maxLength={MAX_PROMPT_LENGTH}
@@ -607,8 +596,8 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
               <p className="m-0 pb-3 text-[13px] text-muted-foreground">向临床助手提问，它会用只读工具查阅本次就诊的资料后回答。</p>
             ) : (
               <ol className="m-0 flex list-none flex-col gap-3 pb-3">
-                {copilot.turns.map((turn) => (
-                  <CopilotTurnView key={turn.turnId} turn={turn} copilot={copilot} onEdit={(text) => { setDraft(text); setEditing(turn.turnId) }} />
+                {copilot.turns.map((turn, index) => (
+                  <CopilotTurnView key={turn.turnId} index={index} turn={turn} copilot={copilot} onEdit={(text) => { setDraft(text); setEditing(turn.turnId) }} />
                 ))}
               </ol>
             )}

@@ -10,6 +10,7 @@ import { ClinicalNoteProvider, useClinicalNoteContext } from './clinical-note/cl
 import { CLINIC_DEPARTMENT, QueueRail } from './queue-rail'
 import { WorkbenchColumns } from './workbench-columns'
 import { WorkbenchAppearance, workbenchPreferences } from './workbench-preferences'
+import { WorkbenchShortcuts, workbenchOwnsShortcut } from './workbench-shortcuts'
 
 export type CaseFocus =
   | { kind: 'none' }
@@ -22,6 +23,7 @@ const HIDDEN_KEY = 'clinmesh.copilot.hidden'
 // hidden. Hiding is remembered in localStorage; private browsing that blocks storage just forgets it.
 export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; focus: CaseFocus }) {
   const copilotButton = useRef<HTMLButtonElement>(null)
+  const focusAfterOpening = useRef(false)
   const encounter = focus.kind === 'encounter' ? focus.encounter : undefined
   const [copilotHidden, setCopilotHidden] = useState(() => {
     try {
@@ -37,6 +39,34 @@ export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; foc
     } catch {}
   }, [copilotHidden])
   const copilot = useCopilot(encounter?.encounterId ?? null, encounter?.status, copilotHidden)
+  const { busy, stop } = copilot
+  const activeEncounter = encounter?.status === 'active'
+  useEffect(() => {
+    if (copilotHidden || !focusAfterOpening.current) return
+    focusAfterOpening.current = false
+    document.querySelector<HTMLElement>('[data-copilot-composer]')?.focus()
+  }, [copilotHidden])
+
+  useEffect(() => {
+    if (!activeEncounter) return
+    const onKey = (event: KeyboardEvent) => {
+      if (!workbenchOwnsShortcut(event)) return
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === '/') {
+        event.preventDefault()
+        if (copilotHidden) {
+          focusAfterOpening.current = true
+          setCopilotHidden(false)
+        } else {
+          document.querySelector<HTMLElement>('[data-copilot-composer]')?.focus()
+        }
+      } else if (event.key === 'Escape' && busy) {
+        event.preventDefault()
+        void stop()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [activeEncounter, busy, copilotHidden, stop])
   const focusedCaseId =
     focus.kind === 'encounter' ? focus.encounter.caseId : focus.kind === 'registration' ? focus.entry.caseId : undefined
   return (
@@ -52,22 +82,23 @@ export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; foc
             </span>
             <h1 className="m-0 text-[15px] font-semibold whitespace-nowrap">ClinMesh 门诊工作台</h1>
             <span className="truncate text-xs text-muted-foreground">{CLINIC_DEPARTMENT}</span>
-            <CopilotTopBar copilot={copilot} hidden={copilotHidden} buttonRef={copilotButton} onShow={() => setCopilotHidden(false)} />
+            <CopilotTopBar copilot={copilot} active={activeEncounter} hidden={copilotHidden} buttonRef={copilotButton} onShow={() => setCopilotHidden(false)} />
+            <WorkbenchShortcuts />
             <WorkbenchAppearance />
           </header>
           <div className="workbench-body flex min-h-0 flex-1 gap-2 py-3 pr-4 pl-3">
             <QueueRail queue={queue} focusedCaseId={focusedCaseId} />
-              <WorkbenchColumns
-                caseWorkspace={<CaseWorkspace focus={focus} />}
-                encounter={focus.kind === 'encounter' ? focus : undefined}
-                copilot={copilot}
-                copilotHidden={copilotHidden}
-                examinations={focus.kind === 'encounter' ? focus.examinations : []}
-                onHideCopilot={() => {
-                  setCopilotHidden(true)
-                  copilotButton.current?.focus()
-                }}
-              />
+            <WorkbenchColumns
+              caseWorkspace={<CaseWorkspace focus={focus} />}
+              encounter={focus.kind === 'encounter' ? focus : undefined}
+              copilot={copilot}
+              copilotHidden={copilotHidden}
+              examinations={focus.kind === 'encounter' ? focus.examinations : []}
+              onHideCopilot={() => {
+                setCopilotHidden(true)
+                copilotButton.current?.focus()
+              }}
+            />
           </div>
         </div>
       </Preferences>
@@ -75,26 +106,38 @@ export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; foc
   )
 }
 
-function CopilotTopBar({ copilot, hidden, buttonRef, onShow }: {
-  copilot: CopilotSession; hidden: boolean; buttonRef: Ref<HTMLButtonElement>; onShow: () => void
+function CopilotTopBar({ copilot, active, hidden, buttonRef, onShow }: {
+  copilot: CopilotSession; active: boolean; hidden: boolean; buttonRef: Ref<HTMLButtonElement>; onShow: () => void
 }) {
   const note = useClinicalNoteContext()
   const pending = note?.writable ? note.assistance.suggestions.length : 0
+  const running = copilot.turns.find((turn) => turn.status === 'running')
+  const currentTool = running?.steps.find((step) => step.kind === 'tool' && step.state === 'running')
+  const activity = currentTool?.kind === 'tool' ? currentTool.subject : running?.trigger.text
+  const connection = !active ? '未接诊' : copilot.stream === 'live' ? '就绪' :
+    copilot.stream === 'reconnecting' ? '重连中' : '连接中'
   return (
-        <button
-          ref={buttonRef}
-          type="button"
-          className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-          onClick={() => onShow()}
-        >
-          <span aria-hidden="true">✦</span>
-          <span>临床助手{copilot.busy ? ' · 运行中' : ''}{copilot.countdown ? ' · 倒计时' : ''}{pending ? ` · ${pending} 项待确认` : ''}</span>
-          {hidden && copilot.unread > 0 && (
-            <span className="inline-flex size-4 items-center justify-center rounded-full bg-info text-[10px] font-semibold text-info-foreground">
-              {copilot.unread > 99 ? '99+' : copilot.unread}
-            </span>
-          )}
-          <span className="sr-only">{hidden ? '显示临床助手面板' : '临床助手面板已显示'}</span>
-        </button>
+    <button
+      ref={buttonRef}
+      aria-keyshortcuts="Control+/ Meta+/"
+      type="button"
+      className="ml-auto flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+      onClick={() => onShow()}
+    >
+      <span aria-hidden="true">✦</span>
+      <span aria-live="polite" className="truncate">
+        临床助手 · {connection}
+        {copilot.busy && (activity ? ` · 运行中：${activity}` : ' · 运行中')}
+        {copilot.countdown && ' · 倒计时'}
+        {copilot.pendingAnalysis.length > 0 && ` · ${copilot.pendingAnalysis.length} 个事件待分析`}
+        {pending > 0 && ` · ${pending} 项待确认`}
+      </span>
+      {hidden && copilot.unread > 0 && (
+        <span className="inline-flex size-4 items-center justify-center rounded-full bg-info text-[10px] font-semibold text-info-foreground">
+          {copilot.unread > 99 ? '99+' : copilot.unread}
+        </span>
+      )}
+      <span className="sr-only">{hidden ? '显示临床助手面板' : '临床助手面板已显示'}</span>
+    </button>
   )
 }

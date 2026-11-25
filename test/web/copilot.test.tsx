@@ -49,6 +49,7 @@ describe('Clinical Copilot panel', () => {
     act(() => api.copilot.analysisEvent(ENCOUNTER, { ref: 'examination:vitals', text: '查体完成：生命体征' }))
     const run = await screen.findByRole('button', { name: '立即分析' })
     await waitFor(() => expect(run).toBeEnabled())
+    expect(screen.getByRole('button', { name: /临床助手.*就绪.*1 个事件待分析/ })).toBeInTheDocument()
     expect(screen.getByText('查体完成：生命体征')).toBeInTheDocument()
     await user.click(run)
     await waitFor(() => expect(run).toBeDisabled())
@@ -69,7 +70,7 @@ describe('Clinical Copilot panel', () => {
     await waitFor(() => expect(log).toHaveTextContent('上呼吸道感染'))
     // Steps render folded; expanding them shows the think text and the tool read with its args and result.
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '思考与读取（2）' }))
+    await user.click(screen.getByRole('button', { name: /^思考与读取（2） · 第 1 轮$/ }))
     expect(log).toHaveTextContent('先看问诊记录。')
     expect(log).toHaveTextContent('就诊状态')
     expect(log).toHaveTextContent('详情')
@@ -88,7 +89,9 @@ describe('Clinical Copilot panel', () => {
 
     await ask('再来一轮')
     expect(screen.getByRole('button', { name: '停止当前轮' })).toBeInTheDocument()
-    await user.type(await composer(), '{Escape}')
+    const note = await screen.findByRole('textbox', { name: '主诉' })
+    note.focus()
+    await user.keyboard('{Escape}')
     await waitFor(() => expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/stop`)).toHaveLength(2))
     expect(api.copilot.snapshot(ENCOUNTER).turns.every((turn) => turn.status !== 'running')).toBe(true)
   })
@@ -99,10 +102,10 @@ describe('Clinical Copilot panel', () => {
     api.copilot.answer(ENCOUNTER, '小结如下。')
     const user = userEvent.setup()
     await waitFor(() => expect(screen.getByRole('log', { name: '临床助手会话' })).toHaveTextContent('小结如下。'))
-    await user.click(screen.getByRole('button', { name: '有帮助' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '有帮助' })).toHaveAttribute('aria-pressed', 'true'))
+    await user.click(screen.getByRole('button', { name: /^有帮助 · 第 1 轮$/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /^有帮助 · 第 1 轮$/ })).toHaveAttribute('aria-pressed', 'true'))
     expect(api.copilot.snapshot(ENCOUNTER).turns[0].feedback).toBe('up')
-    await user.click(screen.getByRole('button', { name: '有帮助' }))
+    await user.click(screen.getByRole('button', { name: /^有帮助 · 第 1 轮$/ }))
     await waitFor(() => expect(api.copilot.snapshot(ENCOUNTER).turns[0].feedback).toBeNull())
   })
 
@@ -112,7 +115,7 @@ describe('Clinical Copilot panel', () => {
     api.copilot.answer(ENCOUNTER, '第一版回答。')
     const user = userEvent.setup()
     await waitFor(() => expect(screen.getByRole('log', { name: '临床助手会话' })).toHaveTextContent('第一版回答。'))
-    await user.click(screen.getByRole('button', { name: '编辑并重发' }))
+    await user.click(screen.getByRole('button', { name: /^编辑并重发 · 第 1 轮$/ }))
     expect(await composer()).toHaveValue('第一版问题')
     await user.type(await composer(), '（改）')
     await user.click(screen.getByRole('button', { name: '发送给临床助手' }))
@@ -145,9 +148,11 @@ describe('Clinical Copilot panel', () => {
     expect(JSON.stringify(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/prompts`)[0]?.[1]?.body)).toContain('/鉴别诊断')
     expect(input).toHaveValue('')
 
-    input.focus()
+    await user.click(screen.getByRole('button', { name: '隐藏临床助手' }))
+    expect(screen.queryByRole('textbox', { name: '问临床助手' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /显示临床助手面板/ })).toHaveFocus()
     fireEvent.keyDown(window, { key: '/', ctrlKey: true })
-    expect(input).toHaveFocus()
+    expect(await composer()).toHaveFocus()
   })
 
   it('hides to a top-bar status with an unread count, and comes back', { timeout: 20_000 }, async () => {
@@ -157,14 +162,14 @@ describe('Clinical Copilot panel', () => {
     await user.click(screen.getByRole('button', { name: '隐藏临床助手' }))
     expect(screen.queryByRole('complementary', { name: '临床助手' })).not.toBeInTheDocument()
 
-    // The turn finishes while the panel is hidden: the top bar shows its status and one unread item.
+    const chip = screen.getByRole('button', { name: /显示临床助手面板/ })
+    expect(chip).toHaveTextContent('运行中：躲起来的提问')
     api.copilot.answer(ENCOUNTER, '回答，但面板被隐藏。')
-    const chip = await screen.findByText('临床助手 · 运行中', undefined, { timeout: 6000 })
-    await waitFor(() => expect(chip.parentElement).toHaveTextContent('1'), { timeout: 6000 })
+    await waitFor(() => expect(chip).toHaveTextContent('1'), { timeout: 6000 })
 
     await user.click(chip)
     expect(await panel()).toHaveTextContent('回答，但面板被隐藏。')
-    await waitFor(() => expect(chip.parentElement).not.toHaveTextContent('1'))
+    await waitFor(() => expect(chip).not.toHaveTextContent('1'))
   })
 
   it('reveals streamed text while deltas are arriving continuously', async () => {

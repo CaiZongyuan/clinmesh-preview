@@ -218,7 +218,7 @@ describe('No Medication', () => {
 
     // The recorded conclusion stands in 处方 mode too: no new draft can be started against it
     // (the server's both-ways refusal is pinned at the Worker seam).
-    await user.click(screen.getByRole('button', { name: '处方' }))
+    await user.click(screen.getByRole('button', { name: '使用处方' }))
     expect(screen.queryByRole('combobox', { name: '搜索药品（本院药房）' })).not.toBeInTheDocument()
     expect(api.prescriptions('encounter-1').lines).toEqual([])
   })

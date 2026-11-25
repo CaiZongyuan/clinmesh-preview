@@ -181,9 +181,8 @@
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
     scroll-behavior: auto !important;
   }
 }
@@ -237,6 +236,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   [data-agent-note-updated], [data-agent-draft] textarea { animation: none; }
+  :is(input, textarea, [contenteditable="true"]) { caret-animation: manual; }
 }
 
 

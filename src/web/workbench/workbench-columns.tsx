@@ -8,7 +8,7 @@ import {
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
 import { useConsultation } from '../consultation/use-consultation'
 import type { CopilotSession } from '../copilot/use-copilot'
-import { ConsultationColumn, ConsultationStrip, type EncounterContext } from './consultation-column'
+import { ConsultationPane, type EncounterContext } from './consultation-column'
 import { CopilotPanel } from './copilot-panel'
 
 const WORKBENCH_LAYOUT_KEY = 'clinmesh.workbench.pixel-widths'
@@ -147,17 +147,14 @@ export function WorkbenchColumns({
         collapsible
         collapsedSize={CONSULTATION.collapsedSize}
       >
-        {({ collapsed }) =>
-          collapsed ? (
-            <ConsultationStrip consultation={consultation} onExpand={() => setConsultationCollapsed(false)} />
-          ) : (
-            <ConsultationColumn
-              encounter={encounter}
-              consultation={consultation}
-              onCollapse={() => setConsultationCollapsed(true)}
-            />
-          )
-        }
+        {({ collapsed }) => (
+          <ConsultationPane
+            encounter={encounter}
+            consultation={consultation}
+            collapsed={collapsed}
+            onToggle={() => setConsultationCollapsed(!collapsed)}
+          />
+        )}
       </ResizablePanel>
       <ResizableHandle
         aria-label="调整问诊记录宽度"

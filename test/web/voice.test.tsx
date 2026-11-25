@@ -338,15 +338,20 @@ describe('voice capture', () => {
     expect(voiceConnections).not.toHaveBeenCalled()
   })
 
-  it('M toggles hands-free listening and Space is push-to-talk', { timeout: 20_000 }, async () => {
+  it('M pauses and resumes listening and Space is push-to-talk', { timeout: 20_000 }, async () => {
     stubMicrophone()
     const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
     await column()
     await voiceBar()
 
-    fireEvent.keyDown(document, { code: 'KeyM' })
+    const user = userEvent.setup()
+    await user.click(within(await voiceBar()).getByRole('button', { name: '开始持续收音' }))
     await openVoiceSocket(api)
     fireEvent.keyDown(document, { code: 'KeyM' })
+    expect(screen.getByRole('status', { name: '麦克风已暂停' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { code: 'KeyM' })
+    expect(screen.queryByRole('status', { name: '麦克风已暂停' })).not.toBeInTheDocument()
+    await user.click(within(await voiceBar()).getByRole('button', { name: '停止持续收音' }))
     await waitFor(() => expect(api.voiceSockets()).toHaveLength(0))
 
     fireEvent.keyDown(document, { code: 'Space' })
@@ -361,4 +366,28 @@ describe('voice capture', () => {
     expect(socket.sent.filter((m) => m.type === 'clinmesh.commit')).toHaveLength(0)
     expect(screen.getByText(/按得太短/)).toBeInTheDocument()
   })
+
+  it('keeps the microphone and patient wait on the collapsed Consultation strip', async () => {
+    const mic = stubMicrophone()
+    const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
+    const user = userEvent.setup()
+    const input = await screen.findByRole('textbox', { name: '键入向患者的提问' })
+    await user.type(input, '今天为什么来就诊？')
+    await user.click(screen.getByRole('button', { name: '发送' }))
+    await user.click(within(await voiceBar()).getByRole('button', { name: '开始持续收音' }))
+    const socket = await openVoiceSocket(api)
+    await user.click(screen.getByRole('button', { name: '收起问诊记录' }))
+    const strip = await screen.findByRole('region', { name: '问诊记录（已收起）' })
+    expect(within(strip).getByRole('status', { name: '问诊正在录音' })).toBeInTheDocument()
+    expect(within(strip).getByRole('status', { name: '等待患者回答' })).toBeInTheDocument()
+    expect(api.voiceSockets()).toEqual([socket])
+    expect(mic.stopTrack).not.toHaveBeenCalled()
+    const expand = within(strip).getByRole('button', { name: '展开问诊记录' })
+    expect(expand).toHaveFocus()
+    await user.click(expand)
+    expect(screen.getByRole('button', { name: '收起问诊记录' })).toHaveFocus()
+    expect(screen.getByRole('button', { name: '停止持续收音' })).toBeInTheDocument()
+    expect(api.voiceSockets()).toEqual([socket])
+  })
+
 })

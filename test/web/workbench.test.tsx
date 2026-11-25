@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { createAgent } from '@ui-sdk/react/agent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAppRouter } from '../../src/web/router'
-import { createFakeClinicApi } from './fake-clinic-api'
+import { createFakeClinicApi, encounterFor } from './fake-clinic-api'
 
 const fetchStub = vi.fn<typeof fetch>()
 const agent = createAgent()
@@ -134,6 +134,30 @@ describe('outpatient workbench', () => {
     await user.click(within(font).getByRole('radio', { name: '标准' }))
     expect(document.documentElement).toHaveAttribute('data-theme', 'system')
     expect(document.documentElement).toHaveAttribute('data-font-scale', 'standard')
+  })
+
+  it('lists the implemented shortcuts and focuses the case tab selected by Alt plus its number', async () => {
+    const user = userEvent.setup()
+    fetchStub.mockImplementation(createFakeClinicApi({ encounters: [encounterFor()] }).handle)
+    render(<RouterProvider router={createAppRouter({
+      history: createMemoryHistory({ initialEntries: ['/encounters/encounter-1'] }),
+    })} />)
+    const trigger = await screen.findByRole('button', { name: '快捷键' })
+    await user.click(trigger)
+    const listing = await screen.findByRole('dialog', { name: '快捷键' })
+    expect(listing).toHaveTextContent('按住 Space')
+    expect(listing).toHaveTextContent('暂停或恢复收音')
+    expect(listing).toHaveTextContent('Alt + 1–4')
+    expect(listing).toHaveTextContent('Ctrl + /')
+    expect(listing).toHaveTextContent('Esc')
+    await user.keyboard('{Escape}')
+    const tabs = await screen.findByRole('tablist', { name: '病例页签' })
+    for (const [index, name] of ['病历记录', '检验检查', '诊断', '处方'].entries()) {
+      await user.keyboard(`{Alt>}${index + 1}{/Alt}`)
+      const selected = within(tabs).getByRole('tab', { name })
+      expect(selected).toHaveAttribute('aria-selected', 'true')
+      expect(selected).toHaveFocus()
+    }
   })
 
   it('remembers keyboard-set widths and a collapsed Consultation column across reloads', async () => {
