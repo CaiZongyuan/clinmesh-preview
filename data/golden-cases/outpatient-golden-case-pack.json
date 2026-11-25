@@ -760,8 +760,8 @@
               "version": "2026"
             },
             {
-              "code": "1558-6",
-              "display": "Fasting glucose [Mass/volume] of Serum or Plasma --6 hours post dose",
+              "code": "1508-0",
+              "display": "Glucose [Mass/volume] of Serum or Plasma",
               "system": "http://loinc.org",
               "version": "2.83"
             }
