@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CaseDebrief, CompletionGateId } from '../../src/shared/completion'
 import type { InvestigationsResponse } from '../../src/shared/investigation'
 import { WORKSPACE_NAME } from '../../src/worker/workspace-name'
-import { api, asked, send, settled, startEncounter, transcript } from './support/clinic'
+import { api, asked, copilotSettled, copilotSnapshot, promptCopilot, send, settled, startEncounter, transcript } from './support/clinic'
 import { installScripted } from './support/scripted-llm'
 
 const note = {
@@ -122,6 +122,27 @@ describe('Complete Encounter', () => {
     expect(await (await api(`${path(id)}/clinical-drafts`)).json()).toEqual({
       drafts: { investigations: ['crp'], prescriptions: [] },
     })
+  })
+
+  it('stops running and queued Copilot turns when the Encounter completes', async () => {
+    const id = await startEncounter()
+    await ready(id)
+    const llm = installScripted('copilot')
+    const gate = llm.gate('正在分析', '不应在完诊后发布')
+    try {
+      expect((await promptCopilot(id, 'running', '小结')).status).toBe(201)
+      await gate.reached
+      expect((await promptCopilot(id, 'queued', '另一条问题')).status).toBe(201)
+      expect((await copilotSnapshot(id)).queued).toHaveLength(1)
+      await write(id, '/completion')
+      const snapshot = await copilotSettled(id, 650)
+      expect(snapshot.turns.map((turn) => turn.status)).toEqual(['stopped'])
+      expect(snapshot.queued).toEqual([])
+      expect(snapshot.turns.every((turn) => !turn.reply.includes('不应在完诊后发布'))).toBe(true)
+      expect(llm.requests).toHaveLength(1)
+    } finally {
+      gate.release()
+    }
   })
 
   it('completes atomically, unlocks a read-only debrief and starts an independent replay', async () => {

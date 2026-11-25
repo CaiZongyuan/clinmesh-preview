@@ -127,6 +127,7 @@ export function usePrescriptions(encounter: EncounterView, drafts: ClinicalDraft
     add,
     edit,
     remove,
+    clearDraft: () => setDraft(() => []),
     issue,
     recordNoMed,
     drugOf,

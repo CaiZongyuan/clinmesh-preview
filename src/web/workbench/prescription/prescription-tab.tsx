@@ -102,6 +102,14 @@ export function PrescriptionTab({ encounter, state }: { encounter: EncounterView
             已确认无需用药 {formatClock(noMedication.recordedAt)}
           </p>
         )}
+        {noMedication && state.draft.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span>仍有 {state.draft.length} 项待处理处方草稿。</span>
+            <Button disabled={!writable} className="h-7 px-2.5 text-xs" onClick={state.clearDraft}>
+              丢弃处方草稿
+            </Button>
+          </div>
+        )}
         {lines.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">

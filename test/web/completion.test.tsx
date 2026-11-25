@@ -123,3 +123,27 @@ it('hydrates a saved Investigation draft and counts it until it is cleared', asy
     expect(await (await api.handle(`${path}/clinical-drafts`)).json()).toMatchObject({ drafts: { investigations: [] } })
   })
 })
+
+it('lets the doctor discard a saved prescription draft after recording No Medication', async () => {
+  const api = createFakeClinicApi({
+    encounters: [encounterFor()],
+    diagnoses: { [id]: { draft: [], revisions: [{
+      revisionId: 'dx-1', version: 1, seq: 1, practitionerId: 'demo-practitioner', confirmedAt: '2026-11-24T00:41:00.000Z',
+      entries: [{ code: 'I10', name: '原发性高血压', source: 'doctor', primary: true }],
+    }] } },
+  })
+  const entries = [{ drugId: 'doxycycline', dose: 1, route: '口服', frequency: 'BID', days: 7 }]
+  await api.handle(`${path}/prescriptions/draft`, { method: 'PUT', body: JSON.stringify({ entries }) })
+  await api.handle(`${path}/no-medication`, { method: 'POST' })
+  vi.stubGlobal('fetch', api.handle)
+  const router = createAppRouter({ history: createMemoryHistory({ initialEntries: [`/encounters/${id}`] }) })
+  render(<RouterProvider router={router} />)
+  const user = userEvent.setup()
+  await screen.findByRole('button', { name: '完诊清单 3/5' })
+  await user.click(screen.getByRole('tab', { name: '处方' }))
+  await user.click(screen.getByRole('button', { name: '丢弃处方草稿' }))
+  expect(await screen.findByRole('button', { name: '完诊清单 4/5' })).toBeInTheDocument()
+  await waitFor(async () => {
+    expect(await (await api.handle(`${path}/clinical-drafts`)).json()).toMatchObject({ drafts: { prescriptions: [] } })
+  })
+})
