@@ -557,10 +557,14 @@ describe('Connected Clinic S2-S8 independent verifier scenarios (B02-B20)', () =
     const drLin = await loginStaff(testEnv, 'dr.lin', 'demo-doctor-b-pass')
     const nurse = await loginStaff(testEnv, 'nurse.zhou', 'demo-nurse-n-pass')
 
-    // Cross-doctor isolation: Doctor B (no care_relationship with pat_01) cannot create a follow-up plan for Patient A (403).
+    // Cross-doctor isolation: Doctor B (no care_relationship with pat_01) cannot create a follow-up plan OR followup_group for Patient A (403).
     expect((await call(testEnv, 'POST', '/api/followup/plans', {
       token: drLin.token,
       body: { patientId: 'pat_01', title: '越权随访计划' },
+    })).status).toBe(403)
+    expect((await call(testEnv, 'POST', '/api/conversations', {
+      token: drLin.token,
+      body: { type: 'followup_group', title: '越权随访群', memberActorIds: ['actor_pat_01'] },
     })).status).toBe(403)
 
     // Doctor creates a new follow-up plan -> automatically provisions follow-up group with Patient A, Dr. Wang, Nurse N, and FollowUpAgent.

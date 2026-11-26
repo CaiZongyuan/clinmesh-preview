@@ -111,7 +111,7 @@ export class FollowUpAgentDO extends DurableObject<Env> {
           if (payload.status !== 'done') return true
           const ws = this.env.CLINIC_WORKSPACE.getByName(payload.workspaceName)
           const scope = await ws.agentVerifyGroupScope(payload.conversationId, payload.triggerActorId)
-          if (!scope.allowed) return true
+          if (!scope.allowed) return false
           const parts: MessagePart[] = []
           const text = payload.text.trim()
           if (text) parts.push({ type: 'text', text })

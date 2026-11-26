@@ -1010,20 +1010,25 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   async issueImCredentials(token: string): Promise<{ ok: true; credentials: ImCredentialsResponse } | Refusal> {
-    const auth = await this.authenticateBearer(token)
-    if (!auth.ok) return auth
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
     const freshToken = generateOpaqueToken()
-    const issued = this.ctx.storage.transactionSync(() =>
-      this.comm.getOrIssueImToken(auth.principal.actorId, auth.principal.imUid, freshToken, new Date().toISOString()),
-    )
+    const issued = this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      const imToken = this.comm.getOrIssueImToken(auth.principal.actorId, auth.principal.imUid, freshToken, now.toISOString())
+      return { ok: true as const, imUid: auth.principal.imUid, token: imToken.token }
+    })
+    if (!issued.ok) return issued
     const im = this.imAdapter()
-    await im.registerUserToken(auth.principal.imUid, issued.token).catch((error) => {
+    await im.registerUserToken(issued.imUid, issued.token).catch((error) => {
       console.error('WuKongIM registerUserToken failed', error)
     })
     return {
       ok: true,
       credentials: {
-        uid: auth.principal.imUid,
+        uid: issued.imUid,
         token: issued.token,
         wsUrl: im.wsUrl,
         mode: im.mode,
@@ -1376,7 +1381,9 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       const targetAgent =
         input.agentActorId ??
         (conv.conversation.type === 'patient_assistant' ? 'actor_agent_patient_svc' : 'actor_agent_followup')
-      const hasAgent = conv.conversation.members.some((m) => m.actorId === targetAgent && m.status === 'active')
+      const hasAgent = conv.conversation.members.some(
+        (m) => m.actorId === targetAgent && m.kind === 'agent' && m.status === 'active',
+      )
       if (!hasAgent) {
         return { ok: false as const, error: { code: 'conversation-member-forbidden' as const, message: '目标 Agent 不是当前会话的有效成员。' } }
       }
@@ -1573,12 +1580,17 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   async closeFollowupPlan(token: string, planId: string): Promise<{ ok: true; plan: FollowupPlanView } | Refusal> {
     await this.ensureClinicSeeded()
     const tokenHash = await sha256Hex(token)
-    return this.ctx.storage.transactionSync(() => {
+    const closed = this.ctx.storage.transactionSync(() => {
       const now = new Date()
       const auth = this.auth.authenticateSession(tokenHash, now)
       if (!auth.ok) return auth
       return this.followup.closePlan(auth.principal, planId, now.toISOString())
     })
+    if (closed.ok && closed.plan.conversationId) {
+      const doName = `${this.workspaceEpoch()}:${closed.plan.conversationId}:actor_agent_followup`
+      await this.env.FOLLOWUP_AGENT.getByName(doName).haltForRevocation().catch(() => {})
+    }
+    return closed
   }
 
   agentListDepartments(): DepartmentView[] {

@@ -298,6 +298,9 @@ export class CommunicationRepository {
       if (patientMembers.length !== 1 || !patientMembers[0].patient_id) {
         return refuse({ code: 'conversation-member-invalid', message: '随访群须绑定且仅绑定一名患者。' })
       }
+      if (!this.hasCareRelationship(patientMembers[0].patient_id, principal.staffId)) {
+        return refuse({ code: 'conversation-member-forbidden', message: '未与该患者建立授权医疗服务关系，无法创建随访群。' })
+      }
     }
 
     const isDirect =
