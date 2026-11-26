@@ -1,3 +1,4 @@
+import { isGreeting } from './clinical-copilot/ambient-drafts'
 import type { DraftAssistance, DraftAssistanceCommand } from '../shared/draft-assistance'
 import { DraftAssistanceRepository, type DraftAssistanceResult } from './draft-assistance-repository'
 import { DurableObject } from 'cloudflare:workers'
@@ -469,7 +470,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   // fire-and-forget, so a slow or absent Copilot never blocks settling the patient's reply.
   private triggerCopilot(encounterId: string, patientTurnId: string): void {
     const doctorTurn = this.consultation.doctorTurnOf(patientTurnId)
-    if (!doctorTurn) return
+    if (!doctorTurn || isGreeting(doctorTurn.text)) return
     this.notifyCopilot(encounterId, {
       ref: `consultation:${doctorTurn.turnId}`,
       text: `问诊定稿：${doctorTurn.text.slice(0, 80)}`,

@@ -1,21 +1,21 @@
-/*
-  Pinned snapshot of the reference repo's shadcn-style token set, see data/provenance.json.
-  Values are copied as-is; light and dark are folded into light-dark() so one declaration covers both themes.
-*/
 :root {
   color-scheme: light dark;
-  --font-ui: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --radius: 0.5rem;
+  --radius-surface: 8px;
+  --radius-control: 6px;
+  --radius-chip: 4px;
+  --cm-font-scale: 1;
 
   --background: light-dark(#f5f6f7, #151517);
   --foreground: light-dark(#0f1115, #f9fafb);
   --card: light-dark(#ffffff, #232324);
   --card-foreground: light-dark(#0f1115, #f9fafb);
-  --popover: light-dark(#ffffff, #353638);
+  --popover: light-dark(#ffffff, #2c2c2e);
   --popover-foreground: light-dark(#0f1115, #f9fafb);
   --primary: light-dark(#0f1115, #f9fafb);
-  --primary-foreground: light-dark(#ffffff, #151517);
+  --primary-foreground: light-dark(#ffffff, #0f1115);
   --secondary: light-dark(#ebeef2, #43454a);
   --secondary-foreground: light-dark(#0f1115, #f9fafb);
   --muted: light-dark(#f5f6f7, #2c2c2e);
@@ -23,30 +23,55 @@
   --accent: light-dark(#e9f0fc, #24344c);
   --accent-foreground: light-dark(#175fb8, #a7caff);
   --destructive: light-dark(#b4232c, #ff9b9b);
-  --destructive-foreground: light-dark(#ffffff, #151517);
+  --destructive-foreground: light-dark(#ffffff, #0f1115);
   --success: light-dark(#187442, #7ddba4);
-  --success-foreground: light-dark(#ffffff, #151517);
+  --success-foreground: light-dark(#ffffff, #0f1115);
   --warning: light-dark(#875b0c, #f4ca7b);
-  --warning-foreground: light-dark(#ffffff, #151517);
+  --warning-foreground: light-dark(#ffffff, #0f1115);
   /* info blue is reserved for Clinical Copilot involvement. */
   --info: light-dark(#1764c0, #8dbbff);
-  --info-foreground: light-dark(#ffffff, #151517);
+  --info-foreground: light-dark(#ffffff, #0f1115);
   --border: light-dark(#dce0e5, #ffffff1f);
+  --control-border: light-dark(#cdd4dd, #ffffff28);
   --input: light-dark(#7e8793, #848b96);
   --ring: var(--info);
-  --clinmesh-glow: 0 0 0 1.5px color-mix(in srgb, var(--info) 35%, transparent), 0 0 16px color-mix(in srgb, var(--info) 16%, transparent);
-}
+  --scrim: light-dark(rgb(15 17 21 / 0.34), rgb(0 0 0 / 0.56));
+  --shadow-xs: 0 1px 2px light-dark(rgb(15 17 21 / 0.05), rgb(0 0 0 / 0.28));
+  --shadow-popover:
+    0 1px 2px light-dark(rgb(15 17 21 / 0.06), rgb(0 0 0 / 0.36)),
+    0 10px 28px -6px light-dark(rgb(15 17 21 / 0.14), rgb(0 0 0 / 0.54));
+  --shadow-dialog:
+    0 4px 12px light-dark(rgb(15 17 21 / 0.08), rgb(0 0 0 / 0.42)),
+    0 20px 44px -10px light-dark(rgb(15 17 21 / 0.2), rgb(0 0 0 / 0.68));
+  --chart-system: light-dark(#64748b, #94a3b8);
+  --chart-tools: light-dark(#7c5cc4, #b39dff);
+  --chart-patient: light-dark(#0f8a8a, #4fd1c5);
+  --chart-consultation: var(--info);
+  --chart-his: light-dark(#b7791f, #f4ca7b);
+  --chart-replies: var(--success);
+  --chart-results: light-dark(#8a94a6, #aab4c3);
+  --specimen-cap-purple: light-dark(#7c3aed, #c084fc);
+  --specimen-cap-yellow: light-dark(#ca8a04, #facc15);
+  --specimen-cap-blue: light-dark(#0284c7, #38bdf8);
+  --specimen-cap-black: light-dark(#18181b, #e4e4e7);
+  --specimen-cap-amber: light-dark(#d97706, #fb923c);
+  --clinmesh-glow:
+    0 0 0 1px color-mix(in srgb, var(--info) 42%, transparent),
+    0 0 16px color-mix(in srgb, var(--info) 14%, transparent);
 
-:root[data-theme="light"] {
-  color-scheme: light;
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-snap: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur-enter: 180ms;
+  --dur-exit: 100ms;
+  --dur-move: 210ms;
+  --dur-tooltip-in: 140ms;
+  --dur-tooltip-out: 60ms;
 }
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-}
-
 
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
-:root[data-font-scale="large"] { zoom: 1.125; }
-:root[data-font-scale="extra-large"] { zoom: 1.25; }
+:root[data-font-scale="large"] { --cm-font-scale: 1.125; }
+:root[data-font-scale="extra-large"] { --cm-font-scale: 1.25; }

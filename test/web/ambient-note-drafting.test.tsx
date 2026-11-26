@@ -43,14 +43,24 @@ it('fills and saves an untouched Clinical Note section through createAgent, then
   const field = screen.getByRole('textbox', { name: '主诉' })
   expect(await writeSection(bridge, '主诉', '发热三天。')).toMatchObject({ ok: true })
   expect(field).toHaveValue('发热三天。')
-  expect(field.closest('[data-agent-draft]')).not.toBeNull()
-  expect(screen.getByText('助手', { exact: true })).toBeInTheDocument()
+  expect(field.closest('[data-agent-draft]')).toHaveTextContent('助手')
   await waitFor(() => expect(api.note(id).draft[0]).toMatchObject({ content: '发热三天。', lastEditedBy: 'assistant' }))
   await user.type(field, '咳嗽。')
   expect(field.closest('[data-agent-draft]')).toBeNull()
   expect(await readSnapshot(bridge)).toContainEqual(expect.objectContaining({
     label: '主诉', focused: true, doctorEdited: true,
   }))
+})
+
+it('lets the doctor withdraw an assistant-filled section and undo it without clearing another field', async () => {
+  const { bridge, user } = await openEncounter()
+  await writeSection(bridge, '主诉', '发热三天。')
+  await writeSection(bridge, '现病史', '夜间咳嗽。')
+  await user.click(screen.getByRole('button', { name: '撤回助手填写：主诉' }))
+  expect(screen.getByRole('textbox', { name: '主诉' })).toHaveValue('')
+  expect(screen.getByRole('textbox', { name: '现病史' })).toHaveValue('夜间咳嗽。')
+  await user.click(screen.getByRole('button', { name: '撤销撤回：主诉' }))
+  expect(screen.getByRole('textbox', { name: '主诉' })).toHaveValue('发热三天。')
 })
 
 it('creates a Suggestion for a focused or doctor-edited field and offers accept, dismiss and undo', async () => {

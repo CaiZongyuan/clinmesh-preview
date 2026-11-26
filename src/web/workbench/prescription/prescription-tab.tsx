@@ -33,9 +33,9 @@ import { formatClock } from '../format'
 import { badge } from '../pane-styles'
 import type { DraftLine, PrescriptionsState } from './use-prescriptions'
 
-const card = 'flex flex-col gap-3 rounded-lg border bg-card p-3'
-const numIn = 'h-8 w-16 rounded-md border bg-background px-2 text-[13px]'
-const select = 'h-8 rounded-md border bg-background px-2 text-[13px]'
+const card = 'flex flex-col gap-3 rounded-lg border bg-card p-3.5'
+const numIn = 'cm-native-input w-16 tabular-nums'
+const select = 'cm-native-select'
 
 export function PrescriptionTab({ encounter, state }: { encounter: EncounterView; state: PrescriptionsState }) {
   const [reason, setReason] = useState('')
@@ -71,7 +71,7 @@ export function PrescriptionTab({ encounter, state }: { encounter: EncounterView
             </h3>
             <span className="text-xs text-muted-foreground">须先确认诊断 · 青霉素类过敏为红线，不可越权</span>
           </div>
-          <div role="group" aria-label="用药结论" className="flex items-center gap-1">
+          <div role="group" aria-label="用药结论" className="cm-mode-switch">
             {(
               [
                 ['rx', '使用处方'],
@@ -80,8 +80,6 @@ export function PrescriptionTab({ encounter, state }: { encounter: EncounterView
             ).map(([value, label]) => (
               <Button
                 key={value}
-                data-variant={mode === value ? 'solid' : 'ghost'}
-                className="h-7 px-2.5 text-xs"
                 aria-pressed={mode === value}
                 disabled={!writable || state.busy}
                 onClick={() => setMode(value)}
@@ -189,28 +187,31 @@ export function PrescriptionTab({ encounter, state }: { encounter: EncounterView
               </div>
             )}
             {state.draft.length === 0 && lines.length === 0 && (
-              <p className="m-0 text-[13px] text-muted-foreground">暂无处方草稿。须先确认诊断才能开具。</p>
+              <p className="cm-empty-box m-0">暂无处方草稿。须先确认诊断才能开具。</p>
             )}
             <MedicationSearch state={state} disabled={!writable} onAdd={state.add} />
-            <ClinicalConfirmation
-              disabled={!writable || state.draft.length === 0 || !overrideAccepted}
-              title="正式开具处方"
-              intent="正式开具处方"
-              confirmLabel="正式开具"
-              onConfirm={issue}
-              trigger={<span>正式开具处方{state.draft.length > 1 && `（${state.draft.length} 项）`}</span>}
-            >
-              <ul className="m-0 list-disc pl-4">
-                {state.draft.map((line) => (
-                  <li key={line.drugId}>{lineSummary(line)}</li>
-                ))}
-              </ul>
-              {crossLines.length > 0 && (
-                <p className="mt-1.5 mb-0">
-                  已登记：{reason || '（未选原因）'}；说明：{note.trim() || '（未填写）'}
-                </p>
-              )}
-            </ClinicalConfirmation>
+            <div className="flex justify-end">
+              <ClinicalConfirmation
+                disabled={!writable || state.draft.length === 0 || !overrideAccepted}
+                triggerClassName="cm-primary-cta h-8 px-3.5 text-[13px]"
+                title="正式开具处方"
+                intent="正式开具处方"
+                confirmLabel="正式开具"
+                onConfirm={issue}
+                trigger={<span>正式开具处方{state.draft.length > 1 && `（${state.draft.length} 项）`}</span>}
+              >
+                <ul className="m-0 list-disc pl-4">
+                  {state.draft.map((line) => (
+                    <li key={line.drugId}>{lineSummary(line)}</li>
+                  ))}
+                </ul>
+                {crossLines.length > 0 && (
+                  <p className="mt-1.5 mb-0">
+                    已登记：{reason || '（未选原因）'}；说明：{note.trim() || '（未填写）'}
+                  </p>
+                )}
+              </ClinicalConfirmation>
+            </div>
           </>
         )}
         <NoteSuggestions module="prescriptions" />

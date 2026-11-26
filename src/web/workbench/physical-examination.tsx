@@ -9,6 +9,7 @@ import { performPhysicalExamination } from '../api'
 import { QuoteMenu } from './clinical-note/quote-menu'
 import { formatClock } from './format'
 import { badge } from './pane-styles'
+import { ActionTooltip } from './ui-tooltip'
 
 // An objective finding in the Consultation transcript, set apart from what the doctor and patient said.
 export function PhysicalExaminationRow({ examination }: { examination: PhysicalExaminationView }) {
@@ -68,21 +69,27 @@ export function PhysicalExaminationPanel({
       <CollapsiblePanel className="flex flex-wrap gap-1.5">
         {BODY_SYSTEMS.map((system) => {
           const done = examined.get(system)
-          return (
+          const disabled = Boolean(done) || encounter.status !== 'active'
+          const button = (
             <Button
               key={system}
               aria-label={`查体：${BODY_SYSTEM_NAME[system]}`}
-              title={done ? done.finding : '执行查体，结果来自病例真值'}
+              title={done ? done.finding : undefined}
               data-examined={done ? '' : undefined}
               data-agent-confirm={`为${encounter.patient.name}执行${BODY_SYSTEM_NAME[system]}查体：揭示该部位的客观发现并记入本次就诊`}
-              disabled={Boolean(done) || encounter.status !== 'active'}
+              disabled={disabled}
               onClick={() => examine(system)}
-              className="h-[26px] gap-1 rounded-full px-2.5 text-[12.5px] data-examined:bg-muted data-examined:text-muted-foreground"
+              className="exam-chip"
             >
               {done && <CheckIcon aria-hidden="true" size={12} />}
               {/* web.css squares an aria-labelled button whose only element child is an icon; text nodes don't count. */}
               <span>{BODY_SYSTEM_NAME[system]}</span>
             </Button>
+          )
+          return disabled ? button : (
+            <ActionTooltip key={system} label={`执行${BODY_SYSTEM_NAME[system]}查体`} side="top">
+              {button}
+            </ActionTooltip>
           )
         })}
         {error && (

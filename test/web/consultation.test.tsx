@@ -40,7 +40,7 @@ function openEncounter({ encounters = [encounterFor()], turns = [], examinations
 }
 
 const column = () => screen.findByRole('region', { name: '问诊记录' })
-const transcriptRows = () => within(screen.getByRole('list', { name: '问诊转写' })).getAllByRole('listitem')
+const transcriptRows = () => within(screen.getByRole('list', { name: '问诊转写' })).getAllByRole('listitem').filter((row) => row.parentElement?.getAttribute('aria-label') === '问诊转写')
 const live = () => waitFor(() => expect(screen.getByRole('status', { name: '模拟患者连接' })).toHaveTextContent('实时'))
 const requestsTo = (method: string, path: string) =>
   fetchStub.mock.calls.filter(([url, init]) => String(url) === path && (init?.method ?? 'GET') === method)
@@ -118,15 +118,19 @@ describe('typed Consultation', () => {
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: '键入向患者的提问' })).toHaveAttribute('placeholder', '键入问题（不经过语音）')
 
-    await userEvent.setup().click(within(failed).getByRole('button', { name: '重试这一问' }))
-    await waitFor(() => expect(transcriptRows()).toHaveLength(3))
+    const user = userEvent.setup()
+    await user.click(within(failed).getByRole('button', { name: '收起提示' }))
+    expect(within(failed).queryByText(/模拟患者回答超时/)).not.toBeInTheDocument()
+    await user.click(within(failed).getByRole('button', { name: '重试这一问' }))
+    await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('第 2 次作答'))
+    expect(transcriptRows()).toHaveLength(2)
     expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/consultation/patient-turns/${api.turns(ENCOUNTER)[1].turnId}/retry`)).toHaveLength(1)
     expect(transcriptRows()[1]).toHaveTextContent('模拟患者回答超时')
     expect(within(transcriptRows()[1]).queryByRole('button', { name: '重试这一问' })).not.toBeInTheDocument()
-    expect(transcriptRows()[2]).toHaveTextContent('第 2 次作答')
+    expect(transcriptRows()[1].querySelector('details')).not.toHaveAttribute('open')
 
     act(() => api.patient.answer(ENCOUNTER, '发烧三天了。'))
-    await waitFor(() => expect(transcriptRows()[2]).toHaveTextContent('发烧三天了。'))
+    await waitFor(() => expect(transcriptRows()[1]).toHaveTextContent('发烧三天了。'))
   })
 
   it('explains a reply that failed because no model is configured', async () => {

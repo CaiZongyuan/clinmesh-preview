@@ -238,3 +238,25 @@ describe('ui-sdk bridge (#14)', () => {
     expect(snapshot.turns.some((t) => t.trigger.text === '问诊定稿：现在怎么样？')).toBe(false)
   }, 20000)
 })
+
+it('rejects an automatic consultation action spanning a symptom and a treatment plan before either field is written', async () => {
+  const id = await withConsultation()
+  const llm = installScripted('copilot').toolCall('ui_act', { steps: [
+    { ref: 'c1', action: 'setValue', args: ['咳嗽三天'] }, { ref: 'c3', action: 'setValue', args: ['安排检查'] },
+  ] }).reply('继续问诊。')
+  const bridge = await serveBridge(id, () => ({ ok: true, result: JSON.stringify([
+    { ref: 'c1', component: 'textarea', label: '主诉' },
+    { ref: 'c3', component: 'textarea', label: '处理意见与随访' },
+  ]) }))
+  try {
+    installScripted('patient').reply('咳嗽三天了。')
+    const event = await finalized(id, '您好，请问咳嗽多久了？')
+    await flush(id, event.ref)
+    await vi.waitFor(async () => {
+      const action = (await snapshotOf(id)).turns.flatMap((turn) => turn.steps).find((step) => step.name === 'ui_act')
+      expect(action?.state).toBe('denied')
+    })
+    expect(llm.requests.length).toBeGreaterThan(0)
+    expect(bridge.calls.map((call) => call.tool)).toEqual(['ui_snapshot'])
+  } finally { bridge.close() }
+})

@@ -3,6 +3,8 @@ import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@ui-sdk/react/button'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@ui-sdk/react/tabs'
 import { useEffect, useRef, useState } from 'react'
+import { ArrowRightIcon, ClipboardListIcon, FileTextIcon, FlaskConicalIcon, PillIcon, StethoscopeIcon, TicketIcon, UsersIcon } from 'lucide-react'
+import { CLINIC_DEPARTMENT, QueueList } from './queue-rail'
 import type { EncounterView } from '../../shared/encounter'
 import type { GoldenCaseQueueEntry } from '../../shared/golden-case-queue'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
@@ -20,65 +22,48 @@ import { InvestigationsTab } from './investigations/investigations-tab'
 import { useInvestigations } from './investigations/use-investigations'
 import { PrescriptionTab } from './prescription/prescription-tab'
 import { usePrescriptions } from './prescription/use-prescriptions'
-import { badge, pane, paneBody, paneFooter, paneHeader } from './pane-styles'
+import { badge, pane, paneBody, paneFooter } from './pane-styles'
 import { PatientBanner } from './patient-banner'
-import type { CaseFocus } from './workbench'
 import { workbenchOwnsShortcut } from './workbench-shortcuts'
 
-export function CaseWorkspace({ focus }: { focus: CaseFocus }) {
-  if (focus.kind === 'encounter') return <EncounterWorkspace key={focus.encounter.encounterId} encounter={focus.encounter} examinations={focus.examinations} debrief={focus.debrief} />
+export function WaitingRoom({ queue, selected }: { queue: GoldenCaseQueueEntry[]; selected?: GoldenCaseQueueEntry }) {
+  const { start, error } = useStartEncounter()
+  const firstWaiting = queue.find((entry) => entry.queueStatus === 'waiting')
+  const entry = selected ?? firstWaiting
   return (
-    <main aria-label="病例工作区" className={pane}>
-      <div className={paneHeader}>
-        <h2 className="m-0 text-sm font-semibold">病例工作区</h2>
-      </div>
-      <div className={`${paneBody} grid place-items-center`}>
-        {focus.kind === 'registration' ? (
-          <Registration entry={focus.entry} />
-        ) : (
-          <p className="m-0 p-6 text-center text-[13px] text-muted-foreground">
-            从候诊队列选择患者开始接诊后，这里显示患者信息、病历记录、检验检查、诊断与处方。
-          </p>
-        )}
+    <main className="waiting-room" aria-label="门诊候诊">
+      <header className="waiting-heading">
+        <div><p><StethoscopeIcon size={15} />{CLINIC_DEPARTMENT}</p><h2>门诊候诊</h2></div>
+        <div className="waiting-total"><UsersIcon size={18} /><strong>{queue.length}</strong> 位挂号患者</div>
+      </header>
+      <div className="waiting-grid">
+        <nav aria-label="候诊队列" className="roster-card">
+          <h3><UsersIcon size={18} />候诊队列</h3>
+          <QueueList key={selected?.queueStatus} queue={queue} selected={entry} />
+        </nav>
+        {entry ? (
+          <section className="registration-card" aria-label="挂号信息" key={entry.caseId}>
+            <header><TicketIcon size={18} /> 挂号信息 <span>{entry.queueNumber} 号</span></header>
+            <div className="registration-body">
+              <div className="registration-avatar" aria-hidden="true">{entry.patientName[0]}</div>
+              <h3>{entry.patientName}</h3>
+              <p>{SEX_LABEL[entry.sex]} · {entry.age} 岁 · {VISIT_KIND_LABEL[entry.visitKind]}</p>
+              <dl><div><dt>主诉<span className="sr-only">：</span></dt><dd>{entry.chiefComplaint}</dd></div>
+                <div><dt>挂号时间</dt><dd><time dateTime={entry.registeredAt}>{formatClock(entry.registeredAt)}</time></dd></div>
+                <div><dt>就诊科室</dt><dd>{CLINIC_DEPARTMENT}</dd></div></dl>
+              <Button data-variant="solid" onClick={() => start(entry.caseId)}>开始接诊<ArrowRightIcon size={15} /></Button>
+              {error && <p role="alert" className="text-destructive">{error}</p>}
+            </div>
+          </section>
+        ) : <section className="registration-card queue-empty"><ClipboardListIcon size={26} /><p>暂无待接诊患者</p></section>}
       </div>
     </main>
   )
 }
 
-function Registration({ entry }: { entry: GoldenCaseQueueEntry }) {
-  const { start, error } = useStartEncounter()
-  return (
-    <section aria-label="挂号信息" className="flex max-w-[360px] flex-col items-center gap-2 p-6 text-center">
-      <span className="font-mono text-xs text-muted-foreground">{entry.queueNumber} 号</span>
-      <div className="flex flex-wrap items-center justify-center gap-1.5">
-        <h3 className="m-0 text-base font-semibold">{entry.patientName}</h3>
-        <span className="text-xs text-muted-foreground">
-          {SEX_LABEL[entry.sex]} · {entry.age} 岁
-        </span>
-        <span className={`${badge} border`}>{VISIT_KIND_LABEL[entry.visitKind]}</span>
-      </div>
-      <p className="m-0 text-[13px]">主诉：{entry.chiefComplaint}</p>
-      <p className="m-0 text-xs text-muted-foreground">
-        挂号 <time dateTime={entry.registeredAt}>{formatClock(entry.registeredAt)}</time>
-      </p>
-      <Button data-variant="solid" className="mt-2" onClick={() => start(entry.caseId)}>
-        开始接诊
-      </Button>
-      {error && (
-        <p role="alert" className="m-0 text-[13px] text-destructive">
-          {error}
-        </p>
-      )}
-    </section>
-  )
-}
-
-const tab =
-  'h-9 gap-1.5 rounded-none border-0 border-b-2 border-transparent bg-transparent px-3 text-[13px] data-[selected]:border-foreground data-[selected]:font-semibold'
-
 const primaryTabs = ['note', 'investigations', 'diagnosis', 'prescription'] as const
 
-function EncounterWorkspace({
+export function EncounterWorkspace({
   encounter, examinations, debrief,
 }: { encounter: EncounterView; examinations: PhysicalExaminationView[]; debrief?: CaseDebrief }) {
   const drafts = useClinicalDrafts(encounter.encounterId)
@@ -134,25 +119,25 @@ function EncounterWorkspace({
         </p>
       )}
       <Tabs value={selectedTab === 'debrief' && !debrief ? 'note' : selectedTab} onValueChange={(value) => selectTab(value as ClinicalTab)} className="flex min-h-0 flex-1 flex-col">
-        <TabsList ref={tabList} aria-label="病例页签" className="flex flex-none gap-1 border-b px-2">
-          <TabsTab aria-keyshortcuts="Alt+1" value="note" className={tab} data-agent-note-updated={assistantSections > 0 || undefined}>
-            病历记录
+        <TabsList ref={tabList} aria-label="病例页签" className="section-tabs record-tabs">
+          <TabsTab aria-keyshortcuts="Alt+1" value="note" data-agent-note-updated={assistantSections > 0 || undefined}>
+            <FileTextIcon aria-hidden="true" size={14} />病历记录
             {assistantSections > 0 && <span className={`${badge} bg-info/10 text-info`}>助手 {assistantSections}</span>}
           </TabsTab>
-          <TabsTab aria-keyshortcuts="Alt+2" value="investigations" className={tab} data-agent-note-updated={assistantInvestigations > 0 || undefined}>
-            检验检查
+          <TabsTab aria-keyshortcuts="Alt+2" value="investigations" data-agent-note-updated={assistantInvestigations > 0 || undefined}>
+            <FlaskConicalIcon aria-hidden="true" size={14} />检验检查
             <PendingCount count={investigations.pendingCount} />
             <AssistantCount count={assistantInvestigations} />
           </TabsTab>
-          <TabsTab aria-keyshortcuts="Alt+3" value="diagnosis" className={tab} data-agent-note-updated={assistantDiagnoses > 0 || undefined}>
-            诊断
+          <TabsTab aria-keyshortcuts="Alt+3" value="diagnosis" data-agent-note-updated={assistantDiagnoses > 0 || undefined}>
+            <StethoscopeIcon aria-hidden="true" size={14} />诊断
             <AssistantCount count={assistantDiagnoses} />
           </TabsTab>
-          <TabsTab aria-keyshortcuts="Alt+4" value="prescription" className={tab} data-agent-note-updated={assistantPrescriptions > 0 || undefined}>
-            处方
+          <TabsTab aria-keyshortcuts="Alt+4" value="prescription" data-agent-note-updated={assistantPrescriptions > 0 || undefined}>
+            <PillIcon aria-hidden="true" size={14} />处方
             <AssistantCount count={assistantPrescriptions} />
           </TabsTab>
-          {debrief && <TabsTab value="debrief" className={tab}>病例复盘</TabsTab>}
+          {debrief && <TabsTab value="debrief">病例复盘</TabsTab>}
         </TabsList>
         <TabsPanel value="note" className={paneBody}>
           <ClinicalNoteTab encounter={encounter} diagnosisSeq={diagnosis.view.revisions.at(-1)?.seq} />

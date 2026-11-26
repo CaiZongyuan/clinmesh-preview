@@ -1,6 +1,7 @@
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
 import { KeyboardIcon } from 'lucide-react'
 import { iconButton } from './pane-styles'
+import { ActionTooltip } from './ui-tooltip'
 
 const shortcuts = [
   ['按住 Space', '按住说话'],
@@ -13,15 +14,21 @@ const shortcuts = [
 export function WorkbenchShortcuts() {
   return (
     <Popover>
-      <PopoverTrigger aria-label="快捷键" title="快捷键" className={iconButton}>
-        <KeyboardIcon aria-hidden="true" size={16} />
-      </PopoverTrigger>
-      <PopoverContent className="w-72 max-w-[calc(100vw-1rem)] space-y-2 px-3 py-2 text-xs">
-        <PopoverTitle className="m-0 text-sm">快捷键</PopoverTitle>
-        <dl className="m-0 flex flex-col gap-1.5">
+      <ActionTooltip label="快捷键" side="bottom">
+        <PopoverTrigger aria-label="快捷键" className={iconButton}>
+          <KeyboardIcon aria-hidden="true" size={16} />
+        </PopoverTrigger>
+      </ActionTooltip>
+      <PopoverContent sideOffset={6} align="end" className="w-72 max-w-[calc(100vw-1rem)] gap-2.5 p-3 text-xs">
+        <PopoverTitle className="m-0 text-[13px] font-semibold">快捷键</PopoverTitle>
+        <dl className="m-0 flex flex-col gap-2">
           {shortcuts.map(([key, action]) => (
-            <div key={key} className="grid grid-cols-[5.5rem_1fr] gap-1.5">
-              <dt><kbd className="font-mono">{key}</kbd></dt>
+            <div key={key} className="grid grid-cols-[5.75rem_1fr] items-center gap-2">
+              <dt>
+                <kbd className="inline-block rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+                  {key}
+                </kbd>
+              </dt>
               <dd className="m-0 text-muted-foreground">{action}</dd>
             </div>
           ))}

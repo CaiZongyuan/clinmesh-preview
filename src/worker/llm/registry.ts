@@ -35,9 +35,11 @@ export function resolveLlmProvider(env: LlmEnv, kind: AgentKind, override: LlmOv
   if (!config.apiKey || !config.baseUrl) {
     return { ok: false, reason: 'llm-not-configured', message: '未配置大模型接口（LLM_BASE_URL / LLM_API_KEY）' }
   }
+  const origin = env.CLINMESH_DEV_PROVIDER_ORIGIN
+  const baseUrl = typeof origin === 'string' ? `${origin}/${kind}` : config.baseUrl
   return {
     ok: true,
-    provider: createOpenAiCompatibleProvider({ baseUrl: config.baseUrl, apiKey: config.apiKey, effortStyle: config.effortStyle }),
+    provider: createOpenAiCompatibleProvider({ baseUrl, apiKey: config.apiKey, effortStyle: config.effortStyle }),
     model: config.model,
     effort: config.effort,
   }

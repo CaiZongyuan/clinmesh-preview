@@ -2,6 +2,7 @@ import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuItem, MenuTrigger } f
 import { QuoteIcon } from 'lucide-react'
 import { NOTE_SECTION_NAME, NOTE_SECTIONS, isNoteSection } from '../../../shared/clinical-note'
 import { iconButton } from '../pane-styles'
+import { ActionTooltip } from '../ui-tooltip'
 import { useClinicalNoteContext } from './clinical-note-context'
 
 // Quotes one Consultation entry into a Clinical Note section the doctor picks. Hidden once the note can't be edited.
@@ -10,10 +11,12 @@ export function QuoteMenu({ label, text }: { label: string; text: string }) {
   if (!context?.writable) return null
   return (
     <Menu onAction={(section) => isNoteSection(section) && context.quote(section, text)}>
-      <MenuTrigger aria-label={label} title="引用到病历" className={`${iconButton} size-6 bg-card`}>
-        <QuoteIcon aria-hidden="true" size={12} />
-      </MenuTrigger>
-      <MenuContent className="min-w-40 text-[13px]">
+      <ActionTooltip label="引用到病历" side="top" container={typeof document !== 'undefined' ? document.body : null}>
+        <MenuTrigger aria-label={label} className={`${iconButton} size-6`}>
+          <QuoteIcon aria-hidden="true" size={12} />
+        </MenuTrigger>
+      </ActionTooltip>
+      <MenuContent sideOffset={6} className="min-w-40 text-[13px]">
         <MenuGroup>
           <MenuGroupLabel className="px-2 py-1 text-[11px] text-muted-foreground">引用原话到病历</MenuGroupLabel>
           {NOTE_SECTIONS.map((section) => (

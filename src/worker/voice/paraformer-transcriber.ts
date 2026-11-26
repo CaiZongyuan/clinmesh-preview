@@ -1,9 +1,8 @@
 import type { Transcriber, TranscriberSession, TranscriberSessionOptions } from 'agents/voice'
-import type { CaptureMode } from '../../shared/voice'
+import { DASHSCOPE_INFERENCE_URL, type CaptureMode } from '../../shared/voice'
 
+export { DASHSCOPE_INFERENCE_URL }
 export const PARAFORMER_MODEL = 'paraformer-realtime-v2'
-// Workers open outbound WebSockets with fetch over https; the service's own address is wss://…/api-ws/v1/inference.
-export const DASHSCOPE_INFERENCE_URL = 'https://dashscope.aliyuncs.com/api-ws/v1/inference'
 
 const SAMPLE_RATE = 16_000
 const BYTES_PER_MS = (SAMPLE_RATE * 2) / 1000
@@ -14,8 +13,10 @@ const MAX_TIMELINE = 3_000
 // Opens the duplex DashScope inference WebSocket, already accepted.
 export type ConnectUpstream = (token: string) => Promise<WebSocket>
 
-export const connectDashScope: ConnectUpstream = async (token) => {
-  const response = await fetch(DASHSCOPE_INFERENCE_URL, { headers: { Upgrade: 'websocket', Authorization: `Bearer ${token}` } })
+export async function connectDashScope(token: string, url = DASHSCOPE_INFERENCE_URL, workspace?: string): Promise<WebSocket> {
+  const headers = new Headers({ Upgrade: 'websocket', Authorization: `Bearer ${token}` })
+  if (workspace) headers.set('X-DashScope-WorkSpace', workspace)
+  const response = await fetch(url, { headers })
   const socket = response.webSocket
   if (!socket) throw new Error(`DashScope refused the speech recognition socket (HTTP ${response.status})`)
   socket.accept()
@@ -39,6 +40,7 @@ export interface ParaformerOptions {
   onRecognized?: (speech: RecognizedSpeech) => void
   // A committed push-to-talk capture in which nothing was recognized.
   onEmpty?: () => void
+  onFailure?: (code: string, taskId: string) => void
 }
 
 interface Sentence {
@@ -106,6 +108,7 @@ class ParaformerSession implements TranscriberSession {
       }
     })
     this.ready.catch(() => {})
+    this.timer = setTimeout(() => this.fail(new Error('Paraformer did not start the task in time'), 'StartTimeout'), START_TIMEOUT_MS)
     void this.open()
   }
 
@@ -146,7 +149,7 @@ class ParaformerSession implements TranscriberSession {
       return
     }
     this.socket = socket
-    if (this.closed) return this.disconnect()
+    if (this.closed || this.state === 'failed') return this.disconnect()
     socket.addEventListener('message', (event) => this.receive(event.data))
     socket.addEventListener('close', () => this.lost())
     socket.addEventListener('error', () => this.lost())
@@ -163,7 +166,6 @@ class ParaformerSession implements TranscriberSession {
         },
       }),
     )
-    this.timer = setTimeout(() => this.fail(new Error('Paraformer did not start the task in time')), START_TIMEOUT_MS)
   }
 
   private receive(data: unknown) {
@@ -184,7 +186,7 @@ class ParaformerSession implements TranscriberSession {
       case 'task-finished':
         return this.finished()
       case 'task-failed':
-        return this.fail(new Error(`${header.error_code ?? 'TaskFailed'}: ${header.error_message ?? 'speech recognition failed'}`))
+        return this.fail(new Error(`${header.error_code ?? 'TaskFailed'}: ${header.error_message ?? 'speech recognition failed'}`), header.error_code ?? 'TaskFailed')
     }
   }
 
@@ -246,10 +248,12 @@ class ParaformerSession implements TranscriberSession {
     this.timer = setTimeout(() => this.disconnect(), FINISH_TIMEOUT_MS)
   }
 
-  private fail(error: Error) {
+  private fail(error: Error, code = 'ConnectionFailed') {
     if (this.state === 'failed' || this.state === 'finished') return
     clearTimeout(this.timer)
     this.state = 'failed'
+    const safeCode = /^[\w.-]{1,80}$/.test(code) ? code : 'TaskFailed'
+    if (!this.closed) this.options.onFailure?.(safeCode, this.taskId)
     this.disconnect()
     if (!this.readySettled) this.settleReady(error)
     else if (!this.closed) this.callbacks.onFatalError?.(error)
@@ -259,7 +263,7 @@ class ParaformerSession implements TranscriberSession {
   private lost() {
     if (this.state === 'finished' || this.state === 'failed') return
     if (this.closed && this.state !== 'started') return
-    this.fail(new Error('The speech recognition connection closed unexpectedly'))
+    this.fail(new Error('The speech recognition connection closed unexpectedly'), 'ConnectionClosed')
   }
 
   private disconnect() {

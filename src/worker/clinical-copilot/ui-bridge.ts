@@ -86,7 +86,7 @@ export function uiTools(bridge: CopilotBridge, confirm: ConfirmTargets): Record<
         if (blocked) return { ok: false, outcome: 'denied', subject: '被拦截（正式操作）', result: DENIED }
         const res = await bridge.call('ui_act', args, signal, runId)
         if (res.outcome === 'suggestion') return { ok: true, outcome: 'approval', subject: '转为建议（待医生采纳）', result: res.result }
-        if (res.outcome === 'denied') return { ok: false, outcome: 'denied', subject: '被拦截（正式操作）', result: res.result }
+        if (res.outcome === 'denied') return { ok: false, outcome: 'denied', subject: '界面操作被拦截', result: res.result }
         if (!res.ok) return { ok: false, subject: '界面操作', result: res.result }
         return { ok: true, subject: '写入草稿', result: res.result }
       },

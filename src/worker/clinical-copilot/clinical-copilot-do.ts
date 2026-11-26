@@ -1,3 +1,5 @@
+import { allowedAmbientEdit, eventSections } from './ambient-drafts'
+import { NOTE_SECTION_NAME } from '../../shared/clinical-note'
 import { DurableObject } from 'cloudflare:workers'
 import type { CopilotCompactResponse, CopilotContextView } from '../../shared/copilot-context'
 import type {
@@ -365,7 +367,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
       text: `批量分析（${events.length} 个事件）：${events.map(({ text }) => text).join('；')}`,
     }, () => {
       sql.exec('DELETE FROM copilot_analysis_event WHERE automatic = 0 AND id <= ?', last.id)
-    })
+    }, [...new Set(events.flatMap(eventSections))])
     return { ok: true, value }
   }
 
@@ -429,8 +431,8 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
     if (due) await this.enqueueTrigger(due)
   }
 
-  private enqueueTrigger(trigger: CopilotAnalysisEvent, onEnqueue?: () => void): Promise<CopilotPromptResponse> {
-    const copilotTrigger: CopilotTrigger = { kind: 'event', text: trigger.text, mentions: [] }
+  private enqueueTrigger(trigger: CopilotAnalysisEvent, onEnqueue?: () => void, sections = eventSections(trigger)): Promise<CopilotPromptResponse> {
+    const copilotTrigger: CopilotTrigger = { kind: 'event', text: trigger.text, mentions: [], sections }
     return this.runtime
       .enqueue({
         kind: 'event',
@@ -438,7 +440,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
         trigger: copilotTrigger,
         deadlineAt: null,
         subject: trigger.ref,
-        messages: [{ originRef: trigger.ref, message: { role: 'user', content: `${trigger.text}\n基于这一轮开始时的界面快照，按这些临床事件更新相关草稿。可以使用 ui_act 写入病历、检查、诊断和处方草稿，医生正在编辑的内容会保留为建议。` } }],
+        messages: [{ originRef: trigger.ref, message: { role: 'user', content: `${trigger.text}\n本轮只整理该事件新增且已证实的信息，可写字段：${sections.map((key) => NOTE_SECTION_NAME[key]).join('、') || '无'}。不要借用既往资料补全其他栏，不要推测阴性症状或写诊断、检查、处方、随访计划。没有新增证据就不操作。用一句话说明实际更新。` } }],
       }, { onEnqueue })
       .then(({ runId }) => ({ kind: 'run' as const, turnId: runId }))
   }
@@ -463,7 +465,25 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   private bridge() {
     return {
       connected: () => this.runtime.sockets.bridgeConnected(),
-      call: (tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal, runId: string) => this.runtime.sockets.callBridge(tool, args, signal, runId),
+      call: (tool: 'ui_snapshot' | 'ui_act', args: unknown, signal: AbortSignal, runId: string) => {
+        if (tool === 'ui_act') {
+          const sql = this.ctx.storage.sql
+          const run = sql.exec<{ kind: string; subject: string | null; trigger_json: string }>(
+            'SELECT kind, subject, trigger_json FROM agent_run WHERE run_id = ?', runId,
+          ).toArray()[0]
+          if (run?.kind === 'event') {
+            const trigger: CopilotTrigger = JSON.parse(run.trigger_json)
+            const sections = trigger.sections ?? eventSections({ ref: run.subject ?? '', text: trigger.text })
+            const snapshot = sql.exec<{result: string}>(`SELECT result FROM agent_tool_call
+              WHERE run_id = ? AND name = 'ui_snapshot' AND status = 'ok' ORDER BY id DESC LIMIT 1`, runId).toArray()[0]
+            if (!allowedAmbientEdit(args, snapshot?.result ?? null, sections)) {
+              return Promise.resolve({ ok: false, result: '自动分析只可补充与本事件直接相关的病历字段。', outcome: 'denied' as const })
+            }
+            args = { ...(args as object), allowedNoteLabels: sections.map((section) => NOTE_SECTION_NAME[section]) }
+          }
+        }
+        return this.runtime.sockets.callBridge(tool, args, signal, runId)
+      },
     }
   }
 

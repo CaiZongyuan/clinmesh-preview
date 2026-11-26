@@ -10,7 +10,8 @@ import {
   ComboboxLabel,
   ComboboxList,
 } from '@ui-sdk/react/combobox'
-import { RadioGroup, Radio } from '@ui-sdk/react/radio'
+import { RadioGroup, Radio, RadioIndicator } from '@ui-sdk/react/radio'
+import { useState } from 'react'
 import { HistoryIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import {
   COMMON_DIAGNOSIS_CODES,
@@ -36,13 +37,13 @@ export function DiagnosisTab({ encounter, state }: { encounter: EncounterView; s
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <section aria-labelledby="diagnosis-heading" className={card}>
+      <section aria-labelledby="diagnosis-heading" className={card + " diagnosis-card"}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h3 id="diagnosis-heading" className="m-0 text-sm font-semibold">
               诊断
             </h3>
-            <span className="text-xs text-muted-foreground">ICD-10 · 恰有一项主诊断 · 最多 {MAX_DIAGNOSIS_ENTRIES} 项</span>
+            <span className="text-xs text-muted-foreground">ICD-10</span>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {last && (
@@ -58,6 +59,14 @@ export function DiagnosisTab({ encounter, state }: { encounter: EncounterView; s
             {state.error}
           </p>
         )}
+        <div className="diagnosis-picker">
+          <IcdSearch disabled={!writable || full || state.busy} full={full} onAdd={state.add} />
+          <CommonDiagnoses disabled={!writable || full || state.busy} selected={draft.map((entry) => entry.code)} onAdd={state.add} />
+        </div>
+        <div className="diagnosis-list-heading">
+          <h4>{last && !draft.length ? '已确认诊断' : '诊断草稿'}</h4>
+          <span>{draft.length || last?.entries.length || 0} / {MAX_DIAGNOSIS_ENTRIES}</span>
+        </div>
         {revisions.length > 0 && draft.length === 0 && (
           <div className="flex flex-col gap-1.5">
             {last!.entries.map((entry) => (
@@ -78,7 +87,8 @@ export function DiagnosisTab({ encounter, state }: { encounter: EncounterView; s
                 <HistoryIcon aria-hidden className="size-3.5" />
                 修改已确认诊断
               </Button>
-            </div>          </div>
+            </div>
+          </div>
         )}
         {draft.length > 0 && (
           <DraftTable
@@ -91,10 +101,8 @@ export function DiagnosisTab({ encounter, state }: { encounter: EncounterView; s
           />
         )}
         {draft.length === 0 && revisions.length === 0 && (
-          <p className="m-0 text-[13px] text-muted-foreground">暂无诊断草稿。搜索 ICD-10 编码、名称或拼音首字母添加。</p>
+          <p className="cm-empty-box m-0">暂无诊断草稿。搜索 ICD-10 编码、名称或拼音首字母添加。</p>
         )}
-        <IcdSearch disabled={!writable || full} full={full} onAdd={state.add} />
-        <CommonDiagnoses disabled={!writable} onAdd={state.add} />
         <NoteSuggestions module="diagnosis" />
         <ConfirmDiagnosis state={state} primaryName={primary ? icdName(primary.code) : undefined} writable={writable} />
       </section>
@@ -118,7 +126,12 @@ function DraftTable({
   onRemove: (code: string) => void
 }) {
   return (
-    <div className="overflow-x-auto">
+    <RadioGroup
+            value={primaryCode}
+            onValueChange={(code) => code && onPrimary(code)}
+            aria-label="选择主诊断"
+            className="diagnosis-draft"
+          >
       <table className="w-full text-[13px]">
         <thead>
           <tr className="border-b text-left text-xs text-muted-foreground">
@@ -130,18 +143,12 @@ function DraftTable({
           </tr>
         </thead>
         <tbody>
-          <RadioGroup
-            value={primaryCode}
-            onValueChange={(code) => code && onPrimary(code)}
-            aria-label="选择主诊断"
-            className="contents"
-          >
             {entries.map((entry) => (
               <tr key={entry.code} className="border-b last:border-b-0">
                 <td className="py-1.5 pr-2">
-                  <Radio value={entry.code} disabled={!writable || busy} aria-label={`设为主诊断 ${icdName(entry.code)}`} />
+                  <Radio value={entry.code} disabled={!writable || busy} aria-label={`设为主诊断 ${icdName(entry.code)}`}><RadioIndicator /></Radio>
                 </td>
-                <td className="py-1.5 pr-2">{icdName(entry.code)}</td>
+                <td className="py-1.5 pr-2">{icdName(entry.code)} {entry.code === primaryCode && <span className="primary-diagnosis-label">主诊断</span>}</td>
                 <td className="py-1.5 pr-2 font-mono text-xs">{entry.code}</td>
                 <td className="py-1.5 pr-2 text-xs text-muted-foreground">{DIAGNOSIS_SOURCE_NAME[entry.source]}</td>
                 <td className="py-1.5 text-right">
@@ -157,10 +164,9 @@ function DraftTable({
                 </td>
               </tr>
             ))}
-          </RadioGroup>
         </tbody>
       </table>
-    </div>
+    </RadioGroup>
   )
 }
 
@@ -170,14 +176,17 @@ const DIAGNOSIS_OPTIONS = ICD_CATALOG.map((entry) => ({ value: entry.code, label
 
 function IcdSearch({ disabled, full, onAdd }: { disabled: boolean; full: boolean; onAdd: (code: string) => void }) {
   const proposal = useClinicalNoteContext()
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
   return (
-    <Combobox aria-label="ICD-10 搜索" items={DIAGNOSIS_OPTIONS}
+    <Combobox query={query} onQueryChange={setQuery} open={open} onOpenChange={setOpen} aria-label="ICD-10 搜索" items={DIAGNOSIS_OPTIONS}
       onValueChange={(code, details) => {
-        // The field stays a search box: refuse the selection so the typed query remains, and add the entry.
         details.cancel()
         if (!code) return
         if (details.source === 'agent') proposal?.propose({ module: 'diagnosis', itemId: code })
         else onAdd(code)
+        setQuery('')
+        setOpen(false)
       }}
       autoHighlight
       disabled={disabled}
@@ -186,7 +195,7 @@ function IcdSearch({ disabled, full, onAdd }: { disabled: boolean; full: boolean
         搜索 ICD-10 诊断{full ? `（已达 ${MAX_DIAGNOSIS_ENTRIES} 项上限）` : ''}
       </ComboboxLabel>
       <ComboboxInput placeholder="搜索诊断名称、编码或拼音，如 gxy、J18" aria-label="搜索 ICD-10 诊断" />
-      <ComboboxContent>
+      <ComboboxContent className="diagnosis-results">
         <ComboboxEmpty>没有匹配的诊断。</ComboboxEmpty>
         <ComboboxList>
           {({ items }) => (items as typeof DIAGNOSIS_OPTIONS).map((entry) => (
@@ -201,17 +210,17 @@ function IcdSearch({ disabled, full, onAdd }: { disabled: boolean; full: boolean
   )
 }
 
-function CommonDiagnoses({ disabled, onAdd }: { disabled: boolean; onAdd: (code: string) => void }) {
+function CommonDiagnoses({ disabled, selected, onAdd }: { disabled: boolean; selected: string[]; onAdd: (code: string) => void }) {
   const proposal = useClinicalNoteContext()
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+    <div className="diagnosis-shortcuts">
       <span className="text-muted-foreground">常用：</span>
       {COMMON_DIAGNOSIS_CODES.map((code) => (
         <Button
           key={code}
           data-variant="outline"
           className="h-7 rounded-full px-2.5 text-xs"
-          disabled={disabled}
+          disabled={disabled || selected.includes(code)}
           aria-label={`添加常用诊断 ${icdName(code)}`}
           onClick={(_event, details) => {
             if (details.source === 'agent') proposal?.propose({ module: 'diagnosis', itemId: code })
@@ -219,7 +228,7 @@ function CommonDiagnoses({ disabled, onAdd }: { disabled: boolean; onAdd: (code:
           }}
         >
           <PlusIcon aria-hidden className="size-3" />
-          {icdName(code)}
+          <span>{icdName(code)}</span>
         </Button>
       ))}
     </div>

@@ -25,12 +25,16 @@ export function CompletionChecklist({
 }) {
   const count = gates.filter((gate) => gate.met).length
   const label = location === 'banner' ? '患者完诊清单' : '完诊清单'
+  const allMet = count === gates.length
   return (
     <Popover>
-      <PopoverTrigger aria-label={`${label} ${count}/${gates.length}`} className="h-7 px-2 text-xs">
-        完诊 <b className="ml-1 font-mono tabular-nums">{count}/{gates.length}</b>
+      <PopoverTrigger
+        aria-label={`${label} ${count}/${gates.length}`}
+        className={`h-7 gap-1 px-2 text-xs ${allMet ? 'border-success/40 bg-success/10 text-success' : ''}`}
+      >
+        完诊 <b className="font-mono tabular-nums">{count}/{gates.length}</b>
       </PopoverTrigger>
-      <PopoverContent side={location === 'banner' ? 'bottom' : 'top'} align="start" className="max-w-[320px] p-3">
+      <PopoverContent side={location === 'banner' ? 'bottom' : 'top'} align={location === 'banner' ? 'end' : 'start'} sideOffset={6} className="max-w-[320px] p-3">
         <PopoverTitle className="m-0 text-sm font-semibold">{label}</PopoverTitle>
         <ul className="m-0 mt-2 grid list-none gap-2 p-0 text-xs">
           {gates.map((gate) => {

@@ -9,7 +9,7 @@ import {
   ScrollAreaViewport,
 } from '@ui-sdk/react/scroll-area'
 import { SegmentedControl, SegmentedControlIndicator, SegmentedControlItem } from '@ui-sdk/react/segmented-control'
-import { ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, MicIcon, MicOffIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon, RotateCcwIcon, Volume2Icon, VolumeXIcon } from 'lucide-react'
+import { MessagesSquareIcon, ArrowDownIcon, CheckIcon, CopyIcon, KeyboardIcon, MicIcon, MicOffIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, RefreshCwIcon, RotateCcwIcon, Volume2Icon, VolumeXIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
 import { MAX_QUESTION_LENGTH, type ConsultationTurn, type PatientTurnFailure, type Recognizer } from '../../shared/consultation'
 import type { EncounterView } from '../../shared/encounter'
@@ -21,6 +21,7 @@ import { badge, iconButton, pane, paneHeader } from './pane-styles'
 import { PhysicalExaminationPanel, PhysicalExaminationRow } from './physical-examination'
 import { useVoiceCapture, type VoiceCaptureController } from '../voice/use-voice-capture'
 import { usePatientSpeech } from '../voice/use-patient-speech'
+import { ActionTooltip } from './ui-tooltip'
 import { useVoiceKeys, VoiceBar } from './voice-bar'
 
 export interface EncounterContext {
@@ -126,22 +127,28 @@ function ConsultationColumn({ encounter: context, consultation, voice, speech, h
   const [filter, setFilter] = useState<TranscriptFilter>('all')
   const encounter = context?.encounter
   const liveEncounterId = encounter?.status === 'active' ? encounter.encounterId : null
+  const attempts = new Map<string, ConsultationTurn[]>()
+  for (const turn of consultation.turns) {
+    if (!turn.replyTo) continue
+    const list = attempts.get(turn.replyTo) ?? []
+    list.push(turn)
+    attempts.set(turn.replyTo, list)
+  }
   const visible = transcriptOf(consultation.turns, context?.examinations ?? []).filter(
-    (entry) => filter === 'all' || entry.channel === filter,
+    (entry) => (filter === 'all' || entry.channel === filter) &&
+      !(entry.channel === 'patient' && entry.turn.status === 'failed' && entry.turn.replyTo &&
+        attempts.get(entry.turn.replyTo)?.at(-1)?.turnId !== entry.turn.turnId),
   )
   const latestSeq = consultation.turns.at(-1)?.seq
   return (
     <section aria-label="问诊记录" className={pane}>
       <div className={paneHeader}>
-        <div className="min-w-0">
-          <h2 className="m-0 text-sm font-semibold">问诊记录</h2>
-          <p className="m-0 truncate text-[11px] text-muted-foreground">
-            {encounter ? `模拟患者 · ${encounter.patient.name} · ` : ''}只按版本固定的 Patient Persona 应答
-          </p>
-        </div>
-        <Button ref={toggleButton} aria-label="收起问诊记录" className={iconButton} onClick={onCollapse}>
-          <PanelLeftCloseIcon aria-hidden="true" size={16} />
-        </Button>
+        <div><h2>问诊记录</h2><p>{encounter ? `模拟患者 · ${encounter.patient.name}` : '模拟患者'}</p></div>
+        <ActionTooltip label="收起问诊记录" side="bottom">
+          <Button ref={toggleButton} aria-label="收起问诊记录" className={iconButton} onClick={onCollapse}>
+            <PanelLeftCloseIcon aria-hidden="true" size={16} />
+          </Button>
+        </ActionTooltip>
       </div>
       {!context || !encounter ? (
         <div className="min-h-0 flex-1">
@@ -158,7 +165,7 @@ function ConsultationColumn({ encounter: context, consultation, voice, speech, h
             >
               <SegmentedControlIndicator />
               {FILTERS.map((f) => (
-                <SegmentedControlItem key={f.value} value={f.value} className="px-2">
+                <SegmentedControlItem key={f.value} value={f.value} className="h-[22px] px-2">
                   {f.label}
                 </SegmentedControlItem>
               ))}
@@ -166,24 +173,27 @@ function ConsultationColumn({ encounter: context, consultation, voice, speech, h
             <div className="flex items-center gap-1">
               <StreamStatus consultation={consultation} />
               {liveEncounterId && (
-                <Button
-                  aria-label={speech.muted ? '取消患者语音静音' : '静音患者语音'}
-                  title={speech.muted ? '取消静音' : '静音'}
-                  className={iconButton}
-                  onClick={speech.toggleMute}
-                >
-                  {speech.muted ? <VolumeXIcon aria-hidden="true" size={15} /> : <Volume2Icon aria-hidden="true" size={15} />}
-                </Button>
+                <ActionTooltip label={speech.muted ? '取消静音' : '静音患者语音'} side="bottom">
+                  <Button
+                    aria-label={speech.muted ? '取消患者语音静音' : '静音患者语音'}
+                    className={iconButton}
+                    onClick={speech.toggleMute}
+                  >
+                    {speech.muted ? <VolumeXIcon aria-hidden="true" size={15} /> : <Volume2Icon aria-hidden="true" size={15} />}
+                  </Button>
+                </ActionTooltip>
               )}
             </div>
           </div>
-          <ScrollArea stickToEnd className="relative min-h-0 flex-1">
+          <ScrollArea stickToEnd className="consultation-scroll relative min-h-0 flex-1">
             <ScrollAreaViewport role="log" aria-label="问诊实时记录" className="h-full">
               <ScrollAreaContent>
                 {visible.length === 0 ? (
-                  <p className="m-0 p-4 text-[13px] text-muted-foreground">{FILTERS.find((f) => f.value === filter)!.empty}</p>
+                  <div className="conversation-empty"><span className="section-icon"><MessagesSquareIcon size={21} /></span>
+                    <strong>{FILTERS.find((f) => f.value === filter)!.empty}</strong>
+                    {filter === 'all' && encounter.status === 'active' && <p>键入问题或按住说话，开始问诊。</p>}</div>
                 ) : (
-                  <ol aria-label="问诊转写" className="m-0 flex list-none flex-col gap-3 px-3.5 pt-3 pb-4">
+                  <ol aria-label="问诊转写" className="transcript m-0 flex list-none flex-col gap-3 px-3.5 pt-3 pb-4">
                     {visible.map((entry) =>
                       entry.channel === 'examination' ? (
                         <PhysicalExaminationRow key={entry.examination.system} examination={entry.examination} />
@@ -191,6 +201,7 @@ function ConsultationColumn({ encounter: context, consultation, voice, speech, h
                         <TurnRow
                           key={entry.turn.turnId}
                           turn={entry.turn}
+                          previousFailures={entry.turn.replyTo ? attempts.get(entry.turn.replyTo)?.filter((t) => t.turnId !== entry.turn.turnId && t.status === 'failed') : undefined}
                           patientName={encounter.patient.name}
                           streamed={consultation.streamed[entry.turn.turnId]}
                           speech={
@@ -260,6 +271,7 @@ interface TurnSpeech {
 }
 
 interface TurnRowProps {
+  previousFailures?: ConsultationTurn[]
   turn: ConsultationTurn
   patientName: string
   streamed: string | undefined
@@ -267,7 +279,18 @@ interface TurnRowProps {
   retry?: () => void
 }
 
-function TurnRow({ turn, patientName, streamed, speech, retry }: TurnRowProps) {
+function TurnRow({ turn, patientName, streamed, speech, retry, previousFailures }: TurnRowProps) {
+  const dismissalKey = `clinmesh.dismissed-reply.${turn.turnId}`
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(dismissalKey) === '1' } catch { return false }
+  })
+  const toggleFailure = () => {
+    setDismissed(!dismissed)
+    try {
+      if (dismissed) localStorage.removeItem(dismissalKey)
+      else localStorage.setItem(dismissalKey, '1')
+    } catch {}
+  }
   const doctor = turn.speaker === 'doctor'
   const failed = turn.status === 'failed'
   return (
@@ -318,7 +341,10 @@ function TurnRow({ turn, patientName, streamed, speech, retry }: TurnRowProps) {
         ) : failed ? (
           <div className="text-[13px] leading-relaxed text-destructive">
             {turn.text && <p className="m-0 text-muted-foreground line-through">{turn.text}</p>}
-            <p className="m-0">{FAILURE_TEXT[turn.failure ?? 'llm-error']}</p>
+            {!dismissed && <p className="m-0">{FAILURE_TEXT[turn.failure ?? 'llm-error']}</p>}
+            <Button className="failure-toggle" aria-expanded={!dismissed} onClick={toggleFailure}>
+              {dismissed ? '查看失败原因' : '收起提示'}
+            </Button>
             {retry && (
               <Button className="mt-1 h-7 gap-1 px-2.5 text-xs" onClick={retry}>
                 <RefreshCwIcon aria-hidden="true" size={12} />
@@ -330,6 +356,14 @@ function TurnRow({ turn, patientName, streamed, speech, retry }: TurnRowProps) {
           <div>
             <p className="m-0 text-sm leading-relaxed [overflow-wrap:anywhere]">{turn.text}</p>
           </div>
+        )}
+        {previousFailures && previousFailures.length > 0 && (
+          <details className="attempt-history">
+            <summary>历史尝试（{previousFailures.length}）</summary>
+            <ul>{previousFailures.map((attempt) => <li key={attempt.turnId}>
+              第 {attempt.attempt} 次 · {formatClockSeconds(attempt.settledAt ?? attempt.createdAt)} · {FAILURE_TEXT[attempt.failure ?? 'llm-error']}
+            </li>)}</ul>
+          </details>
         )}
         {speech && speech.progress !== null && (
           <div
@@ -345,12 +379,14 @@ function TurnRow({ turn, patientName, streamed, speech, retry }: TurnRowProps) {
         )}
       </div>
       {turn.status === 'final' && (
-        <div className="absolute top-0 right-0 flex gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-open]]:opacity-100">
+        <div className="transcript-actions">
           <CopyTurn turn={turn} />
           {speech?.replay && (
-            <Button aria-label={`重播第 ${turn.seq} 条回答`} title="重播" className={`${iconButton} size-6 bg-card`} onClick={speech.replay}>
-              <RotateCcwIcon aria-hidden="true" size={12} />
-            </Button>
+            <ActionTooltip label="重播回答" side="top">
+              <Button aria-label={`重播第 ${turn.seq} 条回答`} className={`${iconButton} size-6`} onClick={speech.replay}>
+                <RotateCcwIcon aria-hidden="true" size={12} />
+              </Button>
+            </ActionTooltip>
           )}
           <QuoteMenu label={`引用第 ${turn.seq} 条到病历`} text={quotedTurn(turn.speaker, turn.text)} />
         </div>
@@ -399,9 +435,13 @@ function CopyTurn({ turn }: { turn: ConsultationTurn }) {
   }
   return (
     <>
-      <Button aria-label={`复制第 ${turn.seq} 条`} title="复制" className={`${iconButton} size-6 bg-card`} onClick={copy}>
-        {state === 'copied' ? <CheckIcon aria-hidden="true" size={12} /> : <CopyIcon aria-hidden="true" size={12} />}
-      </Button>
+      <ActionTooltip label={state === 'copied' ? '已复制' : '复制'} closeOnPress={false} side="top">
+        <Button aria-label={`复制第 ${turn.seq} 条`} className={`${iconButton} size-6`} onClick={copy}>
+          {state === 'copied'
+            ? <CheckIcon aria-hidden="true" size={12} className="text-success" />
+            : <CopyIcon aria-hidden="true" size={12} />}
+        </Button>
+      </ActionTooltip>
       <span role="status" aria-label={`第 ${turn.seq} 条复制状态`} className="sr-only">
         {state === 'copied' ? '已复制' : state === 'failed' ? '无法访问剪贴板，请手动选择文本' : ''}
       </span>
@@ -456,9 +496,11 @@ function ConsultationStrip({ consultation, voice, toggleButton, onExpand }: {
   const questions = consultation.turns.filter((turn) => turn.speaker === 'doctor').length
   return (
     <section aria-label="问诊记录（已收起）" className={`${pane} items-center gap-2.5 py-2`}>
-      <Button ref={toggleButton} aria-label="展开问诊记录" className={iconButton} onClick={onExpand}>
-        <PanelLeftOpenIcon aria-hidden="true" size={16} />
-      </Button>
+      <ActionTooltip label="展开问诊记录" side="right">
+        <Button ref={toggleButton} aria-label="展开问诊记录" className={iconButton} onClick={onExpand}>
+          <PanelLeftOpenIcon aria-hidden="true" size={16} />
+        </Button>
+      </ActionTooltip>
       <span aria-hidden="true" className="text-[13px] tracking-[2px] text-muted-foreground [writing-mode:vertical-rl]">
         问诊记录{questions > 0 ? ` · ${questions} 问` : ''}
       </span>

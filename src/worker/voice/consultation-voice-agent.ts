@@ -43,6 +43,14 @@ export class ConsultationVoiceAgent extends withVoiceInput(Agent<Env>) {
       mode: this.modes.get(connection.id) ?? 'continuous',
       onRecognized: (speech) => this.recognized.set(connection.id, [...(this.recognized.get(connection.id) ?? []), speech]),
       onEmpty: () => send(connection, { type: 'clinmesh.capture-empty' }),
+      onFailure: (code, taskId) => {
+        if (connection.readyState !== WebSocket.OPEN) return
+        const reason = code === 'AllocationQuota.FreeTierOnly' ? '百炼拒绝了本次免费识别请求'
+          : code === 'StartTimeout' ? '等待百炼启动识别超时'
+          : code === 'ConnectionClosed' ? '百炼语音连接已关闭'
+          : '本次百炼语音识别失败'
+        send(connection, { type: 'error', code, message: `${reason}（${code}）。任务号 ${taskId}` })
+      },
     })
     this.transcribers.set(connection.id, transcriber)
     return transcriber

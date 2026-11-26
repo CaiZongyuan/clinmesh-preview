@@ -32,6 +32,14 @@ const FILTERS: { value: CategoryFilter; label: string }[] = [
 
 const card = 'flex flex-col gap-3 rounded-lg border bg-card p-3'
 
+const specimenCap = (text: string) =>
+  text.includes('紫帽') ? 'purple'
+    : text.includes('黄帽') ? 'yellow'
+      : text.includes('蓝帽') ? 'blue'
+        : text.includes('黑帽') ? 'black'
+          : text.includes('琥珀') ? 'amber'
+            : null
+
 const matches = (item: CatalogItemView, query: string) =>
   !query || item.name.toLowerCase().includes(query) || item.pinyinInitials.some((initials) => initials.startsWith(query))
 
@@ -93,60 +101,64 @@ export function InvestigationsTab({ state, writable }: { state: Investigations; 
             >
               <SegmentedControlIndicator />
               {FILTERS.map((filter) => (
-                <SegmentedControlItem key={filter.value} value={filter.value} className="h-7 px-3 text-xs">
+                <SegmentedControlItem key={filter.value} value={filter.value} className="h-[24px] px-2.5 text-xs">
                   {filter.label}
                 </SegmentedControlItem>
               ))}
             </SegmentedControl>
-            <ul aria-label="检查目录" className="m-0 flex max-h-72 list-none flex-col overflow-y-auto rounded-md border p-0">
-              {shown.map((item) => (
-                <li key={item.id} className="flex items-center gap-2 border-b px-2.5 py-1.5 last:border-b-0">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-[13px]">
-                      {item.name}
-                      <span className={`${badge} border text-muted-foreground`}>{CATEGORY_LABEL[item.category]}</span>
+            <ul aria-label="检查目录" className="m-0 flex max-h-72 list-none flex-col overflow-y-auto rounded-lg border p-0">
+              {shown.map((item) => {
+                const cap = specimenCap(item.specimenOrSite)
+                return (
+                  <li key={item.id} className="investigation-catalog-row flex items-center gap-2 border-b px-3 py-2 last:border-b-0">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 text-[13px] font-medium">
+                        {item.name}
+                        <span className={`${badge} border text-muted-foreground`}>{CATEGORY_LABEL[item.category]}</span>
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        {cap && <span aria-hidden="true" className="clinmesh-specimen-cap" data-cap={cap} />}
+                        <span>{item.specimenOrSite} · {item.department} · 预计 {item.expectedTurnaround}</span>
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {item.specimenOrSite} · {item.department} · 预计 {item.expectedTurnaround}
-                    </div>
-                  </div>
-                  {issued.has(item.id) ? (
-                    <span className="text-xs text-muted-foreground">已开立</span>
-                  ) : pending.includes(item.id) ? (
-                    <span className="text-xs text-muted-foreground">已在待开立</span>
-                  ) : (
-                    <Button
-                      className="h-7 px-2.5 text-xs"
-                      disabled={!writable}
-                      aria-label={`加入待开立：${item.name}`}
-                      onClick={(_event, details) => {
-                        if (details.source === 'agent') proposal?.propose({ module: 'investigations', itemId: item.id })
-                        else state.add(item.id)
-                      }}
-                    >
-                      加入
-                    </Button>
-                  )}
-                </li>
-              ))}
-              {shown.length === 0 && <li className="px-2.5 py-3 text-xs text-muted-foreground">无匹配项目</li>}
+                    {issued.has(item.id) ? (
+                      <span className="text-xs text-muted-foreground">已开立</span>
+                    ) : pending.includes(item.id) ? (
+                      <span className="text-xs text-info">已在待开立</span>
+                    ) : (
+                      <Button
+                        className="h-7 px-2.5 text-xs"
+                        disabled={!writable}
+                        aria-label={`加入待开立：${item.name}`}
+                        onClick={(_event, details) => {
+                          if (details.source === 'agent') proposal?.propose({ module: 'investigations', itemId: item.id })
+                          else state.add(item.id)
+                        }}
+                      >
+                        加入
+                      </Button>
+                    )}
+                  </li>
+                )
+              })}
+              {shown.length === 0 && <li className="px-3 py-4 text-center text-xs text-muted-foreground">无匹配项目</li>}
             </ul>
           </div>
-          <div className="flex min-w-0 flex-col gap-2 rounded-md bg-muted p-2.5">
+          <div className="flex min-w-0 flex-col gap-2.5 rounded-lg border bg-muted/60 p-3">
             <div className="flex items-center justify-between">
-              <h4 className="m-0 text-xs font-semibold">待开立 {pendingItems.length}</h4>
+              <h4 className="m-0 text-xs font-semibold">待开立 <span className="font-mono text-muted-foreground">{pendingItems.length}</span></h4>
               {pendingItems.length > 0 && (
-                <Button className="h-6 border-transparent bg-transparent px-1.5 text-xs" onClick={state.clear}>
+                <Button className="h-6 border-transparent bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground" onClick={state.clear}>
                   清空待开立
                 </Button>
               )}
             </div>
             {pendingItems.length === 0 ? (
-              <p className="m-0 py-3 text-center text-xs text-muted-foreground">从目录加入检查项目</p>
+              <p className="cm-empty-box m-0 my-auto">从左侧目录加入检查项目</p>
             ) : (
-              <ul aria-label="待开立检查" className="m-0 flex list-none flex-col gap-1 p-0">
+              <ul aria-label="待开立检查" className="m-0 flex list-none flex-col gap-1.5 p-0">
                 {pendingItems.map((item) => (
-                  <li key={item.id} className="flex items-center gap-2 rounded-md bg-card px-2 py-1.5">
+                  <li key={item.id} className="flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-semibold">{item.name}</div>
                       <div className="text-[11.5px] text-muted-foreground">
@@ -162,7 +174,7 @@ export function InvestigationsTab({ state, writable }: { state: Investigations; 
             )}
             <ClinicalConfirmation
               trigger={pendingItems.length ? `开立 ${pendingItems.length} 项` : '开立'}
-              triggerClassName="mt-auto h-8 w-full border-primary bg-primary text-xs text-primary-foreground"
+              triggerClassName="cm-primary-cta mt-auto h-8 w-full text-xs"
               disabled={!writable || pendingItems.length === 0}
               title={`开立 ${pendingItems.length} 项检查？`}
               confirmLabel="确认开立"

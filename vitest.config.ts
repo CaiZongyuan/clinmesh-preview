@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     projects: [
+      { test: { name: 'dev', include: ['test/dev/**/*.test.ts'] } },
       {
         plugins: [
           cloudflareTest({

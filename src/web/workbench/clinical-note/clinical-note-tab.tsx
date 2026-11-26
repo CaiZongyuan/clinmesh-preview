@@ -1,9 +1,10 @@
+import { useState } from 'react'
 import { Button } from '@ui-sdk/react/button'
 import { Field, FieldDescription, FieldLabel } from '@ui-sdk/react/field'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@ui-sdk/react/menu'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
 import { Textarea } from '@ui-sdk/react/textarea'
-import { CheckIcon, HistoryIcon, LoaderCircleIcon, PenLineIcon } from 'lucide-react'
+import { CheckIcon, HistoryIcon, LoaderCircleIcon, PenLineIcon, SparklesIcon } from 'lucide-react'
 import {
   MAX_NOTE_SECTION_LENGTH,
   NOTE_SECTION_NAME,
@@ -120,8 +121,10 @@ function NoteSectionField({ section, note, writable, propose, insertCommonPhrase
   const required = REQUIRED_NOTE_SECTIONS.includes(section)
   const text = note.sections[section]
   const assistantDraft = note.authors[section] === 'assistant'
+  const baseline = note.revisions.at(-1)?.sections[section] ?? ''
+  const [withdrawn, setWithdrawn] = useState<string | null>(null)
   return (
-    <Field disabled={!writable} className="flex flex-col gap-1" data-agent-draft={assistantDraft || undefined}>
+    <Field disabled={!writable} className="note-field" data-agent-draft={assistantDraft || undefined}>
       <FieldLabel className="text-[13px] font-medium">
         {name}
         {required && (
@@ -130,13 +133,14 @@ function NoteSectionField({ section, note, writable, propose, insertCommonPhrase
           </span>
         )}
       </FieldLabel>
-      {assistantDraft && <span className={`${badge} self-start border border-dashed border-info/65 text-info`}>助手</span>}
+      <div className="note-field-editor">
       <Textarea
         value={text}
         data-note-section={section}
         data-note-author={note.authors[section]}
         onValueChange={(value, details) => {
           if (details.source !== 'agent') {
+            setWithdrawn(null)
             note.edit(section, value)
             return
           }
@@ -156,7 +160,7 @@ function NoteSectionField({ section, note, writable, propose, insertCommonPhrase
         placeholder={required ? '必填' : undefined}
         className="w-full resize-y text-[13px] leading-relaxed"
       />
-      <div className="flex items-center justify-between gap-2">
+      <div className="note-field-tools">
         <Menu onAction={(phrase) => insertCommonPhrase(section, phrase)}>
           <MenuTrigger
             aria-label={`常用语：${name}`}
@@ -173,9 +177,34 @@ function NoteSectionField({ section, note, writable, propose, insertCommonPhrase
             ))}
           </MenuContent>
         </Menu>
+        {assistantDraft && (
+          <span className="note-author">
+            <SparklesIcon aria-hidden="true" size={10} />
+            助手
+          </span>
+        )}
+        {writable && assistantDraft && text !== baseline && (
+          <Button
+            aria-label={`撤回助手填写：${name}`}
+            className="note-withdraw-btn"
+            onClick={() => { setWithdrawn(text); note.edit(section, baseline) }}
+          >
+            撤回此栏
+          </Button>
+        )}
+        {writable && withdrawn !== null && text === baseline && !assistantDraft && (
+          <Button
+            aria-label={`撤销撤回：${name}`}
+            className="note-withdraw-btn"
+            onClick={() => { note.edit(section, withdrawn); setWithdrawn(null) }}
+          >
+            撤销撤回
+          </Button>
+        )}
         <FieldDescription className="font-mono text-[11px] text-muted-foreground">
           {text.length}/{MAX_NOTE_SECTION_LENGTH}
         </FieldDescription>
+      </div>
       </div>
       <NoteSuggestions section={section} />
     </Field>

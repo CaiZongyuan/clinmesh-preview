@@ -6,6 +6,7 @@ import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { formatClock, formatDuration, SEX_LABEL, VISIT_KIND_LABEL } from './format'
 import { HealthRecordPopover } from './health-record'
 import { badge, iconButton } from './pane-styles'
+import { ActionTooltip } from './ui-tooltip'
 
 const STATUS_LABEL: Record<EncounterStatus, string> = { active: '就诊中', abandoned: '已放弃', completed: '已完诊 · 只读' }
 
@@ -29,16 +30,26 @@ export function PatientBanner({
   completion?: ReactNode
 }) {
   const { patient, triage, visibleSourceHistory: history } = encounter
+  const hasClinicalFlags = history.allergies.length > 0 || history.chronicConditions.length > 0
   return (
-    <section aria-label="患者信息" className="flex max-h-[45%] flex-none flex-col gap-2 overflow-y-auto border-b px-4 pt-3 pb-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <h2 className="m-0 text-base font-semibold">{patient.name}</h2>
+    <section aria-label="患者信息" className="patient-banner">
+      <div className="patient-banner-top">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <h2 className="m-0 text-[15.5px] font-semibold tracking-tight">{patient.name}</h2>
           <span className="text-xs text-muted-foreground">
             {SEX_LABEL[patient.sex]} · {patient.age} 岁
           </span>
           <span className={`${badge} border`}>{VISIT_KIND_LABEL[patient.visitKind]}</span>
           <span className={`${badge} bg-warning/15 text-warning`}>分诊 {triage.level} 级</span>
+          <span className={`${badge} bg-secondary text-secondary-foreground`}>{STATUS_LABEL[encounter.status]}</span>
+        </div>
+        <div className="flex flex-none items-center gap-1.5">
+          <EncounterTimer startedAt={encounter.startedAt} endedAt={encounter.endedAt} />
+          <HealthRecordPopover history={history} />
+        </div>
+      </div>
+      {hasClinicalFlags && (
+        <div className="flex flex-wrap items-center gap-1.5">
           {history.allergies.map((allergy) => (
             <span
               key={allergy.agent}
@@ -50,34 +61,31 @@ export function PatientBanner({
             </span>
           ))}
           {history.chronicConditions.map((condition) => (
-            <span key={condition.code} className={`${badge} border border-warning/60 text-warning`}>
+            <span key={condition.code} className={`${badge} border border-warning/45 bg-warning/5 text-warning`}>
               慢病：{condition.display}
             </span>
           ))}
-          <span className={`${badge} bg-secondary text-secondary-foreground`}>{STATUS_LABEL[encounter.status]}</span>
         </div>
-        <div className="flex flex-none items-center gap-1.5">
-          <EncounterTimer startedAt={encounter.startedAt} endedAt={encounter.endedAt} />
-          <HealthRecordPopover history={history} />
-          {completion}
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
+      )}
+      <div className="patient-banner-meta">
         <OutpatientNumber value={patient.outpatientNumber} />
         <span>
           挂号 <time dateTime={patient.registeredAt}>{formatClock(patient.registeredAt)}</time>
         </span>
         <span>{patient.department}</span>
         <span>{patient.insurance}</span>
-        <span>
-          主诉：<span className="text-foreground">{patient.chiefComplaint}</span>
+        <span className="basis-full text-[12px] leading-snug">
+          主诉：<span className="font-medium text-foreground">{patient.chiefComplaint}</span>
         </span>
       </div>
-      {examinedVitals?.vitals ? (
-        <VitalSignTiles source="查体" measuredAt={examinedVitals.examinedAt} vitals={examinedVitals.vitals} />
-      ) : (
-        <VitalSignTiles source="分诊" measuredAt={triage.measuredAt} vitals={triage.vitals} />
-      )}
+      <div className="patient-banner-vitals">
+        {examinedVitals?.vitals ? (
+          <VitalSignTiles source="查体" measuredAt={examinedVitals.examinedAt} vitals={examinedVitals.vitals} />
+        ) : (
+          <VitalSignTiles source="分诊" measuredAt={triage.measuredAt} vitals={triage.vitals} />
+        )}
+        {completion && <div className="ml-auto flex-none">{completion}</div>}
+      </div>
     </section>
   )
 }
@@ -85,24 +93,24 @@ export function PatientBanner({
 // The latest reading wins the tiles: triage until the vitals Physical Examination, which leaves triage on record.
 function VitalSignTiles({ source, measuredAt, vitals }: { source: '分诊' | '查体'; measuredAt: string; vitals: VitalSign[] }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <ul aria-label={`${source}生命体征`} className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
+      <ul aria-label={`${source}生命体征`} className="m-0 flex list-none flex-wrap gap-1 p-0">
         {vitals.map((vital) => {
           const label = VITAL_LABEL[vital.kind]
           return (
             <li
               key={vital.kind}
               data-flag={vital.flag ?? undefined}
-              className="flex items-baseline gap-1 rounded-md bg-muted px-2 py-0.5 text-xs shadow-[inset_0_0_0_1px_var(--border)] data-flag:shadow-[inset_0_0_0_1px_var(--warning)]"
+              className="patient-vital-tile"
             >
               <span aria-hidden="true" className="text-muted-foreground">
                 {label.short}
               </span>
               <span className="sr-only">{label.name}</span>
-              <span className={`text-[13.5px] font-semibold tabular-nums ${vital.flag ? 'text-warning' : ''}`}>
+              <span className={`text-[12px] font-semibold tabular-nums ${vital.flag ? 'text-warning' : 'text-foreground'}`}>
                 {vital.value}
               </span>
-              <span className="text-[11px] text-muted-foreground">{vital.unit}</span>
+              <span className="text-[10.5px] text-muted-foreground">{vital.unit}</span>
               {vital.flag && (
                 <>
                   <span aria-hidden="true" className="font-semibold text-warning">
@@ -115,7 +123,7 @@ function VitalSignTiles({ source, measuredAt, vitals }: { source: '分诊' | '�
           )
         })}
       </ul>
-      <span className="text-[11px] text-muted-foreground">
+      <span className="ml-0.5 text-[11px] text-muted-foreground">
         {source} <time dateTime={measuredAt}>{formatClock(measuredAt)}</time>
       </span>
     </div>
@@ -126,7 +134,7 @@ function EncounterTimer({ startedAt, endedAt }: { startedAt: string; endedAt: st
   const now = useNow(endedAt === null)
   const elapsed = (endedAt === null ? now : Date.parse(endedAt)) - Date.parse(startedAt)
   return (
-    <span title="本次就诊时长" className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground">
+    <span title="本次就诊时长" className="inline-flex items-center gap-1 font-mono text-xs tabular-nums text-muted-foreground">
       <ClockIcon aria-hidden="true" size={13} />
       <span className="sr-only">就诊时长</span>
       {formatDuration(elapsed)}
@@ -156,11 +164,19 @@ function OutpatientNumber({ value }: { value: string }) {
     setTimeout(() => setCopyState('idle'), 1500)
   }
   return (
-    <span className="inline-flex items-center gap-0.5">
+    <span className="inline-flex items-center gap-1">
       门诊号 <span className="font-mono text-foreground">{value}</span>
-      <Button aria-label="复制门诊号" title="复制门诊号" className={`${iconButton} size-6`} onClick={copy}>
-        {copyState === 'copied' ? <CheckIcon aria-hidden="true" size={12} /> : <CopyIcon aria-hidden="true" size={12} />}
-      </Button>
+      <ActionTooltip
+        label={copyState === 'copied' ? '已复制' : '复制门诊号'}
+        closeOnPress={false}
+        side="bottom"
+      >
+        <Button aria-label="复制门诊号" className={`${iconButton} size-5.5`} onClick={copy}>
+          {copyState === 'copied'
+            ? <CheckIcon aria-hidden="true" size={12} className="text-success" />
+            : <CopyIcon aria-hidden="true" size={12} />}
+        </Button>
+      </ActionTooltip>
       <span role="status" aria-label="复制状态" className="sr-only">
         {copyState === 'copied' ? '已复制门诊号' : copyState === 'failed' ? '无法访问剪贴板，请手动复制' : ''}
       </span>

@@ -63,6 +63,19 @@ describe('voice capture (ADR-0003: the doctor speaks, the pipeline asks the Simu
     expect(((await missing.json()) as { error: { code: string } }).error.code).toBe('encounter-not-found')
   })
 
+  it('delivers the specific provider failure and task ID before the SDK closes the call', async () => {
+    const { tasks } = speak({ failAfterStart: 'AllocationQuota.FreeTierOnly' })
+    const socket = await openVoiceSocket(await startEncounter())
+    socket.send({ type: 'start_call' })
+    socket.audio(100)
+    await socket.waitFor((messages) => messages.some((frame) => frame.type === 'error'))
+    const firstError = socket.messages.find((frame) => frame.type === 'error')
+    expect(firstError).toMatchObject({ code: 'AllocationQuota.FreeTierOnly' })
+    expect(firstError?.message).toContain(tasks[0].actions[0].header.task_id)
+    expect(firstError?.message).not.toContain('Provider detail')
+    socket.close()
+  })
+
   it('turns a spoken sentence into a doctor turn and the Simulated Patient reply, with recognition metadata', async () => {
     installScripted('patient').reply('医生，我这三天一直发烧，咳嗽得厉害。')
     const { tasks } = speak({ sentences: [{ atMs: 300, text: '您哪里不舒服？', partials: ['您哪里'] }] })

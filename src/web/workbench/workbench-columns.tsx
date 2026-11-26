@@ -5,7 +5,8 @@ import {
   ResizablePanel,
   type ResizableLayoutCommitDetails,
 } from '@ui-sdk/react/resizable'
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import type { CopilotMention } from '../../shared/copilot-turn'
 import { useConsultation } from '../consultation/use-consultation'
 import type { CopilotSession } from '../copilot/use-copilot'
 import { ConsultationPane, type EncounterContext } from './consultation-column'
@@ -51,12 +52,15 @@ export function WorkbenchColumns({
   onHideCopilot,
 }: {
   caseWorkspace: ReactNode
-  encounter?: EncounterContext
+  encounter: EncounterContext
   copilot: CopilotSession
   copilotHidden: boolean
   examinations: EncounterContext['examinations']
   onHideCopilot: () => void
 }) {
+  const [draft, setDraft] = useState('')
+  const [mentions, setMentions] = useState<CopilotMention[]>([])
+  const [editing, setEditing] = useState<string | null>(null)
   const [columns] = useState(createResizableController)
   const [widths, setWidths] = useState(storedWidths)
   const widthsRef = useRef(widths)
@@ -70,26 +74,20 @@ export function WorkbenchColumns({
     } catch {}
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!group.current) return
-    let frame = 0
     const synchronize = () => {
-      cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => {
-        const wanted = widthsRef.current
-        if (wanted.collapsed) columns.collapse(CONSULTATION.id)
-        if (isOverlay()) return
+      const wanted = widthsRef.current
+      if (!isOverlay()) {
         if (!wanted.collapsed) columns.resize(CONSULTATION.id, px(wanted.consultation))
         if (!copilotHidden) columns.resize(COPILOT.id, px(wanted.copilot))
-      })
+      }
+      if (wanted.collapsed) columns.collapse(CONSULTATION.id)
     }
+    synchronize()
     const observer = new ResizeObserver(synchronize)
     observer.observe(group.current)
-    synchronize()
-    return () => {
-      observer.disconnect()
-      cancelAnimationFrame(frame)
-    }
+    return () => observer.disconnect()
   }, [columns, copilotHidden])
 
   const saveLayout = (layout: number[], details: ResizableLayoutCommitDetails) => {
@@ -141,7 +139,7 @@ export function WorkbenchColumns({
     >
       <ResizablePanel
         id={CONSULTATION.id}
-        defaultSize={px(widths.consultation)}
+        defaultSize={widths.collapsed ? CONSULTATION.collapsedSize : px(widths.consultation)}
         minSize={CONSULTATION.minSize}
         maxSize={CONSULTATION.maxSize}
         collapsible
@@ -173,7 +171,8 @@ export function WorkbenchColumns({
             onDoubleClick={resetCopilot}
           />
           <ResizablePanel id={COPILOT.id} defaultSize={px(widths.copilot)} minSize={COPILOT.minSize} maxSize={COPILOT.maxSize}>
-            <CopilotPanel copilot={copilot} encounter={encounter?.encounter} examinations={examinations} onHide={onHideCopilot} />
+            <CopilotPanel copilot={copilot} encounter={encounter.encounter} examinations={examinations} onHide={onHideCopilot}
+              draft={draft} setDraft={setDraft} mentions={mentions} setMentions={setMentions} editing={editing} setEditing={setEditing} />
           </ResizablePanel>
         </>
       )}

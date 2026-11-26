@@ -56,6 +56,7 @@ export interface FakeParaformerScript {
   startDelayMs?: number
   // Fail every task with this error instead of starting it.
   failStart?: string
+  failAfterStart?: string
 }
 
 // The Bailian Paraformer realtime service for Worker-seam tests, installed behind the ParaformerTranscriber. It runs
@@ -99,6 +100,9 @@ export function installFakeParaformer(script: FakeParaformerScript = {}): { task
           }
           started = true
           emit('task-started')
+          if (script.failAfterStart) setTimeout(() => service.send(JSON.stringify({
+            header: { event: 'task-failed', task_id: taskId, error_code: script.failAfterStart, error_message: 'Provider detail' },
+          })), 10)
         }, script.startDelayMs ?? 30)
       } else if (action.header.action === 'finish-task') {
         record.finished = true

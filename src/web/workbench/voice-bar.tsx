@@ -4,10 +4,12 @@ import { useEffect, useRef, type Ref, type RefObject } from 'react'
 import type { EncounterView } from '../../shared/encounter'
 import type { VoiceCaptureController } from '../voice/use-voice-capture'
 import { badge } from './pane-styles'
+import { ActionTooltip } from './ui-tooltip'
 import { workbenchOwnsShortcut } from './workbench-shortcuts'
 
 const ASR_LABEL: Record<VoiceCaptureController['asr'], string> = {
-  off: '未连接',
+  off: '待机 · 麦克风未开启',
+  microphone: '等待麦克风音频…',
   connecting: '识别服务连接中…',
   ready: '识别服务已连接',
   error: '识别服务出错',
@@ -165,21 +167,23 @@ export function VoiceBar({ encounter, voice, holdButton }: {
                 aria-pressed={voice.capturing}
                 aria-label={voice.capturing ? '停止持续收音' : '开始持续收音'}
                 data-variant={voice.capturing ? 'solid' : undefined}
-                className="h-8 gap-1.5 px-3 text-xs"
+                className="h-[30px] gap-1.5 px-2.5 text-xs"
                 onClick={voice.toggle}
               >
                 <MicIcon aria-hidden="true" size={13} />
                 {voice.capturing ? '停止收音' : '持续收音'}
               </Button>
               <HoldButton voice={voice} buttonRef={holdButton} />
-              <Button aria-keyshortcuts="M" aria-label="暂停收音" aria-pressed={false} className="h-8 gap-1.5 px-2.5 text-xs" onClick={voice.togglePause}>
-                <MicOffIcon aria-hidden="true" size={13} />
-                暂停
-              </Button>
+              <ActionTooltip label="暂停收音（快捷键 M）" side="top">
+                <Button aria-keyshortcuts="M" aria-label="暂停收音" aria-pressed={false} className="h-[30px] gap-1.5 px-2.5 text-xs" onClick={voice.togglePause}>
+                  <MicOffIcon aria-hidden="true" size={13} />
+                  暂停
+                </Button>
+              </ActionTooltip>
             </>
           )
         ) : (
-          <Button aria-keyshortcuts="M" aria-label="恢复收音" data-variant="solid" className="h-8 gap-1.5 px-3 text-xs" onClick={voice.togglePause} disabled={!voice.paused}>
+          <Button aria-keyshortcuts="M" aria-label="恢复收音" data-variant="solid" className="h-[30px] gap-1.5 px-3 text-xs" onClick={voice.togglePause} disabled={!voice.paused}>
             <MicIcon aria-hidden="true" size={13} />
             恢复收音
           </Button>
@@ -269,9 +273,7 @@ function HoldButton({ voice, buttonRef }: { voice: VoiceCaptureController; butto
       aria-label={voice.holding ? (voice.cancelArmed ? '松开以取消' : '正在录音，松开结束') : '按住说话'}
       data-holding={voice.holding || undefined}
       data-cancel={voice.cancelArmed || undefined}
-      className={`flex h-8 select-none items-center gap-1.5 rounded-md border px-3 text-xs ${
-        voice.cancelArmed ? 'border-destructive bg-destructive/10 text-destructive' : voice.holding ? 'border-destructive text-destructive' : 'bg-card'
-      }`}
+      className="hold-talk-btn"
     >
       {voice.holding ? <CircleStopIcon aria-hidden="true" size={13} /> : <HandIcon aria-hidden="true" size={13} />}
       {voice.holding ? (
@@ -284,7 +286,7 @@ function HoldButton({ voice, buttonRef }: { voice: VoiceCaptureController; butto
               {[0.2, 0.5, 0.8, 0.5, 0.2].map((threshold, i) => (
                 <i
                   key={i}
-                  className="w-[3px] rounded-sm bg-current"
+                  className="w-[3px] rounded-sm bg-current transition-[height] duration-75"
                   style={{ height: `${3 + Math.round(voice.level > threshold ? 9 * voice.level : 0)}px` }}
                 />
               ))}
@@ -294,7 +296,7 @@ function HoldButton({ voice, buttonRef }: { voice: VoiceCaptureController; butto
       ) : (
         <>
           按住说话
-          <kbd className="font-mono text-[10px] opacity-60">Space</kbd>
+          <kbd className="hold-talk-kbd">Space</kbd>
         </>
       )}
     </button>
@@ -314,17 +316,20 @@ function LevelDot({ level }: { level: number }) {
 }
 
 function VoiceStatus({ voice }: { voice: VoiceCaptureController }) {
-  const recognizerLabel = voice.recognizer === 'web-speech' ? '网页语音识别' : 'Bailian Paraformer'
+  const recognizerLabel = voice.recognizer === 'paraformer-realtime-v2' ? 'Bailian Paraformer' : voice.recognizer === 'web-speech' ? '网页语音识别' : '正在读取语音配置'
+  const status = voice.error ? 'error' : voice.asr
   const latency = voice.latencyMs !== null ? `延迟 ${voice.latencyMs}ms` : null
   return (
-    <span role="status" aria-label="语音识别状态" className={`${badge} h-6 gap-1.5 bg-muted font-normal text-muted-foreground`}>
+    <span role="status" aria-label="语音识别状态" className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
       <span
         aria-hidden="true"
-        className={`size-1.5 rounded-full ${voice.asr === 'ready' ? 'bg-success' : voice.asr === 'error' ? 'bg-destructive' : 'bg-warning'}`}
+        className={`size-1.5 flex-none rounded-full ${status === 'ready' ? 'bg-success' : status === 'error' ? 'bg-destructive' : status === 'connecting' ? 'bg-warning' : 'bg-muted-foreground/70'}`}
       />
-      {ASR_LABEL[voice.asr]} · {recognizerLabel}
-      {latency && ` · ${latency}`}
-      {voice.deviceLabel && ` · ${voice.deviceLabel}`}
+      <span className="truncate">
+        {voice.paused ? '已暂停收音' : ASR_LABEL[status]} · {recognizerLabel}
+        {latency && ` · ${latency}`}
+        {voice.deviceLabel && ` · ${voice.deviceLabel}`}
+      </span>
     </span>
   )
 }

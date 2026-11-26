@@ -17,7 +17,7 @@ const TARGET_RATE = 16_000
 const METER_POINTS = 256
 const SPEECH_LEVEL = 0.025
 
-export type AsrState = 'off' | 'connecting' | 'ready' | 'error'
+export type AsrState = 'off' | 'microphone' | 'connecting' | 'ready' | 'error'
 
 export interface VoiceError {
   code: string
@@ -114,6 +114,7 @@ export function useVoiceCapture(
   sessionRef.current = session
   const socketRef = useRef<WebSocket | null>(null)
   const micRef = useRef<MicStream | null>(null)
+  const captureWire = useRef<{ feed(frame: ArrayBuffer): void; commit(): void } | null>(null)
   const webSpeechRef = useRef<WebSpeechSession | null>(null)
   const pausedRef = useRef(false)
   pausedRef.current = paused
@@ -161,15 +162,55 @@ export function useVoiceCapture(
 
   // The voice socket lives for exactly one capture session.
   useEffect(() => {
-    if (recognizer !== 'paraformer-realtime-v2' || !encounterId || !captureMode) return
+    if (recognizer !== 'paraformer-realtime-v2' || !encounterId || !captureMode || paused) return
     const ws = openVoiceSocket(encounterId)
     socketRef.current = ws
-    setAsr('connecting')
+    setAsr('microphone')
+    const waiting: ArrayBuffer[] = []
+    let waitingBytes = 0
+    let opened = false
+    let started = false
+    let listening = false
+    let released = false
+    const flush = () => {
+      if (!opened || waiting.length === 0) return
+      if (!started) {
+        started = true
+        setAsr('connecting')
+        ws.send(JSON.stringify({ type: 'start_call' }))
+      }
+      for (const frame of waiting) ws.send(frame)
+      waiting.length = 0
+      waitingBytes = 0
+    }
+    captureWire.current = {
+      feed(frame) {
+        if (released || socketRef.current !== ws || pausedRef.current) return
+        waiting.push(frame)
+        waitingBytes += frame.byteLength
+        if (waitingBytes > TARGET_RATE * 2 * 10) {
+          setError('连接语音服务超时，请重新开始收音。')
+          endSession()
+          return
+        }
+        flush()
+      },
+      commit() {
+        if (released) return
+        released = true
+        stopMic()
+        if (!started && !waiting.length) endSession('麦克风还未采到音频，请再说一次。')
+        else if (listening) ws.send(JSON.stringify({ type: 'clinmesh.commit' }))
+      },
+    }
     ws.onopen = () => {
+      if (socketRef.current !== ws) return
+      opened = true
       ws.send(JSON.stringify({ type: 'clinmesh.capture', mode: captureMode } satisfies VoiceClientMessage))
-      ws.send(JSON.stringify({ type: 'start_call' }))
+      flush()
     }
     ws.onmessage = (event) => {
+      if (socketRef.current !== ws) return
       let message: VoiceServerMessage
       try {
         message = JSON.parse(String(event.data)) as VoiceServerMessage
@@ -177,36 +218,49 @@ export function useVoiceCapture(
         return
       }
       if (message.type === 'transcript_interim' && !pausedRef.current) setInterim(message.text || null)
-      else if (message.type === 'status' && message.status === 'listening') setAsr('ready')
+      else if (message.type === 'status' && message.status === 'listening' && !listening) {
+        listening = true
+        setAsr('ready')
+        if (released) ws.send(JSON.stringify({ type: 'clinmesh.commit' }))
+      }
       else if (message.type === 'error') {
-        setError(message.message)
+        const fallback: Record<string, string> = {
+          'Speech recognition connection was lost': '识别连接已中断，可重新开始收音。',
+          'Speech recognition failed to start': '语音识别服务启动失败，可重新开始收音。',
+        }
+        setError(fallback[message.message] ?? message.message)
         endSession()
       } else if (message.type === 'clinmesh.capture-empty') endSession('这段没有听清，没有记录。')
       else if (message.type === 'clinmesh.voice-turn') onVoiceTurn(message)
     }
     ws.onclose = () => {
-      if (socketRef.current === ws) closeSocket()
+      if (socketRef.current !== ws) return
+      setError('语音识别连接已中断，可重新开始收音。')
+      endSession()
     }
     return () => {
+      captureWire.current = null
       if (socketRef.current === ws) {
         ws.close()
         socketRef.current = null
         setAsr('off')
       }
     }
-  }, [recognizer, encounterId, captureMode, onVoiceTurn, endSession, closeSocket])
+  }, [recognizer, encounterId, captureMode, paused, onVoiceTurn, endSession, stopMic])
 
   // The microphone streams while a capture is open (continuous keeps it between sentences).
   useEffect(() => {
     if (recognizer !== 'paraformer-realtime-v2' || !encounterId || !captureMode || paused) return
     const mic = new MicStream((frame) => {
-      if (socketRef.current?.readyState === WebSocket.OPEN && !pausedRef.current) socketRef.current.send(frame)
+      captureWire.current?.feed(frame)
     }, deviceId, { onReady: setDeviceLabel, onDevices: setDevices, onLevel: setLevel, onSpeechStart })
     micRef.current = mic
-    void mic.start((message) => {
+    const failMic = (message: string) => {
+      if (micRef.current !== mic) return
       setError(message)
       endSession()
-    })
+    }
+    void mic.start(failMic).catch(() => failMic('麦克风音频采集启动失败，请重新开始收音。'))
     return () => {
       stopMic()
     }
@@ -248,7 +302,7 @@ export function useVoiceCapture(
     if (held.cancelled) endSession('已取消，这段话没有记录。')
     else if (duration < MIN_HOLD_MS) endSession('按得太短，没有记录。再说请按住说话。')
     else if (recognizer === 'web-speech') webSpeechRef.current?.commit(duration)
-    else send({ type: 'clinmesh.commit' })
+    else captureWire.current?.commit()
   }, [endSession, recognizer])
 
   // A hold the browser interrupts (pointercancel, lost capture, window blur) is discarded: nothing
@@ -370,6 +424,8 @@ class MicStream {
     this.stream = stream
     const ctx = new AudioContext()
     this.ctx = ctx
+    if (ctx.state === 'suspended') await ctx.resume()
+    if (this.stopped) return
     const source = ctx.createMediaStreamSource(this.stream)
     const analyser = ctx.createAnalyser()
     analyser.fftSize = METER_POINTS
@@ -400,7 +456,7 @@ class MicStream {
     processor.connect(ctx.destination)
     this.hooks.onReady(this.stream.getAudioTracks()[0]?.label ?? null)
     const devices = await navigator.mediaDevices.enumerateDevices().catch(() => [])
-    if (!this.stopped) this.hooks.onDevices(devices)
+    if (!this.stopped) this.hooks.onDevices(devices.filter((device) => device.kind === 'audioinput'))
   }
 
   async stop() {

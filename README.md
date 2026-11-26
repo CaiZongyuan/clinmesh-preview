@@ -32,6 +32,8 @@ LLM_API_KEY=<your key>
 # PATIENT_TURN_EXPIRY_GRACE_MS=5000       # extra wait before the workspace itself fails an unsettled reply
 ```
 
+On `pnpm dev`, the local Worker sends model streams and Bailian voice connections through the host's `HTTP_PROXY` / `HTTPS_PROXY` when configured. The development server starts and stops its own loopback relay and honors `NO_PROXY`. Each agent uses its configured API base URL and bearer token.
+
 Without `LLM_API_KEY` the workbench still runs: each patient reply fails at once with `llm-not-configured`, visibly, with a retry button. Use the API base URL that matches your credential. Z.ai Coding Plan credentials use `https://open.bigmodel.cn/api/coding/paas/v4`. The Clinical Copilot shows a failed turn when the model is unconfigured.
 
 ### Voice configuration
@@ -41,6 +43,7 @@ The doctor can speak instead of type (持续收音 hands-free with recognizer VA
 ```
 # .dev.vars
 BAILIAN_TOKEN=...   # secret; enables Paraformer recognition and Sambert playback
+BAILIAN_WORKSPACE_ID=...  # optional Beijing workspace ID for its dedicated MaaS host
 ```
 
 A Paraformer-recognized turn carries `voice: { recognizer, durationMs, confidence: null }` (Paraformer reports no confidence score). The voice socket `/api/encounters/:encounterId/voice` speaks the Cloudflare `agents/voice` protocol plus ClinMesh messages (`src/shared/voice.ts`); it is refused once the Encounter is frozen.
@@ -91,7 +94,8 @@ WebSocket routes must be registered on the same Hono app (not dispatched beside 
 | `pnpm dev`       | Local dev server (pass `--port <n>` to change the port)                                          |
 | `pnpm build`     | Builds the client assets and the Worker into `dist/`                                             |
 | `pnpm typecheck` | `tsc -b` over the web, Worker and tooling projects                                               |
-| `pnpm test`      | Both test seams: `worker` (Workers Vitest pool, real Hono + Durable Object + SQLite) and `web` (jsdom + Testing Library, real router + workbench, fetch stubbed) |
+| `pnpm test`      | Local provider transport (`dev`), `worker` (Workers Vitest pool, real Hono + Durable Object + SQLite) and `web` (jsdom + Testing Library, real router + workbench, fetch stubbed) |
+| `pnpm test:e2e`  | Builds the app and runs the Chromium encounter journeys with Playwright. |
 | `pnpm cf-typegen`| Regenerates `src/worker/worker-configuration.d.ts` after changing `wrangler.jsonc`               |
 
 Run one seam with `pnpm test --project worker` or `pnpm test --project web`.
@@ -107,3 +111,9 @@ Run one seam with `pnpm test --project worker` or `pnpm test --project web`.
 - `data/` Pinned data snapshots. `data/provenance.json` records each snapshot's source paths and reference commit.
 - `test/worker/`, `test/web/` The two test seams. `test/fixtures/` holds shared Golden Case expectations.
 - `prototypes/copilot-workbench/` Reference prototype, not production code.
+
+### Browser verification
+
+Install Chromium once with `pnpm exec playwright install chromium`, then run `pnpm test:e2e`. Each browser journey starts its own local Worker and Durable Object SQLite store. An HTTP fixture supplies streaming model responses and usage to the normal provider adapter. The browser uses the built client, clinic API and WebSockets. Screenshots and failure traces are written to `.scratch/browser-tests/`.
+
+The workbench takes its light and dark palettes, four-region desktop layout and clinical note form from the [in-repo prototype](prototypes/copilot-workbench/workbench-prototype.html). The Copilot session uses folded tool calls, a scroll-following transcript and a compact mobile composer. Its 上下文 tab and `/上下文` command show the current encounter's context composition, request timeline, item browser and compaction history. The interaction references were [Pi Web](https://github.com/agegr/pi-web), [Pi Pocket](https://github.com/TannerMidd/pi-pocket) and [dsh-context](https://github.com/bowenliang123/dsh-context).

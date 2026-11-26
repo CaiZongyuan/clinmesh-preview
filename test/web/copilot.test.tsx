@@ -228,6 +228,16 @@ describe('Clinical Copilot panel', () => {
     expect(api.copilot.snapshot(ENCOUNTER).queued).toContainEqual(expect.objectContaining({ text: '另一个问题' }))
   })
 
+  it('renders the assistant’s Markdown table with cells, formatting and literal escaped pipes', async () => {
+    const api = openEncounter()
+    await ask('按表格列出证据')
+    api.copilot.answer(ENCOUNTER, '| 字段 | 内容要点 | 依据 |\n|---|---|---|\n| **主诉** | 发热、咳嗽 3 天 | 问诊\\|分诊 |')
+    const table = await screen.findByRole('table', { name: '' })
+    expect(within(table).getAllByRole('columnheader').map((cell) => cell.textContent)).toEqual(['字段', '内容要点', '依据'])
+    expect(within(table).getByRole('cell', { name: '问诊|分诊' })).toBeInTheDocument()
+    expect(within(table).getByRole('cell', { name: '主诉' }).querySelector('strong')).toBeInTheDocument()
+  })
+
   it('opens the context view from the typed slash command: ring, categories, Case Truth zero, draft kept', async () => {
     const api = openEncounter()
     await ask('先跑一轮')
@@ -237,7 +247,7 @@ describe('Clinical Copilot panel', () => {
     const user = userEvent.setup()
     await user.type(input, '/上下文')
     await user.click(screen.getByRole('button', { name: '发送给临床助手' }))
-    const dialog = await screen.findByRole('dialog', { name: '助手上下文（只读）' })
+    const dialog = await screen.findByRole('dialog', { name: '上下文洞察' })
     expect(requestsTo('GET', `/api/encounters/${ENCOUNTER}/copilot/context`)).toHaveLength(1)
     // Usage ring against the model window with the compaction/output reserve.
     expect(dialog).toHaveTextContent('预计输入')
@@ -265,7 +275,7 @@ describe('Clinical Copilot panel', () => {
     const user = userEvent.setup()
     await user.type(await composer(), '/上下文')
     await user.click(screen.getByRole('button', { name: '发送给临床助手' }))
-    const dialog = await screen.findByRole('dialog', { name: '助手上下文（只读）' })
+    const dialog = await screen.findByRole('dialog', { name: '上下文洞察' })
     await user.click(within(dialog).getByRole('button', { name: '压缩上下文' }))
     expect(requestsTo('POST', `/api/encounters/${ENCOUNTER}/copilot/compact`)).toHaveLength(1)
     // The compaction is queued as a run; the notice says so, and the marker lands in the session when it completes.

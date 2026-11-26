@@ -34,7 +34,8 @@ export interface CopilotSession {
   compactions: CopilotCompactionEntry[]
   model: CopilotModelSetting | null
   stream: CopilotStreamState
-  // Turns that finished, or steps that changed, while the panel was hidden.
+  checkpoint: number | null
+  // Distinct turns that changed while the panel was hidden.
   unread: number
   // Any Copilot turn is running or queued.
   busy: boolean
@@ -50,7 +51,6 @@ export interface CopilotSession {
   stop(): Promise<void>
   setFeedback(turnId: string, value: CopilotFeedback | null): Promise<void>
   configure(model: string, effort: CopilotModelSetting['effort']): Promise<void>
-  clearUnread(): void
 }
 
 const MIN_RECONNECT_MS = 500
@@ -69,6 +69,8 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
   const [snapshot, setSnapshot] = useState<CopilotSnapshot | null>(null)
   const [stream, setStream] = useState<CopilotStreamState>('connecting')
   const [unread, setUnread] = useState(0)
+  const unreadTurns = useRef(new Set<string>())
+  const previous = useRef<CopilotSnapshot | null>(null)
   const current = useRef(encounterId)
   current.current = encounterId
 
@@ -78,15 +80,36 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
     if (!encounterId) return
     const latest = await fetchCopilotSnapshot(encounterId).catch(() => null)
     if (!latest || current.current !== encounterId) return
+    const prior = previous.current
+    if (prior && latest.seq < prior.seq) return
+    if (hiddenRef.current && prior && latest.seq > prior.seq) {
+      const oldTurns = new Map(prior.turns.map((turn) => [turn.turnId, turn]))
+      for (const turn of latest.turns) {
+        const old = oldTurns.get(turn.turnId)
+        if (!old || old.status !== turn.status || old.reply !== turn.reply || old.steps.length !== turn.steps.length) {
+          unreadTurns.current.add(turn.turnId)
+        }
+      }
+      setUnread(unreadTurns.current.size)
+    }
+    previous.current = latest
     setSnapshot(latest)
-    if (hiddenRef.current) setUnread((n) => n + 1)
   }, [encounterId])
 
   useEffect(() => {
+    previous.current = null
+    unreadTurns.current.clear()
     setSnapshot(null)
     setUnread(0)
     setStream('connecting')
   }, [encounterId])
+
+  useEffect(() => {
+    if (!hidden) {
+      unreadTurns.current.clear()
+      setUnread(0)
+    }
+  }, [hidden])
 
   useEffect(() => {
     void refresh()
@@ -176,6 +199,7 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
     queued: snapshot?.queued ?? [],
     compactions: snapshot?.compactions ?? [],
     model: snapshot?.model ?? null,
+    checkpoint: snapshot?.checkpoint ?? null,
     stream: encounterId ? stream : 'connecting',
     unread,
     countdown: snapshot?.countdown ?? null,
@@ -201,6 +225,5 @@ export function useCopilot(encounterId: string | null, encounterStatus?: string,
     configure: async (model, effort) => {
       await apply(() => configureCopilot(encounterId!, { model, effort }))
     },
-    clearUnread: () => setUnread(0),
   }
 }

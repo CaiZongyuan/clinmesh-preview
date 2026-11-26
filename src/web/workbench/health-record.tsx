@@ -17,7 +17,7 @@ export function HealthRecordPopover({ history }: { history: VisibleSourceHistory
         <HistoryIcon aria-hidden="true" size={13} />
         健康档案
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" className="w-[440px] max-w-[calc(100vw-32px)] p-2">
+      <PopoverContent side="bottom" align="end" sideOffset={6} className="w-[440px] max-w-[calc(100vw-32px)] p-2.5">
         <PopoverTitle className="m-0 px-1 pb-1.5 text-xs font-semibold">健康档案 · 本院既往记录</PopoverTitle>
         <Tabs defaultValue="visits">
           <TabsList aria-label="健康档案分类" className="grid w-full grid-cols-4">

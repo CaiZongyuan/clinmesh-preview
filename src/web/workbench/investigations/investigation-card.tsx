@@ -13,6 +13,7 @@ import {
 import { formatClock } from '../format'
 import { badge } from '../pane-styles'
 import { ClinicalConfirmation } from '../clinical-confirmation'
+import { ActionTooltip } from '../ui-tooltip'
 import { latestReport } from './use-investigations'
 
 const FLAG: Record<Exclude<ResultFlag, null>, { mark: string; hint: string }> = {
@@ -101,15 +102,16 @@ export function InvestigationCard(props: InvestigationCardProps) {
                 <p className="m-0">仅首份报告发布前可取消；若报告已发布，服务端将拒绝取消。</p>
                 <p className="m-0 mt-1 text-muted-foreground">取消后不再出报告，也无需确认已阅；如仍需要可重新开立。</p>
               </ClinicalConfirmation>
-              <Button
-                className="h-7 px-2.5 text-xs"
-                disabled={!writable}
-                aria-label={`立即出报告：${name}`}
-                title="模拟测试控件：跳过周转时间"
-                onClick={onReleaseNow}
-              >
-                立即出报告
-              </Button>
+              <ActionTooltip label="模拟测试控件：跳过周转时间" side="top">
+                <Button
+                  className="h-7 px-2.5 text-xs"
+                  disabled={!writable}
+                  aria-label={`立即出报告：${name}`}
+                  onClick={onReleaseNow}
+                >
+                  立即出报告
+                </Button>
+              </ActionTooltip>
             </>
           )}
           {report && !report.acknowledgement && (

@@ -54,6 +54,7 @@ export function useNoteBridge(encounterId: string | null) {
     controller: AbortController
     proposals: Promise<{ id: string; response: DraftAssistanceResponse }>[]
     runId: string
+    allowedNoteLabels?: string[]
   } | null>(null)
 
   useEffect(() => {
@@ -66,6 +67,8 @@ export function useNoteBridge(encounterId: string | null) {
     const agent = createAgent({
       allow(step) {
         if (disposed || active.current?.controller.signal.aborted) return false
+        const labels = active.current?.allowedNoteLabels
+        if (labels && (step.component !== 'textarea' || step.action !== 'setValue' || !labels.includes(step.label ?? ''))) return false
         if (step.confirm) {
           denied = true
           return false
@@ -106,7 +109,8 @@ export function useNoteBridge(encounterId: string | null) {
         respond({ ok: false, outcome: 'denied', result: '被拦截：该操作需要医生本人的临床确认。' })
         return
       }
-      const recorded = { callId, controller: new AbortController(), proposals: [] as Promise<{ id: string; response: DraftAssistanceResponse }>[], runId: message.runId }
+      const allowedNoteLabels = (args as { allowedNoteLabels?: string[] }).allowedNoteLabels
+      const recorded = { callId, allowedNoteLabels, controller: new AbortController(), proposals: [] as Promise<{ id: string; response: DraftAssistanceResponse }>[], runId: message.runId }
       active.current = recorded
       denied = false
       try {

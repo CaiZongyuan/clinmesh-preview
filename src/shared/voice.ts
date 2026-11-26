@@ -1,6 +1,17 @@
 import type { ConsultationTurn, Recognizer } from './consultation'
 import type { EncounterError } from './encounter'
 
+// Workers open outbound WebSockets with fetch over https; the service's own address is wss://…/api-ws/v1/inference.
+export const DASHSCOPE_INFERENCE_URL = 'https://dashscope.aliyuncs.com/api-ws/v1/inference'
+
+export function bailianVoiceEndpoint(env: Readonly<Record<string, unknown>>) {
+  const value = env.BAILIAN_WORKSPACE_ID
+  if (typeof value !== 'string' || !value.trim()) return { url: DASHSCOPE_INFERENCE_URL, workspace: undefined }
+  const workspace = value.trim()
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(workspace)) throw new Error('Invalid BAILIAN_WORKSPACE_ID')
+  return { url: `https://${workspace}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`, workspace }
+}
+
 // GET /api/voice: which recognizer turns the doctor's speech into Consultation turns. Paraformer when the Worker
 // has a BAILIAN_TOKEN, otherwise the browser's Web Speech API. Never carries the token.
 export interface VoiceConfigResponse {

@@ -1,3 +1,4 @@
+import type { NoteSection } from '../../shared/clinical-note'
 import type {
   CopilotFailure,
   CopilotFeedback,
@@ -13,6 +14,7 @@ import type { CopilotCompactionEntry } from '../../shared/copilot-context'
 
 // What a Copilot run was asked, as recorded in its trigger.
 export interface CopilotTrigger {
+  sections?: NoteSection[]
   kind: 'event' | 'doctor'
   text: string
   mentions: CopilotMention[]

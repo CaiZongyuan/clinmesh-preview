@@ -1,9 +1,12 @@
 import { NoteSuggestions } from './clinical-note/note-suggestions'
 import { Button } from '@ui-sdk/react/button'
 import { Switch, SwitchThumb } from '@ui-sdk/react/switch'
-import { Dialog, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
+import { ScrollArea, ScrollAreaContent, ScrollAreaScrollToEnd, ScrollAreaViewport } from '@ui-sdk/react/scroll-area'
+import { Tabs, TabsList, TabsPanel, TabsTab } from '@ui-sdk/react/tabs'
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
 import { Select, SelectContent, SelectItem, SelectList, SelectTrigger, SelectValue } from '@ui-sdk/react/select'
 import {
+  createTriggerMenuController,
   TriggerMenu,
   TriggerMenuContent,
   TriggerMenuEmpty,
@@ -15,6 +18,13 @@ import {
 } from '@ui-sdk/react/trigger-menu'
 import type { TriggerMenuContentState, TriggerMenuData, TriggerMenuDataGroup, TriggerMenuDataItem, TriggerMenuSelectDetails } from '@ui-sdk/react/trigger-menu'
 import {
+  AtSignIcon,
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChartPieIcon,
+  CheckIcon,
+  ScanLineIcon,
+  XIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CircleStopIcon,
@@ -44,9 +54,10 @@ import { fetchClinicalNote, fetchInvestigations } from '../api'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import type { CopilotSession } from '../copilot/use-copilot'
 import { formatClockSeconds } from './format'
-import { markdown } from './copilot-markdown'
-import { CopilotContextDialog } from './copilot-context-view'
-import { badge, iconButton, pane, paneHeader } from './pane-styles'
+import { CopilotMarkdown } from './copilot-markdown'
+import { CopilotContextViewPanel } from './copilot-context-view'
+import { badge, iconButton, pane } from './pane-styles'
+import { ActionTooltip } from './ui-tooltip'
 
 const EFFORT_LABEL: Record<CopilotModelSetting['effort'], string> = { off: '关', low: '低', medium: '中', high: '高' }
 const FAILURE_TEXT: Record<NonNullable<CopilotTurn['failure']>, string> = {
@@ -65,7 +76,7 @@ const STOP_TEXT: Record<NonNullable<CopilotTurn['stopReason']>, string> = {
 
 const TOOL_STATE_TEXT: Record<string, string> = {
   running: '读取中…',
-  ok: '',
+  ok: '已完成',
   error: '读取失败',
   cancelled: '未执行',
   denied: '已拦截',
@@ -77,19 +88,15 @@ const seconds = (dur: number) => `${dur.toFixed(1)}s`
 function ToolStep({ step, label }: { step: Extract<CopilotStep, { kind: 'tool' }>; label: string }) {
   const status = TOOL_STATE_TEXT[step.state]
   return (
-    <li className="flex items-center gap-1.5 text-xs text-muted-foreground" data-tool-state={step.state}>
-      <WrenchIcon aria-hidden="true" size={13} />
-      <span>{step.subject}</span>
-      {status && <span className="text-info">{status}</span>}
-      <details className="min-w-0">
-        <summary aria-label={`详情 · ${label} · ${step.subject}`} className="cursor-pointer list-none underline decoration-dotted">详情</summary>
-        <pre className="copilot-args overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-[11px]">
-          {JSON.stringify(step.args)}
-          {'\n────\n'}
-          {step.result}
-        </pre>
+    <li className="tool-step" data-tool-state={step.state}>
+      <details>
+        <summary aria-label={`详情 · ${label} · ${step.subject}`}>
+          <WrenchIcon size={14} /><strong>{step.subject}</strong><span>{status}</span>
+          <small>{seconds(step.dur)}</small><ChevronDownIcon size={12} /><span className="sr-only">详情</span>
+        </summary>
+        <dl><dt>工具</dt><dd>{step.name}</dd><dt>参数</dt><dd><pre>{JSON.stringify(step.args, null, 2)}</pre></dd>
+          <dt>结果</dt><dd><pre>{step.result || '尚无结果'}</pre></dd></dl>
       </details>
-      {step.dur > 0 && <span>{seconds(step.dur)}</span>}
     </li>
   )
 }
@@ -98,17 +105,15 @@ function TurnSteps({ turn, label }: { turn: CopilotTurn; label: string }) {
   const [open, setOpen] = useState(false)
   const steps = turn.steps
   if (steps.length === 0) return null
-  const Icon = open ? ChevronDownIcon : ChevronRightIcon
   return (
     <div className="copilot-steps">
       <button
         type="button"
-        className="flex items-center gap-1 text-xs text-muted-foreground"
         aria-expanded={open}
         aria-label={`思考与读取（${steps.length}） · ${label}`}
         onClick={() => setOpen((value) => !value)}
       >
-        <Icon aria-hidden="true" size={13} />
+        <ChevronRightIcon aria-hidden="true" size={13} />
         思考与读取（{steps.length}）
       </button>
       {open && (
@@ -129,7 +134,7 @@ function TurnSteps({ turn, label }: { turn: CopilotTurn; label: string }) {
   )
 }
 
-function TurnActions({ turn, label, copilot, onEdit }: { turn: CopilotTurn; label: string; copilot: CopilotSession; onEdit: (text: string) => void }) {
+function TurnActions({ turn, label, copilot, onEdit, writable }: { writable: boolean; turn: CopilotTurn; label: string; copilot: CopilotSession; onEdit: (text: string) => void }) {
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -139,51 +144,64 @@ function TurnActions({ turn, label, copilot, onEdit }: { turn: CopilotTurn; labe
     } catch {}
   }
   return (
-    <div className="flex items-center gap-0.5 text-muted-foreground">
-      <Button aria-label={`复制回答 · ${label}`} title="复制回答" className={iconButton} onClick={() => void copy()}>
-        <CopyIcon aria-hidden="true" size={14} />
-      </Button>
-      {copied && <span className="text-[11px]">已复制</span>}
-      {turn.status === 'done' && (
+    <div className="turn-actions flex items-center gap-0.5 text-muted-foreground">
+      <ActionTooltip label={copied ? '已复制' : '复制回答'} closeOnPress={false} side="top">
+        <Button aria-label={`复制回答 · ${label}`} className={iconButton} onClick={() => void copy()}>
+          {copied
+            ? <CheckIcon aria-hidden="true" size={14} className="text-success" />
+            : <CopyIcon aria-hidden="true" size={14} />}
+        </Button>
+      </ActionTooltip>
+      {copied && <span className="sr-only" role="status">已复制</span>}
+      {writable && turn.status === 'done' && (
         <>
-          <Button aria-label={`重新生成 · ${label}`} title="重新生成" className={iconButton} onClick={() => void copilot.resend(turn.turnId, turn.trigger.text, turn.trigger.mentions)}>
-            <RefreshCwIcon aria-hidden="true" size={14} />
-          </Button>
-          <Button aria-label={`编辑并重发 · ${label}`} title="编辑并重发" className={iconButton} onClick={() => onEdit(turn.trigger.text)}>
-            <PencilIcon aria-hidden="true" size={14} />
-          </Button>
-          <Button
-            aria-label={`有帮助 · ${label}`}
-            aria-pressed={turn.feedback === 'up'}
-            className={iconButton}
-            onClick={() => void copilot.setFeedback(turn.turnId, turn.feedback === 'up' ? null : 'up')}
-          >
-            <ThumbsUpIcon aria-hidden="true" size={14} />
-          </Button>
-          <Button
-            aria-label={`没有帮助 · ${label}`}
-            aria-pressed={turn.feedback === 'down'}
-            className={iconButton}
-            onClick={() => void copilot.setFeedback(turn.turnId, turn.feedback === 'down' ? null : 'down')}
-          >
-            <ThumbsDownIcon aria-hidden="true" size={14} />
-          </Button>
+          <ActionTooltip label="重新生成" side="top">
+            <Button aria-label={`重新生成 · ${label}`} className={iconButton} onClick={() => void copilot.resend(turn.turnId, turn.trigger.text, turn.trigger.mentions)}>
+              <RefreshCwIcon aria-hidden="true" size={14} />
+            </Button>
+          </ActionTooltip>
+          <ActionTooltip label="编辑并重发" side="top">
+            <Button aria-label={`编辑并重发 · ${label}`} className={iconButton} onClick={() => onEdit(turn.trigger.text)}>
+              <PencilIcon aria-hidden="true" size={14} />
+            </Button>
+          </ActionTooltip>
+          <ActionTooltip label={turn.feedback === 'up' ? '取消有帮助' : '有帮助'} side="top">
+            <Button
+              aria-label={`有帮助 · ${label}`}
+              aria-pressed={turn.feedback === 'up'}
+              className={iconButton}
+              onClick={() => void copilot.setFeedback(turn.turnId, turn.feedback === 'up' ? null : 'up')}
+            >
+              <ThumbsUpIcon aria-hidden="true" size={14} />
+            </Button>
+          </ActionTooltip>
+          <ActionTooltip label={turn.feedback === 'down' ? '取消没有帮助' : '没有帮助'} side="top">
+            <Button
+              aria-label={`没有帮助 · ${label}`}
+              aria-pressed={turn.feedback === 'down'}
+              className={iconButton}
+              onClick={() => void copilot.setFeedback(turn.turnId, turn.feedback === 'down' ? null : 'down')}
+            >
+              <ThumbsDownIcon aria-hidden="true" size={14} />
+            </Button>
+          </ActionTooltip>
         </>
       )}
     </div>
   )
 }
 
-function CopilotTurnView({ turn, index, copilot, onEdit }: { turn: CopilotTurn; index: number; copilot: CopilotSession; onEdit: (text: string) => void }) {
+function CopilotTurnView({ turn, index, copilot, onEdit, writable }: { writable: boolean; turn: CopilotTurn; index: number; copilot: CopilotSession; onEdit: (text: string) => void }) {
   const live = turn.status === 'running'
   const label = `第 ${index + 1} 轮`
   return (
-    <li className="flex flex-col gap-1.5 border-b pb-3" data-turn-status={turn.status} data-turn-superseded={turn.superseded || undefined}>
-      <p className="m-0 text-xs text-muted-foreground">
-        {turn.trigger.kind === 'doctor' ? '医生' : '自动'} · {formatClockSeconds(turn.startedAt)}
-        {turn.superseded && ' · 已被取代'}
-      </p>
-      <p className="m-0 text-[13px] font-medium">{turn.trigger.text}</p>
+    <li className="copilot-turn" data-turn-status={turn.status} data-turn-superseded={turn.superseded || undefined}>
+      {turn.trigger.kind === 'doctor' ? (
+        <div className="turn-prompt"><span className="prompt-avatar" aria-hidden="true">医</span>
+          <div><p className="turn-byline">医生 · {formatClockSeconds(turn.startedAt)}{turn.superseded && ' · 已被取代'}</p>
+          <p>{turn.trigger.text}</p></div>
+        </div>
+      ) : <div className="turn-event"><strong>{turn.trigger.text} · 自动</strong></div>}
       {turn.trigger.mentions.length > 0 && (
         <p className="m-0 flex flex-wrap gap-1">
           {turn.trigger.mentions.map((mention) => (
@@ -202,7 +220,7 @@ function CopilotTurnView({ turn, index, copilot, onEdit }: { turn: CopilotTurn; 
       )}
       {(turn.reply || live) && (
         <div className="copilot-reply text-[13px]" aria-busy={live}>
-          {markdown(turn.reply || '…')}
+          <CopilotMarkdown text={turn.reply || '…'} />
         </div>
       )}
       {turn.failure && <p className="m-0 text-xs text-destructive">{FAILURE_TEXT[turn.failure]}</p>}
@@ -214,7 +232,7 @@ function CopilotTurnView({ turn, index, copilot, onEdit }: { turn: CopilotTurn; 
           <span className="text-[11px] text-muted-foreground">
             {turn.usage ? `用量 输入 ${turn.usage.in} · 输出 ${turn.usage.out}` : ''}
           </span>
-          <TurnActions turn={turn} label={label} copilot={copilot} onEdit={onEdit} />
+          <TurnActions writable={writable} turn={turn} label={label} copilot={copilot} onEdit={onEdit} />
         </div>
       )}
     </li>
@@ -223,7 +241,7 @@ function CopilotTurnView({ turn, index, copilot, onEdit }: { turn: CopilotTurn; 
 
 function ModelChip({ model, onChange }: { model: CopilotModelSetting; onChange: (m: string, e: CopilotModelSetting['effort']) => void }) {
   return (
-    <span className="flex items-center gap-1">
+    <span className="model-controls">
       <Select
         aria-label="助手模型"
         value={model.model}
@@ -274,6 +292,7 @@ interface ComposerProps {
   onMentionsChange: (mentions: CopilotMention[]) => void
   editing: string | null
   onCancelEdit: () => void
+  onOpenContext: () => void
 }
 
 type MentionItem = TriggerMenuDataItem<string> & { value: string; label: string }
@@ -347,20 +366,21 @@ function CompactionMarkers({ compactions }: { compactions: CopilotSession['compa
   )
 }
 
-function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftChange, mentions, onMentionsChange, editing, onCancelEdit }: ComposerProps) {
+function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftChange, mentions, onMentionsChange, editing, onCancelEdit, onOpenContext }: ComposerProps) {
   const [mode, setMode] = useState<CopilotPromptMode>('queue')
   const [menuOpen, setMenuOpen] = useState(false)
-  const [contextOpen, setContextOpen] = useState(false)
-  const input = useRef<HTMLTextAreaElement>(null)
+  const [sendError, setSendError] = useState('')
+  const [menu] = useState(createTriggerMenuController)
 
   const submit = async () => {
     const text = draft.trim()
     if (!text || text.length > MAX_PROMPT_LENGTH) return
     if (text === CONTEXT_COMMAND) {
       // A typed slash command opens the same read-only view the menu action does; what the doctor typed stays.
-      setContextOpen(true)
+      onOpenContext()
       return
     }
+    setSendError('')
     const used = mentions.filter((mention) => text.includes(`@${mention.label}`))
     const sent = editing ? await copilot.resend(editing, text, used) : await copilot.prompt(text, used, mode)
     if (sent) {
@@ -369,10 +389,13 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
       onDraftChange('')
       onMentionsChange([])
       onCancelEdit()
+    } else {
+      setSendError('发送失败，内容已保留，可以重试。')
     }
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === 'Escape' && (editing || menuOpen)) {
       event.stopPropagation()
       if (editing && !menuOpen) onCancelEdit()
@@ -419,7 +442,7 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
     if (value === CONTEXT_COMMAND) {
       // Open the read-only context view; the composer keeps whatever the doctor had typed.
       details.preventDefault()
-      setContextOpen(true)
+      onOpenContext()
       return
     }
     if (details.trigger !== '@') return
@@ -432,7 +455,8 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
   }
 
   return (
-    <div className="flex flex-col gap-1.5 border-t px-3 py-2">
+    <div className="copilot-composer">
+      {sendError && <p role="alert" className="text-xs text-destructive">{sendError}</p>}
       {editing && (
         <p className="m-0 flex items-center gap-2 text-xs text-muted-foreground">
           正在编辑并重发上一轮
@@ -442,15 +466,15 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
         </p>
       )}
       <TriggerMenu
+        controller={menu}
         triggers={triggers}
         onOpenChange={setMenuOpen}
         onSelect={onSelect}
       >
         <TriggerMenuInput
-          ref={input}
           aria-label="问临床助手"
           data-copilot-composer
-          placeholder={copilot.busy ? '助手正在运行：发送可指引（steer）或排队' : '输入问题，/ 唤出命令，@ 引用就诊资料与草稿'}
+          placeholder={copilot.busy ? '输入指引或加入队列…' : '询问本次就诊，或用 @ 引用资料…'}
           value={draft}
           maxLength={MAX_PROMPT_LENGTH}
           onChange={(event) => onDraftChange(event.target.value)}
@@ -475,17 +499,7 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
           </TriggerMenuList>
         </TriggerMenuContent>
       </TriggerMenu>
-      <Dialog open={contextOpen} onOpenChange={setContextOpen}>
-        <DialogContent className="copilot-menu max-w-lg overflow-auto p-4" aria-label="助手上下文（只读）">
-          <DialogTitle className="m-0 text-sm font-semibold">助手上下文（只读）</DialogTitle>
-          <CopilotContextDialog
-            encounterId={encounterId}
-            modelLabel={copilot.model ? `${copilot.model.model} · ${EFFORT_LABEL[copilot.model.effort]}` : null}
-          />
-        </DialogContent>
-      </Dialog>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="composer-toolbar">
           {copilot.busy ? (
             <>
               <Button aria-label="停止当前轮" className="h-7 gap-1 px-2" onClick={() => void copilot.stop()}>
@@ -501,12 +515,23 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
               </Button>
             </>
           ) : (
-            <span>Enter 发送 · Shift+Enter 换行 · Ctrl+/ 聚焦</span>
+            <>
+              <ActionTooltip label="引用就诊资料（@）" side="top">
+                <Button aria-label="引用就诊资料" className="composer-shortcut" onClick={() => void menu.open({ trigger: '@' })}>
+                  <AtSignIcon aria-hidden="true" size={15} />
+                </Button>
+              </ActionTooltip>
+              <ActionTooltip label="打开助手命令（/）" side="top">
+                <Button aria-label="打开助手命令" className="composer-shortcut" onClick={() => void menu.open({ trigger: '/' })}>/</Button>
+              </ActionTooltip>
+              {copilot.model && <ModelChip model={copilot.model} onChange={(m, e) => void copilot.configure(m, e)} />}
+            </>
           )}
-        </div>
-        <Button aria-label="发送给临床助手" className="h-7 px-3" disabled={!draft.trim()} onClick={() => void submit()}>
-          发送
-        </Button>
+        <ActionTooltip label="发送（Enter）" side="top" disabled={!draft.trim()}>
+          <Button aria-label="发送给临床助手" data-variant="solid" className="send-prompt" disabled={!draft.trim()} onClick={() => void submit()}>
+            <ArrowUpIcon aria-hidden="true" size={15} />
+          </Button>
+        </ActionTooltip>
       </div>
     </div>
   )
@@ -514,31 +539,41 @@ function CopilotComposer({ copilot, encounterId, examinations, draft, onDraftCha
 
 export interface CopilotPanelProps {
   copilot: CopilotSession
-  encounter: EncounterView | undefined
+  encounter: EncounterView
   examinations: PhysicalExaminationView[]
   onHide: () => void
+  draft: string
+  setDraft: (text: string) => void
+  mentions: CopilotMention[]
+  setMentions: (mentions: CopilotMention[]) => void
+  editing: string | null
+  setEditing: (id: string | null) => void
 }
 
-export function CopilotPanel({ copilot, encounter, examinations, onHide }: CopilotPanelProps) {
-  const [draft, setDraft] = useState('')
-  const [mentions, setMentions] = useState<CopilotMention[]>([])
-  const [editing, setEditing] = useState<string | null>(null)
-  const model = copilot.model
+export function CopilotPanel({ copilot, encounter, examinations, onHide, draft, setDraft, mentions, setMentions, editing, setEditing }: CopilotPanelProps) {
+  const [tab, setTab] = useState('session')
+  const [contextOpen, setContextOpen] = useState(false)
+  const latest = copilot.turns.at(-1)
+  const contextProps = {
+    encounterId: encounter.encounterId,
+    modelLabel: copilot.model?.model ?? null,
+    writable: encounter.status === 'active',
+    revision: [latest?.turnId, latest?.status, latest?.steps.length, copilot.compactions[0]?.markerId, examinations.length].join('/'),
+  }
   return (
-    <aside aria-label="临床助手" className={pane} data-stream={copilot.stream}>
-      <div className={paneHeader}>
-        <h2 className="m-0 flex items-center gap-1.5 text-sm font-semibold">
-          <SparklesIcon aria-hidden="true" size={15} className="text-info" />
-          临床助手
-          {copilot.busy && <span className="text-xs font-normal text-info">运行中</span>}
-        </h2>
-        <div className="flex items-center gap-1.5">
+    <aside aria-label="临床助手" className={`${pane} copilot-pane`} data-stream={copilot.stream} data-running={copilot.busy || undefined}>
+      <div className="pane-heading">
+        <span className="section-icon assistant-icon"><SparklesIcon size={19} /></span>
+        <div className="agent-session"><h2>临床助手</h2><p title={`就诊 ${encounter.patient.outpatientNumber}`}>
+          就诊 {encounter.patient.outpatientNumber} · 检查点 {copilot.checkpoint === null ? '…' : `#${copilot.checkpoint}`}
+        </p></div>
+        <div className="pane-options">
           {encounter?.status === 'active' && (
             <label className="flex shrink-0 items-center gap-1 text-xs">
               <span>自动分析</span>
               <Switch
                 checked={copilot.autoAnalysis}
-                disabled={!model}
+                disabled={!copilot.model}
                 onCheckedChange={(enabled) => void copilot.setAutomaticAnalysis(enabled)}
                 data-agent-confirm="更改自动分析设置"
               >
@@ -546,10 +581,11 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
               </Switch>
             </label>
           )}
-          {model && <ModelChip model={model} onChange={(m, e) => void copilot.configure(m, e)} />}
-          <Button aria-label="隐藏临床助手" title="隐藏临床助手" className={iconButton} onClick={onHide}>
-            <ChevronRightIcon aria-hidden="true" size={16} />
-          </Button>
+          <ActionTooltip label="隐藏临床助手" side="bottom">
+            <Button aria-label="隐藏临床助手" className={iconButton} onClick={onHide}>
+              <ChevronRightIcon aria-hidden="true" size={16} />
+            </Button>
+          </ActionTooltip>
         </div>
       </div>
       {copilot.stream === 'reconnecting' && (
@@ -557,15 +593,15 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
           连接中断，正在重连，恢复后从最新检查点继续。
         </p>
       )}
-      {!encounter ? (
-        <div className="min-h-0 flex-1">
-          <p className="m-0 p-4 text-[13px] text-muted-foreground">
-            接诊开始后，临床助手会随问诊、查体与报告自动分析，并把草稿写入病例工作区。
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="min-h-0 flex-1 overflow-auto px-3.5 pt-3" role="log" aria-label="临床助手会话">
+      <Tabs className="assistant-tabs" value={tab} onValueChange={(value) => value && setTab(value)}>
+        <TabsList aria-label="临床助手视图" className="section-tabs">
+          <TabsTab value="session">会话</TabsTab>
+          <TabsTab value="context">上下文</TabsTab>
+        </TabsList>
+        <TabsPanel value="session" className="session-panel">
+          <ScrollArea stickToEnd className="session-scroll">
+            <ScrollAreaViewport role="log" aria-label="临床助手会话" className="session-viewport">
+              <ScrollAreaContent className="session-content">
             {encounter.status === 'active' && <AmbientCountdown copilot={copilot} />}
             {encounter.status === 'active' && (!copilot.autoAnalysis || copilot.pendingAnalysis.length > 0) && (
               <section aria-label="待分析" className="mb-2 rounded-md border border-dashed border-border p-2 text-xs">
@@ -595,11 +631,15 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
             )}
             <CompactionMarkers compactions={copilot.compactions} />
             {copilot.turns.length === 0 ? (
-              <p className="m-0 pb-3 text-[13px] text-muted-foreground">向临床助手提问，它会用只读工具查阅本次就诊的资料后回答。</p>
+              <div className="conversation-empty"><span className="section-icon assistant-icon"><SparklesIcon size={20} /></span>
+                <strong>本次就诊会话</strong><p>可询问鉴别诊断、检查建议或病历小结。</p>
+                {encounter.status === 'active' && <div>{['/检查建议', '/病历小结'].map((command) => <Button key={command}
+                  onClick={() => { setDraft(command + ' '); document.querySelector<HTMLElement>('[data-copilot-composer]')?.focus() }}>{command}</Button>)}</div>}
+              </div>
             ) : (
               <ol className="m-0 flex list-none flex-col gap-3 pb-3">
                 {copilot.turns.map((turn, index) => (
-                  <CopilotTurnView key={turn.turnId} index={index} turn={turn} copilot={copilot} onEdit={(text) => {
+                  <CopilotTurnView writable={encounter.status === 'active'} key={turn.turnId} index={index} turn={turn} copilot={copilot} onEdit={(text) => {
                     setDraft(text)
                     setMentions(turn.trigger.mentions)
                     setEditing(turn.turnId)
@@ -607,8 +647,20 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
                 ))}
               </ol>
             )}
-          </div>
+              </ScrollAreaContent>
+            </ScrollAreaViewport>
+            <ScrollAreaScrollToEnd className="consultation-jump"><ArrowDownIcon size={13} />回到最新回复</ScrollAreaScrollToEnd>
+          </ScrollArea>
+        </TabsPanel>
+        <TabsPanel value="context" className="context-panel">
+          {tab === 'context' && <><div className="inspector-heading"><h3>上下文洞察</h3>
+            <Button aria-label="展开上下文" onClick={() => setContextOpen(true)}><ScanLineIcon size={15} />展开</Button></div>
+            <CopilotContextViewPanel {...contextProps} /></>}
+        </TabsPanel>
+      </Tabs>
+      {encounter.status === 'active' && <div className="assistant-input-area">
           <CopilotComposer
+            onOpenContext={() => setContextOpen(true)}
             copilot={copilot}
             encounterId={encounter.encounterId}
             examinations={examinations}
@@ -619,8 +671,15 @@ export function CopilotPanel({ copilot, encounter, examinations, onHide }: Copil
             editing={editing}
             onCancelEdit={() => setEditing(null)}
           />
-        </>
-      )}
+          <p className="composer-hint"><kbd>Enter</kbd> 发送 · <kbd>Shift+Enter</kbd> 换行 · <kbd>/</kbd> 命令 · <kbd>@</kbd> 引用</p>
+      </div>}
+      <Dialog open={contextOpen} onOpenChange={setContextOpen}>
+        <DialogContent className="context-dialog" aria-label="上下文洞察">
+          <header><span className="section-icon assistant-icon"><ChartPieIcon size={18} /></span>
+            <DialogTitle>上下文洞察</DialogTitle><DialogClose aria-label="关闭上下文"><XIcon size={17} /></DialogClose></header>
+          {contextOpen && <CopilotContextViewPanel {...contextProps} />}
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }

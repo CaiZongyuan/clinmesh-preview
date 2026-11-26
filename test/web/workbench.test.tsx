@@ -18,24 +18,22 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderWorkbench() {
+function renderWorkbench(active = true) {
+  if (active) fetchStub.mockImplementation(createFakeClinicApi({ encounters: [encounterFor()] }).handle)
   const router = createAppRouter({ history: createMemoryHistory({ initialEntries: ['/'] }) })
   return render(<RouterProvider router={router} />)
 }
 
 describe('outpatient workbench', () => {
-  it('lays out the four regions and lists Golden Case 1 in the queue, grouped by status', async () => {
+  it('opens the roster and lists Golden Case 1 in the queue, grouped by status', async () => {
     const user = userEvent.setup()
-    renderWorkbench()
+    renderWorkbench(false)
 
     const rail = await screen.findByRole('navigation', { name: '候诊队列' })
     expect(fetchStub).toHaveBeenCalledWith('/api/golden-cases', undefined)
-    expect(screen.getByRole('region', { name: '问诊记录' })).toBeInTheDocument()
-    expect(screen.getByRole('main', { name: '病例工作区' })).toBeInTheDocument()
-    expect(screen.getByRole('complementary', { name: '临床助手' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '挂号信息' })).toBeInTheDocument()
     expect(within(rail).getByRole('button', { name: '7 号 李建国 · 待诊' })).toBeInTheDocument()
 
-    await user.click(within(rail).getByRole('button', { name: '打开候诊队列' }))
     const groups = await screen.findByRole('tablist', { name: '候诊分组' })
     expect(within(groups).getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['在诊 0', '待诊 1', '完诊 0'])
     expect(within(groups).getByRole('tab', { name: '待诊 1' })).toHaveAttribute('aria-selected', 'true')

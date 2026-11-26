@@ -62,6 +62,7 @@ function stubMicrophone() {
       enumerateDevices: vi.fn(async () => [
         { deviceId: 'mic-1', kind: 'audioinput', label: '测试麦克风', groupId: 'g', toJSON: {} },
         { deviceId: 'mic-2', kind: 'audioinput', label: '另一支麦克风', groupId: 'g', toJSON: {} },
+        { deviceId: 'mic-1', kind: 'audiooutput', label: '扬声器', groupId: 'g', toJSON: {} },
       ]),
     },
     configurable: true,
@@ -177,17 +178,22 @@ describe('voice capture', () => {
     expect(mic.getUserMedia).not.toHaveBeenCalled()
   })
 
-  it('streams to the Paraformer voice socket in continuous mode, shows interim captions, and accepts the recorded turn', { timeout: 20_000 }, async () => {
-    stubMicrophone()
+  it('waits for microphone PCM before starting Paraformer, then transcribes in continuous mode', { timeout: 20_000 }, async () => {
+    const mic = stubMicrophone()
     const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
     await column()
     const bar = await voiceBar()
     const user = userEvent.setup()
 
-    expect(within(bar).getByRole('status', { name: '语音识别状态' })).toHaveTextContent('未连接')
+    expect(within(bar).getByRole('status', { name: '语音识别状态' })).toHaveTextContent('待机 · 麦克风未开启')
     await user.click(within(bar).getByRole('button', { name: '开始持续收音' }))
     const socket = await openVoiceSocket(api)
+    await waitFor(() => expect(socket.sent.map((m) => m.type)).toEqual(['clinmesh.capture']))
+    expect(within(bar).getByRole('status', { name: '语音识别状态' })).toHaveTextContent('等待麦克风音频')
+    act(() => mic.fireAudio())
     await waitFor(() => expect(socket.sent.map((m) => m.type)).toEqual(['clinmesh.capture', 'start_call']))
+    expect(socket.frames).toBe(1)
+    expect(screen.queryByRole('option', { name: '扬声器' })).not.toBeInTheDocument()
     expect(socket.sent[0].mode).toBe('continuous')
     await waitFor(async () => expect(within(await voiceBar()).getByRole('status', { name: '语音识别状态' })).toHaveTextContent('识别服务已连接'))
 
@@ -206,7 +212,7 @@ describe('voice capture', () => {
   })
 
   it('push-to-talk commits on release, and discards a slide-up cancel', { timeout: 20_000 }, async () => {
-    stubMicrophone()
+    const mic = stubMicrophone()
     const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
     await column()
     const bar = await voiceBar()
@@ -232,6 +238,8 @@ describe('voice capture', () => {
     fireEvent.pointerDown(fresh)
     await waitFor(() => expect(api.voiceSockets()).toHaveLength(1))
     const second = api.voiceSockets().find((s) => !firstSockets.includes(s))!
+    await waitFor(() => expect(second.sent[0]?.type).toBe('clinmesh.capture'))
+    act(() => mic.fireAudio())
     await new Promise((resolve) => setTimeout(resolve, 650))
     fireEvent.pointerUp(await within(await voiceBar()).findByRole('button', { name: /正在录音/ }))
     await waitFor(() => expect(second.sent.map((m) => m.type)).toContain('clinmesh.commit'))
@@ -294,6 +302,24 @@ describe('voice capture', () => {
     expect(screen.getByText('已取消，这段话没有记录。')).toBeInTheDocument()
   })
 
+  it('keeps a provider refusal visible when the SDK follows it with a generic error and releases the mic', async () => {
+    const mic = stubMicrophone()
+    const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
+    await column()
+    const user = userEvent.setup()
+    await user.click(within(await voiceBar()).getByRole('button', { name: '开始持续收音' }))
+    const socket = await openVoiceSocket(api)
+    act(() => mic.fireAudio())
+    await waitFor(() => expect(socket.frames).toBe(1))
+    act(() => {
+      socket.onmessage?.({ data: JSON.stringify({ type: 'error', code: 'AllocationQuota.FreeTierOnly', message: '百炼拒绝了本次免费识别请求（AllocationQuota.FreeTierOnly）。任务号 test-id' }) })
+      socket.onmessage?.({ data: JSON.stringify({ type: 'error', message: 'Speech recognition connection was lost' }) })
+    })
+    expect(await within(await column()).findByRole('alert')).toHaveTextContent('任务号 test-id')
+    expect(screen.queryByText('Speech recognition connection was lost')).not.toBeInTheDocument()
+    expect(mic.stopTrack).toHaveBeenCalledTimes(1)
+  })
+
   it('pausing releases the microphone and shows a persistent privacy banner', { timeout: 20_000 }, async () => {
     const mic = stubMicrophone()
     const { api } = openEncounter({ recognizer: 'paraformer-realtime-v2' })
@@ -302,11 +328,8 @@ describe('voice capture', () => {
     const user = userEvent.setup()
     await user.click(within(bar).getByRole('button', { name: '开始持续收音' }))
     const socket = await openVoiceSocket(api)
+    act(() => mic.fireAudio())
     await waitFor(async () => expect(within(await voiceBar()).getByRole('status', { name: '语音识别状态' })).toHaveTextContent('识别服务已连接'))
-
-    // The mic streams a frame, then pausing gates it: no audio frame leaves the browser while paused,
-    // so nothing can be transcribed.
-    mic.fireAudio()
     expect(socket.frames).toBe(1)
     await user.click(within(await voiceBar()).getByRole('button', { name: '暂停收音' }))
     const banner = await screen.findByRole('status', { name: '麦克风已暂停' })
@@ -321,8 +344,11 @@ describe('voice capture', () => {
 
     await user.click(within(await voiceBar()).getByRole('button', { name: '恢复收音' }))
     expect(mic.getUserMedia).toHaveBeenCalledTimes(2)
-    mic.fireAudio()
-    expect(socket.frames).toBe(2)
+    const resumed = await openVoiceSocket(api)
+    expect(resumed).not.toBe(socket)
+    act(() => mic.fireAudio())
+    await waitFor(() => expect(resumed.frames).toBe(1))
+    expect(socket.frames).toBe(1)
   })
 
   it('lets Space activate a focused workbench button', async () => {
