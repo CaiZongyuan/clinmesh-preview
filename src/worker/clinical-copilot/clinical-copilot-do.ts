@@ -20,7 +20,7 @@ import { resolveLlmConfig, type LlmEnv } from '../llm/config'
 import type { ToolSpec } from '../llm/types'
 import type { AgentEvent } from '../../shared/agent-wire'
 import { applyMigrations } from '../sqlite-migrations'
-import { WORKSPACE_NAME } from '../workspace-name'
+import { workspaceName, type WorkspaceModeEnv } from '../workspace-name'
 import { COPILOT_SYSTEM_PROMPT, encounterOverview, promptContent } from './copilot-context'
 import { COMPACTION_SYSTEM_PROMPT, buildContextView, compactionItems, requestItems, rollingMessages, summarizeTranscript } from './copilot-accounting'
 import { estimateTokens } from '../durable-agent/context'
@@ -110,7 +110,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
     this.read = <R extends CopilotRead>(request: R): Promise<CopilotReadResult<R['kind']>> =>
-      env.CLINIC_WORKSPACE.getByName(WORKSPACE_NAME).readForCopilot(this.encounterId(), request) as Promise<CopilotReadResult<R['kind']>>
+      env.CLINIC_WORKSPACE.getByName(workspaceName(env as unknown as WorkspaceModeEnv)).readForCopilot(this.encounterId(), request) as Promise<CopilotReadResult<R['kind']>>
     const tools = copilotTools(this.read, this.bridge(), this.confirmTargets())
     this.toolSpecs = Object.values(tools).map((tool) => tool.spec)
     const toolSpecs = this.toolSpecs
@@ -279,7 +279,7 @@ export class ClinicalCopilotDO extends DurableObject<Env> {
       ...readSession(this.ctx.storage.sql),
     }
     if (!snapshot.turns.some((turn) => turn.status === 'stopped')) return snapshot
-    const kept = await this.env.CLINIC_WORKSPACE.getByName(WORKSPACE_NAME).getDraftAppliedCounts(encounterId)
+    const kept = await this.env.CLINIC_WORKSPACE.getByName(workspaceName(this.env as unknown as WorkspaceModeEnv)).getDraftAppliedCounts(encounterId)
     return {
       ...snapshot,
       turns: snapshot.turns.map((turn) => {

@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type { PatientTurnFailure } from '../../shared/consultation'
 import { DurableAgentRuntime, type AgentDefinition, type RunError, type RunOutcome } from '../durable-agent/runtime'
 import type { LlmEnv } from '../llm/config'
-import { WORKSPACE_NAME } from '../workspace-name'
+import { workspaceName, type WorkspaceModeEnv } from '../workspace-name'
 import { buildPatientContext, type ConsultationLine, type PatientPersona } from './patient-context'
 
 // Everything the Simulated Patient is ever given, built only by the workspace: the Patient Persona and one
@@ -71,7 +71,7 @@ export class SimulatedPatientDO extends DurableObject<Env> {
       settlement: {
         payload: (run, outcome) => settlementOf(run.trigger as ReplyTrigger, run.externalRef!, outcome),
         deliver: async (payload) =>
-          (await env.CLINIC_WORKSPACE.getByName(WORKSPACE_NAME).settlePatientTurn(payload as PatientTurnSettlement)).accepted,
+          (await env.CLINIC_WORKSPACE.getByName(workspaceName(env as unknown as WorkspaceModeEnv)).settlePatientTurn(payload as PatientTurnSettlement)).accepted,
       },
     }
     this.runtime = new DurableAgentRuntime(ctx, env as unknown as LlmEnv, agent)

@@ -20,6 +20,8 @@ interface ProbeContext {
   failedPatientTurnId: string
   pendingInvestigationId: string
   copilotTurnId: string | null
+  patientToken: string | null
+  logoutToken: string | null
 }
 
 // Distinct clientPromptIds across the phases, so a resent probe never lands on a probe of an earlier phase.
@@ -66,10 +68,13 @@ type PackAmendment = { reason: string; textOverride?: { findings: string; impres
 const releasedAmendments = (catalogItems: readonly string[]) =>
   casePack.cases[0].reportAmendments.filter((a) => catalogItems.includes(a.catalogItem)) as PackAmendment[]
 
-const request = (method: string, path: string, body?: unknown) =>
+const request = (method: string, path: string, body?: unknown, token?: string | null) =>
   exports.default.fetch(`http://clinmesh.test${path}`, {
     method,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    headers: {
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 
@@ -78,6 +83,33 @@ const request = (method: string, path: string, body?: unknown) =>
 // and get a probe here. A probe that uncovers Case Truth through a compliant action records it in `revealed`.
 // The Encounter Abandonment probe stays last because it ends the active Encounter.
 const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
+  'POST /api/auth/wechat': async (ctx) => {
+    const response = await request('POST', '/api/auth/wechat', { code: 'wx-code:truth_probe_a', inviteCode: 'CLIN-A-2026' })
+    if (response.ok) {
+      const cloned = (await response.clone().json()) as { token?: string }
+      if (cloned.token) ctx.patientToken = cloned.token
+    }
+    return response
+  },
+  'POST /api/auth/staff': async (ctx) => {
+    const response = await request('POST', '/api/auth/staff', { username: 'dr.wang', password: 'demo-doctor-a-pass' })
+    if (response.ok) {
+      const cloned = (await response.clone().json()) as { token?: string }
+      if (cloned.token) ctx.logoutToken = cloned.token
+    }
+    return response
+  },
+  'GET /api/me': ({ patientToken }) => request('GET', '/api/me', undefined, patientToken),
+  'POST /api/auth/logout': ({ logoutToken }) => request('POST', '/api/auth/logout', undefined, logoutToken),
+  'GET /api/clinic/departments': ({ patientToken }) => request('GET', '/api/clinic/departments', undefined, patientToken),
+  'GET /api/clinic/doctors': ({ patientToken }) => request('GET', '/api/clinic/doctors', undefined, patientToken),
+  'GET /api/contacts': ({ patientToken }) => request('GET', '/api/contacts', undefined, patientToken),
+  'GET /api/patient/records': ({ patientToken }) => request('GET', '/api/patient/records', undefined, patientToken),
+  'GET /api/patient/records/:id': ({ patientToken }) => request('GET', '/api/patient/records/rel_note_pat01_v1', undefined, patientToken),
+  'GET /api/patient/reports': ({ patientToken }) => request('GET', '/api/patient/reports', undefined, patientToken),
+  'GET /api/patient/reports/:id': ({ patientToken }) => request('GET', '/api/patient/reports/rel_rep_pat01_v1', undefined, patientToken),
+  'GET /api/patient/prescriptions': ({ patientToken }) => request('GET', '/api/patient/prescriptions', undefined, patientToken),
+  'POST /api/demo/reset': () => request('POST', '/api/demo/reset'),
   'PUT /api/encounters/:encounterId/investigations/draft': ({ encounterId }) =>
     request('PUT', `/api/encounters/${encounterId}/investigations/draft`, { entries: ['pct'] }),
   'PUT /api/encounters/:encounterId/prescriptions/draft': ({ encounterId }) =>
@@ -366,6 +398,8 @@ describe('Case Truth isolation over HTTP', () => {
       failedPatientTurnId: failed.turnId,
       pendingInvestigationId: crp.investigationId,
       copilotTurnId: null,
+      patientToken: null,
+      logoutToken: null,
     }
     await probeEveryRoute(ctx, 'Report version 1 released', { keepActive: true })
     // The pinned catalog insert texts (revealed once, legitimately) don't count; only the three vitals
@@ -404,5 +438,5 @@ describe('Case Truth isolation over HTTP', () => {
     const after = (await (await request('GET', `/api/encounters/${encounterId}`)).json()) as EncounterResponse
     expect(after.encounter.status).toBe('abandoned')
     await probeEveryRoute(ctx, 'abandoned Encounter')
-  })
+  }, 15_000)
 })

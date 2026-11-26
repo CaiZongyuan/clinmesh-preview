@@ -111,6 +111,17 @@ Run one seam with `pnpm test --project worker` or `pnpm test --project web`.
 - `data/` Pinned data snapshots. `data/provenance.json` records each snapshot's source paths and reference commit.
 - `test/worker/`, `test/web/` The two test seams. `test/fixtures/` holds shared Golden Case expectations.
 - `prototypes/copilot-workbench/` Reference prototype, not production code.
+- `apps/patient-miniapp/` Native WeChat MiniProgram scaffold (`glass-easel`, `tdesign-miniprogram@1.18.0`, `easyjssdk@2.0.5`, native wire transport).
+- `infrastructure/wukongim/` Version-pinned WuKongIM `v2.2.5-20260422` Docker Compose & runbook.
+- `data/demo-clinic/` Deterministic synthetic fixtures for Connected Clinic demo seeding and reset.
+
+### Connected Clinic (Issue #45 — S0 & S1)
+
+Connected Clinic runs on the same Worker and `ClinicWorkspaceDO` SQLite runtime isolated by `CLINIC_MODE=connected` (namespace `connected-clinic`; Phase 1 simulation remains the default on `default`). See `docs/adr/0004-connected-clinic-s0-poc-and-stack.md`, `docs/adr/0005-connected-clinic-auth-and-workspace-isolation.md`, `.env.example`, and `infrastructure/wukongim/README.md`.
+
+- **Local WuKongIM**: `docker compose -f infrastructure/wukongim/docker-compose.yml up -d` (HTTP management API loopback-only on `127.0.0.1:15001`, WS on `127.0.0.1:15200`).
+- **Auth & Portal routes**: `POST /api/auth/wechat` (invite-code demo binding), `POST /api/auth/staff`, `GET /api/me`, `POST /api/auth/logout`, `GET /api/clinic/departments`, `GET /api/clinic/doctors`, `GET /api/contacts`, `GET /api/patient/records[/:id]`, `GET /api/patient/reports[/:id]`, `GET /api/patient/prescriptions`, and dev/test-only `POST /api/demo/reset` (`DEMO_RESET_ENABLED=true`).
+- **External real-device prerequisites**: WeChat MiniProgram AppID, public HTTPS/WSS domains, and iOS/Android physical devices are required before real-device P0 acceptance can be checked off.
 
 ### Browser verification
 

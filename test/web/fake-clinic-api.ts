@@ -67,6 +67,17 @@ const STATUS: Record<EncounterError['code'], number> = {
   'copilot-llm-unavailable': 503,
   'copilot-bridge-required': 409,
   'copilot-run-stopped': 409,
+  unauthorized: 401,
+  forbidden: 403,
+  'invalid-credentials': 401,
+  'invite-code-required': 403,
+  'invite-code-invalid': 403,
+  'invite-code-expired': 403,
+  'patient-already-bound': 409,
+  'wechat-auth-failed': 401,
+  'wechat-not-configured': 503,
+  'resource-not-found': 404,
+  'demo-reset-disabled': 403,
 }
 
 const refuse = (code: EncounterError['code'], message: string) => Response.json({ error: { code, message } }, { status: STATUS[code] })

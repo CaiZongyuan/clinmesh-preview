@@ -1,41 +1,60 @@
-import { isGreeting } from './clinical-copilot/ambient-drafts'
-import type { DraftAssistance, DraftAssistanceCommand } from '../shared/draft-assistance'
-import { DraftAssistanceRepository, type DraftAssistanceResult } from './draft-assistance-repository'
 import { DurableObject } from 'cloudflare:workers'
-import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
-import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
-import type { AuditEventType, EncounterError, EncounterView } from '../shared/encounter'
-import type { CopilotNoteMention, CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
-import { CopilotReadModel } from './copilot-read-model'
-import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
-import { BODY_SYSTEM_NAME, type BodySystem } from '../shared/physical-examination'
-import type { CopilotAnalysisEvent, CopilotMention } from '../shared/copilot-turn'
+import type {
+  ContactView,
+  DemoResetResponse,
+  DepartmentView,
+  DoctorView,
+  PatientReleaseResourceType,
+  Principal,
+} from '../shared/auth'
 import type { DraftAuthor, NoteSection, NoteSections } from '../shared/clinical-note'
-import { DiagnosisRepository, type DiagnosisResult } from './diagnosis-repository'
-import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
+import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
+import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
+import type { CopilotAnalysisEvent, CopilotMention } from '../shared/copilot-turn'
 import type { DiagnosisDraftEntry } from '../shared/diagnosis'
-import { PrescriptionRepository, type PrescriptionsResult } from './prescription-repository'
+import type { DraftAssistance, DraftAssistanceCommand } from '../shared/draft-assistance'
+import type { AuditEventType, EncounterError, EncounterView } from '../shared/encounter'
+import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
+import type { InvestigationCatalogResponse } from '../shared/investigation'
 import type { PrescriptionLineRequest } from '../shared/medication'
+import { BODY_SYSTEM_NAME, type BodySystem } from '../shared/physical-examination'
+import {
+  AuthRepository,
+  normalizeInviteCode,
+  prepareSeedHashes,
+  type PatientReleaseDetailResult,
+  type PatientReleasesResult,
+  type PrincipalResult,
+} from './auth/auth-repository'
+import { generateOpaqueToken, hashSecret, sha256Hex } from './auth/crypto'
+import { isGreeting } from './clinical-copilot/ambient-drafts'
+import type { CopilotNoteMention, CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
+import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
 import { ConsultationRepository, type Exchange } from './consultation-repository'
-import { EncounterRepository, type EncounterResult } from './encounter-repository'
+import { CopilotReadModel } from './copilot-read-model'
+import { DiagnosisRepository, type DiagnosisResult } from './diagnosis-repository'
+import { DraftAssistanceRepository, type DraftAssistanceResult } from './draft-assistance-repository'
 import { EncounterCompletionRepository } from './encounter-completion-repository'
+import { EncounterRepository, type EncounterResult } from './encounter-repository'
 import { caseTruth, encounterChart, goldenCaseRegistrations, personaFor } from './golden-case-pack'
 import { GoldenCaseRepository } from './golden-case-repository'
-import { PhysicalExaminationRepository, type PhysicalExaminationResult } from './physical-examination-repository'
-import type { InvestigationCatalogResponse } from '../shared/investigation'
 import { catalogItem, catalogVersion, catalogView } from './investigation-catalog'
-import { medicationCatalog } from './medication-catalog'
 import { InvestigationRepository, type InvestigationsResult } from './investigation-repository'
+import { medicationCatalog } from './medication-catalog'
+import { PhysicalExaminationRepository, type PhysicalExaminationResult } from './physical-examination-repository'
+import { PrescriptionRepository, type PrescriptionsResult } from './prescription-repository'
 import type { PatientPersona } from './simulated-patient/patient-context'
 import type { PatientReplyRequest, PatientTurnSettlement } from './simulated-patient/simulated-patient-do'
+import { clinicMode, type WorkspaceModeEnv } from './workspace-name'
 import { migrateWorkspaceSchema } from './workspace-schema'
 
-// Phase 1 has no login: every formal write and audit event is attributed to the single demo practitioner.
+// Phase 1 simulation mode has no login: formal writes and audits attribute to the single demo practitioner.
 const DEMO_PRACTITIONER_ID = 'demo-practitioner'
 
 type Refusal = { ok: false; error: EncounterError }
 export type ConsultationResult = { ok: true; turns: ConsultationTurn[] } | Refusal
 export type ExchangeResult = ({ ok: true } & Exchange) | Refusal
+export type AuthSessionResult = { ok: true; token: string; principal: Principal } | Refusal
 // A recorded exchange, with the persona to ask the Simulated Patient with when it is new (not a resent request).
 type Recorded = { ok: true; exchange: Exchange; persona?: PatientPersona } | Refusal
 
@@ -45,6 +64,7 @@ const millis = (value: unknown, fallback: number) => {
 }
 
 export class ClinicWorkspaceDO extends DurableObject<Env> {
+  private readonly auth: AuthRepository
   private readonly goldenCases: GoldenCaseRepository
   private readonly encounters: EncounterRepository
   private readonly completion: EncounterCompletionRepository
@@ -62,6 +82,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
+    this.auth = new AuthRepository(ctx.storage.sql)
     this.goldenCases = new GoldenCaseRepository(ctx.storage.sql)
     this.encounters = new EncounterRepository(ctx.storage.sql)
     this.completion = new EncounterCompletionRepository(ctx.storage.sql)
@@ -76,31 +97,180 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     this.turnTimeoutMs = millis(env.PATIENT_TURN_TIMEOUT_MS, 30_000)
     this.expiryGraceMs = millis(env.PATIENT_TURN_EXPIRY_GRACE_MS, 5_000)
     ctx.blockConcurrencyWhile(async () => {
+      const seedHashes = clinicMode(env as unknown as WorkspaceModeEnv) === 'connected' ? await prepareSeedHashes() : null
       ctx.storage.transactionSync(() => {
         migrateWorkspaceSchema(ctx.storage.sql)
         this.goldenCases.reconcile(goldenCaseRegistrations())
+        if (seedHashes) this.auth.ensureSeeded(seedHashes, new Date().toISOString())
       })
     })
   }
+
+  private async ensureClinicSeeded(): Promise<void> {
+    if (this.auth.isSeeded()) return
+    const seedHashes = await prepareSeedHashes()
+    this.ctx.storage.transactionSync(() => {
+      this.auth.ensureSeeded(seedHashes, new Date().toISOString())
+    })
+  }
+
+  // Checks practitioner eligibility inside the same transaction that mutates state, preventing TOCTOU bypass.
+  private resolvePractitioner(practitionerId?: string, doctorOnly = true): { ok: true; practitionerId: string } | Refusal {
+    if (!practitionerId || practitionerId === DEMO_PRACTITIONER_ID) {
+      if (clinicMode(this.env as unknown as WorkspaceModeEnv) === 'connected') {
+        return { ok: false, error: { code: 'unauthorized', message: 'Connected Clinic 模式须使用已认证医护身份执行此操作。' } }
+      }
+      return { ok: true, practitionerId: DEMO_PRACTITIONER_ID }
+    }
+    const verified = this.auth.verifyActiveStaff(practitionerId, doctorOnly)
+    return verified.ok ? { ok: true, practitionerId: verified.staffId } : verified
+  }
+
+  // --- Connected Clinic S1 Auth, Directory, Patient Portal & Demo Reset ---
+
+  async loginStaff(username: string, password: string): Promise<AuthSessionResult> {
+    await this.ensureClinicSeeded()
+    const normalized = username.trim().toLowerCase()
+    const passwordHash = await hashSecret(`staff:${normalized}`, password)
+    const token = generateOpaqueToken()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const result = this.auth.loginStaff(normalized, passwordHash, tokenHash, new Date())
+      return result.ok ? { ok: true, token, principal: result.principal } : result
+    })
+  }
+
+  async loginWeChat(openid: string, inviteCode?: string): Promise<AuthSessionResult> {
+    await this.ensureClinicSeeded()
+    const trimmedInvite = inviteCode?.trim()
+    const inviteCodeHash = trimmedInvite ? await hashSecret('invite', normalizeInviteCode(trimmedInvite)) : null
+    const token = generateOpaqueToken()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const result = this.auth.loginWeChat(openid, inviteCodeHash, tokenHash, new Date())
+      return result.ok ? { ok: true, token, principal: result.principal } : result
+    })
+  }
+
+  async authenticateBearer(token: string): Promise<PrincipalResult> {
+    if (!token) return { ok: false, error: { code: 'unauthorized', message: '缺少认证凭据。' } }
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.auth.authenticateSession(tokenHash, new Date())
+  }
+
+  async logoutBearer(token: string): Promise<PrincipalResult> {
+    if (!token) return { ok: false, error: { code: 'unauthorized', message: '缺少认证凭据。' } }
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => this.auth.revokeSession(tokenHash, new Date()))
+  }
+
+  async listDepartments(token: string): Promise<{ ok: true; departments: DepartmentView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return { ok: true, departments: this.auth.listDepartments() }
+  }
+
+  async listDoctors(token: string): Promise<{ ok: true; doctors: DoctorView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return { ok: true, doctors: this.auth.listDoctors() }
+  }
+
+  async listContacts(token: string): Promise<{ ok: true; contacts: ContactView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return { ok: true, contacts: this.auth.listContacts(auth.principal) }
+  }
+
+  async listPatientReleases(token: string, resourceType: PatientReleaseResourceType): Promise<PatientReleasesResult> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.auth.listPatientReleases(auth.principal, resourceType, now.toISOString())
+    })
+  }
+
+  async getPatientRelease(token: string, resourceType: PatientReleaseResourceType, id: string): Promise<PatientReleaseDetailResult> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.auth.getPatientRelease(auth.principal, resourceType, id, now.toISOString())
+    })
+  }
+
+  recordAccessDenial(actorId: string, actorRole: string, action: string, resourceType: string, resourceId: string): void {
+    this.ctx.storage.transactionSync(() => {
+      this.auth.audit({
+        actorId,
+        actorRole,
+        action,
+        resourceType,
+        resourceId,
+        outcome: 'denied',
+        occurredAt: new Date().toISOString(),
+      })
+    })
+  }
+
+  async resetDemoClinic(workspace: string): Promise<DemoResetResponse> {
+    const seedHashes = await prepareSeedHashes()
+    return this.ctx.storage.transactionSync(() => {
+      const nowIso = new Date().toISOString()
+      // Clear clinical tables in child-first order (preserving immutable triggers only where unused, or resetting encounters).
+      // Clinical revision tables carry immutability triggers, so remove only active/draft tables and re-seed Connected Clinic state.
+      this.ctx.storage.sql.exec('DELETE FROM copilot_draft_stop')
+      this.ctx.storage.sql.exec('DELETE FROM doctor_draft_touch')
+      this.ctx.storage.sql.exec('DELETE FROM copilot_draft_proposal')
+      this.ctx.storage.sql.exec('DELETE FROM encounter_draft')
+      this.ctx.storage.sql.exec('DELETE FROM case_debrief_reference')
+      this.ctx.storage.sql.exec('DELETE FROM no_medication')
+      this.ctx.storage.sql.exec('DELETE FROM diagnosis_draft')
+      this.ctx.storage.sql.exec('DELETE FROM clinical_note_section')
+      this.ctx.storage.sql.exec('DELETE FROM consultation_turn')
+      this.ctx.storage.sql.exec('DELETE FROM report_acknowledgement')
+      this.ctx.storage.sql.exec('DELETE FROM report')
+      this.ctx.storage.sql.exec('DELETE FROM investigation_cancellation')
+      this.ctx.storage.sql.exec('DELETE FROM investigation')
+      this.ctx.storage.sql.exec('DELETE FROM physical_examination')
+      this.ctx.storage.sql.exec('DELETE FROM audit_event')
+      this.ctx.storage.sql.exec(`UPDATE encounter SET status = 'abandoned', ended_at = COALESCE(ended_at, ?) WHERE status = 'active'`, nowIso)
+      this.goldenCases.reconcile(goldenCaseRegistrations())
+      return this.auth.resetDemo(workspace, seedHashes, nowIso)
+    })
+  }
+
+  // --- Phase 1 Outpatient Clinical Commands (with Transactional Practitioner Attribution) ---
 
   listGoldenCaseQueue(): GoldenCaseQueueEntry[] {
     return this.goldenCases.listQueue()
   }
 
-  startEncounter(caseId: string): EncounterResult {
+  startEncounter(caseId: string, practitionerId?: string): EncounterResult {
     const chart = encounterChart(caseId)
     if (!chart) {
       return { ok: false, error: { code: 'golden-case-not-found', message: `找不到 Golden Case ${caseId}` } }
     }
-    return this.ctx.storage.transactionSync(() =>
-      this.encounters.start(caseId, chart, DEMO_PRACTITIONER_ID, new Date().toISOString()),
-    )
+    return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.encounters.start(caseId, chart, actor.practitionerId, new Date().toISOString())
+    })
   }
 
-  async abandonEncounter(encounterId: string): Promise<EncounterResult> {
+  async abandonEncounter(encounterId: string, practitionerId?: string): Promise<EncounterResult> {
     const result = this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const now = new Date()
-      const result = this.encounters.abandon(encounterId, DEMO_PRACTITIONER_ID, now.toISOString())
+      const result = this.encounters.abandon(encounterId, actor.practitionerId, now.toISOString())
       // A frozen Encounter takes no late reply: the waiting patient turn fails with it.
       if (result.ok) this.consultation.failPending(encounterId, 'encounter-ended', now)
       return result
@@ -118,8 +288,10 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     }
   }
 
-  async completeEncounter(encounterId: string): Promise<EncounterResult> {
+  async completeEncounter(encounterId: string, practitionerId?: string): Promise<EncounterResult> {
     const result = this.ctx.storage.transactionSync((): EncounterResult => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const active = this.encounters.requireActive(encounterId)
       if (!active.ok) return active
       const now = new Date()
@@ -145,7 +317,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       if (!truth.ok) return truth
       this.completion.recordDebrief(encounterId, truth.caseTruth.debriefReference)
       this.consultation.failPending(encounterId, 'encounter-ended', now)
-      return this.encounters.end(encounterId, 'completed', DEMO_PRACTITIONER_ID, now.toISOString())
+      return this.encounters.end(encounterId, 'completed', actor.practitionerId, now.toISOString())
     })
     if (result.ok) await this.freezeCopilot(encounterId)
     return result
@@ -194,8 +366,10 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return found.ok ? { ok: true, drafts: this.completion.drafts(encounterId) } : found
   }
 
-  saveInvestigationDraft(encounterId: string, entries: string[]): { ok: true; drafts: ClinicalDrafts } | Refusal {
+  saveInvestigationDraft(encounterId: string, entries: string[], practitionerId?: string): { ok: true; drafts: ClinicalDrafts } | Refusal {
     return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const active = this.encounters.requireActive(encounterId)
       if (!active.ok) return active
       if (entries.some((id) => !catalogItem(id))) {
@@ -209,8 +383,10 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     })
   }
 
-  savePrescriptionDraft(encounterId: string, entries: ClinicalDrafts['prescriptions']): { ok: true; drafts: ClinicalDrafts } | Refusal {
+  savePrescriptionDraft(encounterId: string, entries: ClinicalDrafts['prescriptions'], practitionerId?: string): { ok: true; drafts: ClinicalDrafts } | Refusal {
     return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const active = this.encounters.requireActive(encounterId)
       if (!active.ok) return active
       const catalog = medicationCatalog().items
@@ -233,8 +409,10 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return found.ok ? { ok: true, assistance: this.draftAssistance.view(encounterId) } : found
   }
 
-  updateDraftAssistance(encounterId: string, command: DraftAssistanceCommand): DraftAssistanceResult {
+  updateDraftAssistance(encounterId: string, command: DraftAssistanceCommand, practitionerId?: string): DraftAssistanceResult {
     return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const active = this.encounters.requireActive(encounterId)
       return active.ok ? this.draftAssistance.command(active.encounter, command) : active
     })
@@ -256,10 +434,12 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return this.encounters.auditEvents(encounterId)
   }
 
-  performPhysicalExamination(encounterId: string, system: BodySystem): PhysicalExaminationResult {
-    const result = this.ctx.storage.transactionSync(() =>
-      this.examinations.perform(encounterId, system, DEMO_PRACTITIONER_ID, new Date().toISOString()),
-    )
+  performPhysicalExamination(encounterId: string, system: BodySystem, practitionerId?: string): PhysicalExaminationResult {
+    const result = this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.examinations.perform(encounterId, system, actor.practitionerId, new Date().toISOString())
+    })
     if (result.ok) this.notifyCopilot(encounterId, { ref: `examination:${system}`, text: `查体完成：${BODY_SYSTEM_NAME[system]}` })
     return result
   }
@@ -280,9 +460,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     })
   }
 
-  issueInvestigations(encounterId: string, catalogItemIds: string[]): InvestigationsResult {
+  issueInvestigations(encounterId: string, catalogItemIds: string[], practitionerId?: string): InvestigationsResult {
     const result = this.ctx.storage.transactionSync(() => {
-      const issued = this.investigations.issue(encounterId, catalogItemIds, DEMO_PRACTITIONER_ID, Date.now())
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      const issued = this.investigations.issue(encounterId, catalogItemIds, actor.practitionerId, Date.now())
       if (issued.ok) {
         this.completion.issuedInvestigations(encounterId, catalogItemIds)
         this.draftAssistance.removeAttribution(encounterId, 'investigations', catalogItemIds)
@@ -293,10 +475,12 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return result
   }
 
-  releaseInvestigationNow(encounterId: string, investigationId: string): InvestigationsResult {
-    const result = this.ctx.storage.transactionSync(() =>
-      this.investigations.releaseNow(encounterId, investigationId, DEMO_PRACTITIONER_ID, Date.now()),
-    )
+  releaseInvestigationNow(encounterId: string, investigationId: string, practitionerId?: string): InvestigationsResult {
+    const result = this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.investigations.releaseNow(encounterId, investigationId, actor.practitionerId, Date.now())
+    })
     if (result.ok) this.wakeReportAnalysis()
     return result
   }
@@ -327,54 +511,73 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     if (current === null || current > at) await this.ctx.storage.setAlarm(at)
   }
 
-  cancelInvestigation(encounterId: string, investigationId: string): InvestigationsResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.investigations.cancel(encounterId, investigationId, DEMO_PRACTITIONER_ID, Date.now()),
-    )
+  cancelInvestigation(encounterId: string, investigationId: string, practitionerId?: string): InvestigationsResult {
+    return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.investigations.cancel(encounterId, investigationId, actor.practitionerId, Date.now())
+    })
   }
 
-  acknowledgeReports(encounterId: string, reportIds: string[]): InvestigationsResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.investigations.acknowledge(encounterId, reportIds, DEMO_PRACTITIONER_ID, Date.now()),
-    )
+  acknowledgeReports(encounterId: string, reportIds: string[], practitionerId?: string): InvestigationsResult {
+    return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.investigations.acknowledge(encounterId, reportIds, actor.practitionerId, Date.now())
+    })
   }
 
   getClinicalNote(encounterId: string): ClinicalNoteResult {
     return this.clinicalNote.view(encounterId)
   }
 
-  saveClinicalNoteDraft(encounterId: string, sections: Partial<NoteSections>, authors: Partial<Record<NoteSection, DraftAuthor>> = {}): ClinicalNoteResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.clinicalNote.saveDraft(encounterId, sections, authors, new Date().toISOString()),
-    )
+  saveClinicalNoteDraft(
+    encounterId: string,
+    sections: Partial<NoteSections>,
+    authors: Partial<Record<NoteSection, DraftAuthor>> = {},
+    practitionerId?: string,
+  ): ClinicalNoteResult {
+    return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.clinicalNote.saveDraft(encounterId, sections, authors, new Date().toISOString())
+    })
   }
 
-  signClinicalNote(encounterId: string, sections: NoteSections): ClinicalNoteResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.clinicalNote.sign(encounterId, sections, DEMO_PRACTITIONER_ID, new Date().toISOString()),
-    )
+  signClinicalNote(encounterId: string, sections: NoteSections, practitionerId?: string): ClinicalNoteResult {
+    return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.clinicalNote.sign(encounterId, sections, actor.practitionerId, new Date().toISOString())
+    })
   }
 
   getDiagnosis(encounterId: string): DiagnosisResult {
     return this.diagnosis.view(encounterId)
   }
 
-  saveDiagnosisDraft(encounterId: string, entries: DiagnosisDraftEntry[]): DiagnosisResult {
+  saveDiagnosisDraft(encounterId: string, entries: DiagnosisDraftEntry[], practitionerId?: string): DiagnosisResult {
     return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const result = this.diagnosis.saveDraft(encounterId, entries, new Date().toISOString())
       if (result.ok) this.draftAssistance.touch(encounterId, 'diagnosis')
       return result
     })
   }
 
-  confirmDiagnosis(encounterId: string, entries: DiagnosisDraftEntry[]): DiagnosisResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.diagnosis.confirm(encounterId, entries, DEMO_PRACTITIONER_ID, new Date().toISOString()),
-    )
+  confirmDiagnosis(encounterId: string, entries: DiagnosisDraftEntry[], practitionerId?: string): DiagnosisResult {
+    return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.diagnosis.confirm(encounterId, entries, actor.practitionerId, new Date().toISOString())
+    })
   }
 
-  reopenDiagnosis(encounterId: string): DiagnosisResult {
+  reopenDiagnosis(encounterId: string, practitionerId?: string): DiagnosisResult {
     return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const result = this.diagnosis.reopen(encounterId, new Date().toISOString())
       if (result.ok) this.draftAssistance.touch(encounterId, 'diagnosis')
       return result
@@ -385,9 +588,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return this.prescriptions.view(encounterId)
   }
 
-  issuePrescription(encounterId: string, lines: PrescriptionLineRequest[]): PrescriptionsResult {
+  issuePrescription(encounterId: string, lines: PrescriptionLineRequest[], practitionerId?: string): PrescriptionsResult {
     return this.ctx.storage.transactionSync(() => {
-      const issued = this.prescriptions.issue(encounterId, lines, DEMO_PRACTITIONER_ID, new Date().toISOString())
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      const issued = this.prescriptions.issue(encounterId, lines, actor.practitionerId, new Date().toISOString())
       if (issued.ok) {
         this.completion.issuedPrescriptions(encounterId, lines)
         this.draftAssistance.removeAttribution(encounterId, 'prescriptions', lines.map((line) => line.drugId))
@@ -396,10 +601,12 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     })
   }
 
-  recordNoMedication(encounterId: string): PrescriptionsResult {
-    return this.ctx.storage.transactionSync(() =>
-      this.prescriptions.recordNoMedication(encounterId, DEMO_PRACTITIONER_ID, new Date().toISOString()),
-    )
+  recordNoMedication(encounterId: string, practitionerId?: string): PrescriptionsResult {
+    return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
+      return this.prescriptions.recordNoMedication(encounterId, actor.practitionerId, new Date().toISOString())
+    })
   }
 
   getConsultation(encounterId: string): ConsultationResult {
@@ -413,7 +620,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
 
   // Records the doctor's question, typed or spoken, and a pending patient turn in one transaction, then asks the
   // Simulated Patient. Typed questions come over HTTP; spoken ones from the voice pipeline or the browser's recognizer.
-  async askPatient(encounterId: string, question: AskPatientRequest): Promise<ExchangeResult> {
+  async askPatient(encounterId: string, question: AskPatientRequest, practitionerId?: string): Promise<ExchangeResult> {
     const text = question.text.trim()
     if (!text || text.length > MAX_QUESTION_LENGTH || !question.clientTurnId || question.clientTurnId.length > 100) {
       return { ok: false, error: { code: 'invalid-request', message: `提问须为 1–${MAX_QUESTION_LENGTH} 个字符` } }
@@ -422,6 +629,8 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       return { ok: false, error: { code: 'invalid-request', message: '语音识别信息无效' } }
     }
     const recorded = this.ctx.storage.transactionSync((): Recorded => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const ready = this.readyToAsk(encounterId)
       if (!ready.ok) return ready
       const resent = this.consultation.exchangeFor(encounterId, question.clientTurnId)
@@ -433,25 +642,27 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       }
       const exchange = this.consultation.ask(
         encounterId,
-        { clientTurnId: question.clientTurnId, text, practitionerId: DEMO_PRACTITIONER_ID, voice: question.voice },
+        { clientTurnId: question.clientTurnId, text, practitionerId: actor.practitionerId, voice: question.voice },
         ready.now,
         new Date(ready.now.getTime() + this.turnTimeoutMs),
       )
-      this.encounters.audit(encounterId, 'consultation-question-asked', DEMO_PRACTITIONER_ID, ready.now.toISOString(), exchange.doctorTurn.turnId)
+      this.encounters.audit(encounterId, 'consultation-question-asked', actor.practitionerId, ready.now.toISOString(), exchange.doctorTurn.turnId)
       return { ok: true, exchange, persona: ready.persona }
     })
     return this.dispatchReply(encounterId, recorded)
   }
 
   // A failed reply gets a fresh attempt at the same doctor turn; the failed one stays in the record.
-  async retryPatientTurn(encounterId: string, patientTurnId: string): Promise<ExchangeResult> {
+  async retryPatientTurn(encounterId: string, patientTurnId: string, practitionerId?: string): Promise<ExchangeResult> {
     const recorded = this.ctx.storage.transactionSync((): Recorded => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const ready = this.readyToAsk(encounterId)
       if (!ready.ok) return ready
       const deadline = new Date(ready.now.getTime() + this.turnTimeoutMs)
       const retried = this.consultation.retry(encounterId, patientTurnId, ready.now, deadline)
       if (!retried.ok) return retried
-      this.encounters.audit(encounterId, 'patient-reply-retried', DEMO_PRACTITIONER_ID, ready.now.toISOString(), retried.patientTurn.turnId)
+      this.encounters.audit(encounterId, 'patient-reply-retried', actor.practitionerId, ready.now.toISOString(), retried.patientTurn.turnId)
       return { ok: true, exchange: retried, persona: ready.persona }
     })
     return this.dispatchReply(encounterId, recorded)
@@ -491,22 +702,27 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   authorizeCopilotCommand(
     encounterId: string,
     mentions: readonly CopilotMention[] = [],
+    practitionerId?: string,
   ): { ok: true; practitionerId: string; noteMentions: CopilotNoteMention[] } | Refusal {
     return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const active = this.encounters.requireActive(encounterId)
       if (!active.ok) return active
-      return { ok: true, practitionerId: DEMO_PRACTITIONER_ID, noteMentions: this.copilotReads.noteMentions(encounterId, mentions) }
+      return { ok: true, practitionerId: actor.practitionerId, noteMentions: this.copilotReads.noteMentions(encounterId, mentions) }
     })
   }
 
   // Returns the refusal when the Encounter froze before the audit landed, so a caller that answers 201 on
   // success never reports a successful command without its audit event.
-  async auditCopilotCommand(encounterId: string, eventType: AuditEventType, subject: string): Promise<{ ok: true } | Refusal> {
+  async auditCopilotCommand(encounterId: string, eventType: AuditEventType, subject: string, practitionerId?: string): Promise<{ ok: true } | Refusal> {
     return this.ctx.storage.transactionSync(() => {
+      const actor = this.resolvePractitioner(practitionerId, true)
+      if (!actor.ok) return actor
       const active = this.encounters.requireActive(encounterId)
       if (!active.ok) return active
       if (eventType === 'copilot-stopped') this.draftAssistance.stopRun(encounterId, subject)
-      this.encounters.audit(encounterId, eventType, DEMO_PRACTITIONER_ID, new Date().toISOString(), subject)
+      this.encounters.audit(encounterId, eventType, actor.practitionerId, new Date().toISOString(), subject)
       return { ok: true, value: null }
     })
   }

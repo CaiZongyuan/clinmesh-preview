@@ -20,6 +20,7 @@ export default defineConfig({
                 AGENT_STALL_TIMEOUT_MS: '1500',
                 BAILIAN_TOKEN: 'test-bailian-token',
                 BAILIAN_UPSTREAM: 'scripted',
+                WECHAT_AUTH_MODE: 'scripted',
               },
             },
           }),

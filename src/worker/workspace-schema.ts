@@ -229,6 +229,111 @@ const MIGRATIONS: readonly string[] = [
      run_id TEXT NOT NULL,
      PRIMARY KEY (encounter_id, run_id)
    );`,
+  // Connected Clinic S1: actors, accounts, hashed bearer sessions, patient/staff profiles, care relationships,
+  // appointment slots, patient-visible releases, clinic audit log, and optional encounter patient/appointment links.
+  `CREATE TABLE clinic_department (
+     department_id TEXT PRIMARY KEY,
+     name TEXT NOT NULL
+   );
+   CREATE TABLE actor (
+     actor_id TEXT PRIMARY KEY,
+     clinic_id TEXT NOT NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('human', 'agent', 'system')),
+     role TEXT NOT NULL CHECK (role IN ('patient', 'doctor', 'nurse', 'admin', 'agent')),
+     display_name TEXT NOT NULL,
+     im_uid TEXT NOT NULL UNIQUE,
+     status TEXT NOT NULL CHECK (status IN ('active', 'disabled'))
+   );
+   CREATE TABLE staff_profile (
+     staff_id TEXT PRIMARY KEY,
+     actor_id TEXT NOT NULL UNIQUE REFERENCES actor (actor_id),
+     role TEXT NOT NULL CHECK (role IN ('doctor', 'nurse', 'admin')),
+     title TEXT NOT NULL,
+     department_id TEXT NOT NULL REFERENCES clinic_department (department_id),
+     username TEXT NOT NULL UNIQUE,
+     password_hash TEXT NOT NULL
+   );
+   CREATE TABLE patient_profile (
+     patient_id TEXT PRIMARY KEY,
+     actor_id TEXT NOT NULL UNIQUE REFERENCES actor (actor_id),
+     display_name TEXT NOT NULL,
+     sex TEXT NOT NULL CHECK (sex IN ('male', 'female')),
+     birth_date TEXT NOT NULL,
+     outpatient_number TEXT NOT NULL UNIQUE,
+     primary_doctor_id TEXT REFERENCES staff_profile (staff_id),
+     department_id TEXT NOT NULL REFERENCES clinic_department (department_id),
+     allergies_json TEXT NOT NULL,
+     chronic_conditions_json TEXT NOT NULL,
+     invite_code_hash TEXT UNIQUE,
+     invite_code_expires_at TEXT,
+     bound_at TEXT
+   );
+   CREATE TABLE account (
+     account_id TEXT PRIMARY KEY,
+     provider TEXT NOT NULL CHECK (provider IN ('wechat', 'staff')),
+     provider_subject TEXT NOT NULL,
+     actor_id TEXT NOT NULL REFERENCES actor (actor_id),
+     status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
+     created_at TEXT NOT NULL,
+     UNIQUE (provider, provider_subject)
+   );
+   CREATE TABLE auth_session (
+     session_id TEXT PRIMARY KEY,
+     token_hash TEXT NOT NULL UNIQUE,
+     account_id TEXT NOT NULL REFERENCES account (account_id),
+     actor_id TEXT NOT NULL REFERENCES actor (actor_id),
+     created_at TEXT NOT NULL,
+     expires_at TEXT NOT NULL,
+     revoked_at TEXT
+   );
+   CREATE INDEX auth_session_by_actor ON auth_session (actor_id);
+   CREATE TABLE care_relationship (
+     patient_id TEXT NOT NULL REFERENCES patient_profile (patient_id),
+     staff_id TEXT NOT NULL REFERENCES staff_profile (staff_id),
+     relation_kind TEXT NOT NULL CHECK (relation_kind IN ('primary', 'department', 'followup')),
+     created_at TEXT NOT NULL,
+     PRIMARY KEY (patient_id, staff_id, relation_kind)
+   );
+   CREATE TABLE appointment_slot (
+     slot_id TEXT PRIMARY KEY,
+     doctor_id TEXT NOT NULL REFERENCES staff_profile (staff_id),
+     department_id TEXT NOT NULL REFERENCES clinic_department (department_id),
+     starts_at TEXT NOT NULL,
+     ends_at TEXT NOT NULL,
+     capacity INTEGER NOT NULL CHECK (capacity > 0),
+     status TEXT NOT NULL CHECK (status IN ('open', 'closed'))
+   );
+   CREATE TABLE patient_release (
+     release_id TEXT PRIMARY KEY,
+     patient_id TEXT NOT NULL REFERENCES patient_profile (patient_id),
+     encounter_id TEXT,
+     resource_type TEXT NOT NULL CHECK (resource_type IN ('clinical_note', 'report', 'prescription')),
+     resource_id TEXT NOT NULL,
+     version INTEGER NOT NULL,
+     title TEXT NOT NULL,
+     summary TEXT NOT NULL,
+     payload_json TEXT NOT NULL,
+     published_by TEXT NOT NULL REFERENCES actor (actor_id),
+     published_at TEXT NOT NULL,
+     retracted_at TEXT,
+     UNIQUE (resource_type, resource_id, version)
+   );
+   CREATE INDEX patient_release_by_patient ON patient_release (patient_id, resource_type, published_at);
+   CREATE TABLE clinic_audit_event (
+     audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+     actor_id TEXT NOT NULL,
+     actor_role TEXT NOT NULL,
+     action TEXT NOT NULL,
+     resource_type TEXT NOT NULL,
+     resource_id TEXT NOT NULL,
+     request_id TEXT,
+     run_id TEXT,
+     outcome TEXT NOT NULL CHECK (outcome IN ('allowed', 'denied', 'error')),
+     occurred_at TEXT NOT NULL
+   );
+   ALTER TABLE encounter ADD COLUMN patient_id TEXT;
+   ALTER TABLE encounter ADD COLUMN appointment_id TEXT;
+   CREATE UNIQUE INDEX encounter_by_appointment ON encounter (appointment_id) WHERE appointment_id IS NOT NULL;`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

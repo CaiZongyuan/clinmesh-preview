@@ -1,3 +1,4 @@
+import type { AuthErrorCode } from './auth'
 import type { CompletionGateId } from './completion'
 import type { Sex, VisitKind } from './golden-case-queue'
 
@@ -173,6 +174,7 @@ export type EncounterErrorCode =
   | 'copilot-llm-unavailable'
   | 'copilot-bridge-required'
   | 'copilot-run-stopped'
+  | AuthErrorCode
 
 export interface EncounterError {
   code: EncounterErrorCode

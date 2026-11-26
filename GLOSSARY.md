@@ -91,3 +91,21 @@ _Avoid_: Auto-apply, silent commit, suggestion accept
 **Completion Gate**:
 办理门诊完诊前由服务端实时重验的五项强制临床前提（恰有一项已确认主诊断、所有未取消检查最新报告已阅、已签发有效处方或明确无需用药、已签署且不早于当前诊断的结构化病历、无遗留待确认高风险草稿）。高风险草稿指未签发也未丢弃的检查、处方或诊断草稿，以及未处理的 Suggestion。
 _Avoid_: Frontend button state, checklist UI, soft warning
+
+## 互联门诊与院内外协同
+
+**Care Relationship**:
+某名患者与本院医护人员之间经授权建立的诊疗或随访服务关系，决定双方在院外沟通与资料协作中的可见范围。
+_Avoid_: Friend list, contact book, follow
+
+**Appointment**:
+患者针对特定医生与可用号源确认登记的一次门诊预约记录，经签到并由医生接诊后关联至一次具体的 Encounter。
+_Avoid_: Slot, queue ticket, Encounter
+
+**Patient Release**:
+负责医生将一次正式签署的病历、已签发报告或正式处方的指定版本显式发布给患者本人查阅的授权投影。未发布或已撤回的临床记录对患者不可见。
+_Avoid_: Case Truth, raw chart, draft share
+
+**Follow-up Plan**:
+负责医生在诊疗后为患者创建的院外随访计划，包含按期分派的随访问卷任务、患者反馈与经医护人工审核后生效的随访摘要。
+_Avoid_: Chat group, reminder message, autonomous clinical order

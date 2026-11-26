@@ -1,0 +1,264 @@
+{
+  "seedVersion": "connected-clinic-demo-v1",
+  "clinicId": "clinic_clinmesh_demo",
+  "clinicName": "ClinMesh 示范互联门诊",
+  "referenceDate": "2026-11-26",
+  "departments": [
+    { "departmentId": "dept_general", "name": "全科医学科" },
+    { "departmentId": "dept_cardiology", "name": "心内科" }
+  ],
+  "staff": [
+    {
+      "staffId": "staff_doctor_a",
+      "actorId": "actor_doctor_a",
+      "role": "doctor",
+      "displayName": "王明",
+      "title": "主治医师",
+      "departmentId": "dept_general",
+      "imUid": "staff_doctor_a",
+      "username": "dr.wang",
+      "demoPassword": "demo-doctor-a-pass"
+    },
+    {
+      "staffId": "staff_doctor_b",
+      "actorId": "actor_doctor_b",
+      "role": "doctor",
+      "displayName": "林悦",
+      "title": "副主任医师",
+      "departmentId": "dept_cardiology",
+      "imUid": "staff_doctor_b",
+      "username": "dr.lin",
+      "demoPassword": "demo-doctor-b-pass"
+    },
+    {
+      "staffId": "staff_nurse_n",
+      "actorId": "actor_nurse_n",
+      "role": "nurse",
+      "displayName": "周岚",
+      "title": "主管护师",
+      "departmentId": "dept_general",
+      "imUid": "staff_nurse_n",
+      "username": "nurse.zhou",
+      "demoPassword": "demo-nurse-n-pass"
+    }
+  ],
+  "agents": [
+    {
+      "actorId": "actor_agent_patient_svc",
+      "displayName": "AI 就医助手",
+      "imUid": "agent_patient_svc"
+    },
+    {
+      "actorId": "actor_agent_followup",
+      "displayName": "随访助手",
+      "imUid": "agent_followup"
+    }
+  ],
+  "patients": [
+    {
+      "patientId": "pat_01",
+      "actorId": "actor_pat_01",
+      "displayName": "李建国",
+      "sex": "male",
+      "birthDate": "1968-05-11",
+      "outpatientNumber": "OP-DEMO-001",
+      "departmentId": "dept_general",
+      "primaryDoctorId": "staff_doctor_a",
+      "imUid": "pat_01",
+      "inviteCode": "CLIN-A-2026",
+      "inviteCodeExpiresAt": "2027-12-31T23:59:59.000Z",
+      "allergies": [{ "agent": "青霉素", "reaction": "皮疹" }],
+      "chronicConditions": [{ "code": "I10", "display": "原发性高血压" }]
+    },
+    {
+      "patientId": "pat_02",
+      "actorId": "actor_pat_02",
+      "displayName": "陈志远",
+      "sex": "male",
+      "birthDate": "1965-09-18",
+      "outpatientNumber": "OP-DEMO-002",
+      "departmentId": "dept_cardiology",
+      "primaryDoctorId": "staff_doctor_b",
+      "imUid": "pat_02",
+      "inviteCode": "CLIN-B-2026",
+      "inviteCodeExpiresAt": "2027-12-31T23:59:59.000Z",
+      "allergies": [],
+      "chronicConditions": [{ "code": "E78.5", "display": "血脂异常" }]
+    },
+    {
+      "patientId": "pat_03",
+      "actorId": "actor_pat_03",
+      "displayName": "王秀英",
+      "sex": "female",
+      "birthDate": "1974-03-22",
+      "outpatientNumber": "OP-DEMO-003",
+      "departmentId": "dept_general",
+      "primaryDoctorId": "staff_doctor_a",
+      "imUid": "pat_03",
+      "inviteCode": "CLIN-C-2026",
+      "inviteCodeExpiresAt": "2027-12-31T23:59:59.000Z",
+      "allergies": [],
+      "chronicConditions": [{ "code": "I10", "display": "原发性高血压" }]
+    },
+    {
+      "patientId": "pat_04_expired",
+      "actorId": "actor_pat_04_expired",
+      "displayName": "赵明远",
+      "sex": "male",
+      "birthDate": "1981-07-04",
+      "outpatientNumber": "OP-DEMO-004",
+      "departmentId": "dept_general",
+      "primaryDoctorId": "staff_doctor_a",
+      "imUid": "pat_04_expired",
+      "inviteCode": "CLIN-EXP-2025",
+      "inviteCodeExpiresAt": "2025-12-31T23:59:59.000Z",
+      "allergies": [],
+      "chronicConditions": []
+    }
+  ],
+  "careRelationships": [
+    { "patientId": "pat_01", "staffId": "staff_doctor_a", "relationKind": "primary" },
+    { "patientId": "pat_01", "staffId": "staff_nurse_n", "relationKind": "followup" },
+    { "patientId": "pat_02", "staffId": "staff_doctor_b", "relationKind": "primary" },
+    { "patientId": "pat_03", "staffId": "staff_doctor_a", "relationKind": "primary" },
+    { "patientId": "pat_03", "staffId": "staff_nurse_n", "relationKind": "followup" }
+  ],
+  "slots": [
+    { "slotId": "slot_wang_d1_01", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T00:30:00.000Z", "endsAt": "2026-11-27T01:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d1_02", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T01:00:00.000Z", "endsAt": "2026-11-27T01:30:00.000Z", "capacity": 1, "status": "open" },
+    { "slotId": "slot_wang_d1_03", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T01:30:00.000Z", "endsAt": "2026-11-27T02:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d1_04", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T02:00:00.000Z", "endsAt": "2026-11-27T02:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d1_05", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T02:30:00.000Z", "endsAt": "2026-11-27T03:00:00.000Z", "capacity": 1, "status": "closed" },
+    { "slotId": "slot_wang_d1_06", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T06:00:00.000Z", "endsAt": "2026-11-27T06:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d1_07", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T06:30:00.000Z", "endsAt": "2026-11-27T07:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d1_08", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-27T07:00:00.000Z", "endsAt": "2026-11-27T07:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d2_01", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-28T00:30:00.000Z", "endsAt": "2026-11-28T01:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d2_02", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-28T01:00:00.000Z", "endsAt": "2026-11-28T01:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d2_03", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-28T01:30:00.000Z", "endsAt": "2026-11-28T02:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d2_04", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-28T02:00:00.000Z", "endsAt": "2026-11-28T02:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d2_05", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-28T06:00:00.000Z", "endsAt": "2026-11-28T06:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d2_06", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-28T06:30:00.000Z", "endsAt": "2026-11-28T07:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_wang_d2_07", "doctorId": "staff_doctor_a", "departmentId": "dept_general", "startsAt": "2026-11-28T07:00:00.000Z", "endsAt": "2026-11-28T07:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d1_01", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T00:30:00.000Z", "endsAt": "2026-11-27T01:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d1_02", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T01:00:00.000Z", "endsAt": "2026-11-27T01:30:00.000Z", "capacity": 1, "status": "open" },
+    { "slotId": "slot_lin_d1_03", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T01:30:00.000Z", "endsAt": "2026-11-27T02:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d1_04", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T02:00:00.000Z", "endsAt": "2026-11-27T02:30:00.000Z", "capacity": 1, "status": "closed" },
+    { "slotId": "slot_lin_d1_05", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T02:30:00.000Z", "endsAt": "2026-11-27T03:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d1_06", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T06:00:00.000Z", "endsAt": "2026-11-27T06:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d1_07", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T06:30:00.000Z", "endsAt": "2026-11-27T07:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d1_08", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-27T07:00:00.000Z", "endsAt": "2026-11-27T07:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d2_01", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-28T00:30:00.000Z", "endsAt": "2026-11-28T01:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d2_02", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-28T01:00:00.000Z", "endsAt": "2026-11-28T01:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d2_03", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-28T01:30:00.000Z", "endsAt": "2026-11-28T02:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d2_04", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-28T02:00:00.000Z", "endsAt": "2026-11-28T02:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d2_05", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-28T06:00:00.000Z", "endsAt": "2026-11-28T06:30:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d2_06", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-28T06:30:00.000Z", "endsAt": "2026-11-28T07:00:00.000Z", "capacity": 2, "status": "open" },
+    { "slotId": "slot_lin_d2_07", "doctorId": "staff_doctor_b", "departmentId": "dept_cardiology", "startsAt": "2026-11-28T07:00:00.000Z", "endsAt": "2026-11-28T07:30:00.000Z", "capacity": 2, "status": "open" }
+  ],
+  "patientReleases": [
+    {
+      "releaseId": "rel_note_pat01_v1",
+      "patientId": "pat_01",
+      "encounterId": null,
+      "resourceType": "clinical_note",
+      "resourceId": "hist_note_pat01_202609",
+      "version": 1,
+      "title": "全科慢病随访病历（2026-09-12）",
+      "summary": "原发性高血压规律服药随访，家庭血压控制平稳，继续原方案并清淡饮食。",
+      "payload": {
+        "department": "全科医学科",
+        "visitedDate": "2026-09-12",
+        "chiefComplaint": "高血压常规复诊配药",
+        "plan": "继续每日规范服药，每周记录家庭早晚血压并按期复查。"
+      },
+      "publishedBy": "actor_doctor_a",
+      "publishedAt": "2026-09-12T02:15:00.000Z",
+      "retractedAt": null
+    },
+    {
+      "releaseId": "rel_note_pat01_retracted",
+      "patientId": "pat_01",
+      "encounterId": null,
+      "resourceType": "clinical_note",
+      "resourceId": "hist_note_pat01_retracted",
+      "version": 1,
+      "title": "已撤回测试病历记录",
+      "summary": "此版本已撤回，患者端不可读取。",
+      "payload": { "department": "全科医学科" },
+      "publishedBy": "actor_doctor_a",
+      "publishedAt": "2026-09-10T01:00:00.000Z",
+      "retractedAt": "2026-09-10T02:00:00.000Z"
+    },
+    {
+      "releaseId": "rel_rep_pat01_v1",
+      "patientId": "pat_01",
+      "encounterId": null,
+      "resourceType": "report",
+      "resourceId": "hist_rep_pat01_lipid",
+      "version": 1,
+      "title": "血脂四项复查报告（2026-09-12）",
+      "summary": "常规随访血脂指标基本平稳，建议维持低盐低脂饮食。",
+      "payload": {
+        "category": "常规检验",
+        "conclusion": "各项常规代谢随访指标在预期范围，按医嘱复查。"
+      },
+      "publishedBy": "actor_doctor_a",
+      "publishedAt": "2026-09-12T03:00:00.000Z",
+      "retractedAt": null
+    },
+    {
+      "releaseId": "rel_rx_pat01_v1",
+      "patientId": "pat_01",
+      "encounterId": null,
+      "resourceType": "prescription",
+      "resourceId": "hist_rx_pat01_202609",
+      "version": 1,
+      "title": "全科常规续方（2026-09-12）",
+      "summary": "氨氯地平片 每日一次 口服，遵医嘱规律服用，切勿自行停药。",
+      "payload": {
+        "items": [
+          { "drugName": "苯磺酸氨氯地平片", "dosage": "5mg", "frequency": "QD", "route": "口服", "days": 28 }
+        ]
+      },
+      "publishedBy": "actor_doctor_a",
+      "publishedAt": "2026-09-12T02:20:00.000Z",
+      "retractedAt": null
+    },
+    {
+      "releaseId": "rel_note_pat02_v1",
+      "patientId": "pat_02",
+      "encounterId": null,
+      "resourceType": "clinical_note",
+      "resourceId": "hist_note_pat02_202610",
+      "version": 1,
+      "title": "心内科年度评估病历（2026-10-08）",
+      "summary": "血脂异常饮食及运动指导，按期复查肝功能及血脂。",
+      "payload": {
+        "department": "心内科",
+        "visitedDate": "2026-10-08",
+        "chiefComplaint": "体检血脂偏高复诊",
+        "plan": "坚持规律有氧运动与清淡饮食，三个月后复查。"
+      },
+      "publishedBy": "actor_doctor_b",
+      "publishedAt": "2026-10-08T04:10:00.000Z",
+      "retractedAt": null
+    },
+    {
+      "releaseId": "rel_rep_pat02_v1",
+      "patientId": "pat_02",
+      "encounterId": null,
+      "resourceType": "report",
+      "resourceId": "hist_rep_pat02_ecg",
+      "version": 1,
+      "title": "常规十二导联心电图体检报告（2026-10-08）",
+      "summary": "窦性心律，常规体检复查结果正常。",
+      "payload": {
+        "category": "功能检查",
+        "conclusion": "窦性心律，未见明显异常波形。"
+      },
+      "publishedBy": "actor_doctor_b",
+      "publishedAt": "2026-10-08T04:20:00.000Z",
+      "retractedAt": null
+    }
+  ]
+}
