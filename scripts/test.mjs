@@ -15,8 +15,9 @@ const allowedFaultMessages = [
   'response lost',
 ]
 
-const child = spawn('pnpm', ['exec', 'vitest', 'run', ...process.argv.slice(2)], {
+const child = spawn(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['exec', 'vitest', 'run', ...process.argv.slice(2)], {
   stdio: ['inherit', 'pipe', 'pipe'],
+  shell: process.platform === 'win32',
 })
 
 const headers = []
