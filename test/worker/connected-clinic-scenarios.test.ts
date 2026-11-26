@@ -22,6 +22,7 @@ import { app } from '../../src/worker/app'
 import {
   getFakeImSnapshot,
   installImFaultHook,
+  preserveRawInt64MessageIds,
   resetFakeImStore,
 } from '../../src/worker/communication/wukongim-adapter'
 import { clearScriptedLlm } from '../../src/worker/llm/registry'
@@ -391,11 +392,38 @@ describe('Connected Clinic S2-S8 independent verifier scenarios (B02-B20)', () =
     })).status).toBe(403)
     expect((await call(testEnv, 'GET', `/api/conversations/${grp.conversationId}/messages`, { token: nurse.token })).status).toBe(404)
 
-    // Patient A logout revokes session AND rotates/kicks IM credentials immediately (B10).
+    // Patient A logout revokes session, rotates/kicks IM credentials, AND immediately invalidates previously signed attachment URLs (B10/B18).
+    const patAccess = (await (await call(testEnv, 'GET', `/api/attachments/${pendingAtt.attachmentId}/access`, { token: patA.token })).json()) as AttachmentAccessResponse
+    expect((await call(testEnv, 'GET', patAccess.url)).status).toBe(200)
     const credsBefore = (await (await call(testEnv, 'GET', '/api/im/credentials', { token: patA.token })).json()) as { token: string }
     expect((await call(testEnv, 'POST', '/api/auth/logout', { token: patA.token })).status).toBe(200)
     expect((await call(testEnv, 'GET', '/api/conversations/conv_pat01_doctor_a/messages', { token: patA.token })).status).toBe(401)
+    expect((await call(testEnv, 'GET', patAccess.url)).status).toBe(401)
     expect(getFakeImSnapshot().userTokens.pat_01).not.toBe(credsBefore.token)
+
+    // Unwhitelisted card actions are rejected at the message validation boundary (Spec §7.2).
+    const badCardRes = await call(testEnv, 'POST', '/api/conversations/conv_pat01_doctor_a/messages', {
+      token: drWang.token,
+      body: {
+        clientMessageId: 'bad-card-action',
+        parts: [
+          {
+            type: 'card',
+            component: 'ReportCard',
+            version: 1,
+            resourceRef: { kind: 'report', id: 'r1' },
+            safeProps: { title: '非法跳转测试' },
+            actions: [{ name: 'javascript.eval', args: { url: 'https://evil.example' } }],
+          },
+        ],
+      },
+    })
+    expect(badCardRes.status).toBe(400)
+
+    // 64-bit WuKongIM snowflake message_id digits survive JSON parsing without IEEE-754 rounding (ADR-0004).
+    const rawSync = '{"messages":[{"message_id":2126092053442891776,"message_seq":42}]}'
+    const parsedSync = JSON.parse(preserveRawInt64MessageIds(rawSync)) as { messages: Array<{ message_id: string }> }
+    expect(parsedSync.messages[0].message_id).toBe('2126092053442891776')
   })
 
   it('B11, B12, B15, B16 & B19: verifies PatientServiceAgentDO tool cards, whitelisted navigation, appointment prefill, safety refusal, and degraded fallback', async () => {
@@ -437,6 +465,34 @@ describe('Connected Clinic S2-S8 independent verifier scenarios (B02-B20)', () =
       token: patA.token,
       body: { status: 'dispatched', detail: { route: navResult.route } },
     })).status).toBe(200)
+
+    // Verify real WebSocket event replay on /api/agent/runs/:id/socket (hello -> events + replay.done).
+    const wsRes = await call(testEnv, 'GET', `/api/agent/runs/${runId1}/socket`, {
+      token: patA.token,
+      headers: { upgrade: 'websocket' },
+    })
+    expect(wsRes.status).toBe(101)
+    const ws = wsRes.webSocket!
+    const frames: string[] = []
+    ws.addEventListener('message', (ev) => frames.push(String(ev.data)))
+    ws.accept()
+    ws.send(JSON.stringify({ type: 'hello', afterSeq: 0 }))
+    await new Promise((r) => setTimeout(r, 80))
+    ws.close()
+    expect(frames.some((f) => f.includes('"type":"replay.done"'))).toBe(true)
+    expect(frames.some((f) => f.includes('"type":"run.finished"'))).toBe(true)
+
+    // Verify explicit POST /api/agent/conversations/:id/runs & stopRun(runId) mismatch safety.
+    installScripted('patient_service').reply('您好，请问需要什么帮助？')
+    const explicitRunRes = await call(testEnv, 'POST', '/api/agent/conversations/conv_pat01_assistant/runs', {
+      token: patA.token,
+      body: { text: '你好', clientRequestId: 'explicit-run-1' },
+    })
+    expect(explicitRunRes.status).toBe(201)
+    const { runId: explicitRunId } = (await explicitRunRes.json()) as { runId: string }
+    const stopFinished = await call(testEnv, 'POST', `/api/agent/runs/${explicitRunId}/stop`, { token: patA.token })
+    expect(stopFinished.status).toBe(200)
+    expect(((await stopFinished.json()) as { stoppedRunId: string | null }).stoppedRunId).toBeNull()
 
     // Case B (B12): Agent queries real slots & calls prepare_appointment -> ZERO capacity deducted until patient explicitly confirms!
     installScripted('patient_service')
@@ -498,7 +554,14 @@ describe('Connected Clinic S2-S8 independent verifier scenarios (B02-B20)', () =
     const patA = await loginPatient(testEnv, 'wx-code:b13_a', 'CLIN-A-2026')
     const patB = await loginPatient(testEnv, 'wx-code:b13_b', 'CLIN-B-2026')
     const drWang = await loginStaff(testEnv, 'dr.wang', 'demo-doctor-a-pass')
+    const drLin = await loginStaff(testEnv, 'dr.lin', 'demo-doctor-b-pass')
     const nurse = await loginStaff(testEnv, 'nurse.zhou', 'demo-nurse-n-pass')
+
+    // Cross-doctor isolation: Doctor B (no care_relationship with pat_01) cannot create a follow-up plan for Patient A (403).
+    expect((await call(testEnv, 'POST', '/api/followup/plans', {
+      token: drLin.token,
+      body: { patientId: 'pat_01', title: '越权随访计划' },
+    })).status).toBe(403)
 
     // Doctor creates a new follow-up plan -> automatically provisions follow-up group with Patient A, Dr. Wang, Nurse N, and FollowUpAgent.
     const planRes = await call(testEnv, 'POST', '/api/followup/plans', {

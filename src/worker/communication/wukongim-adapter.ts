@@ -1,3 +1,7 @@
+import { decodeBase64Utf8, encodeBase64Utf8 } from '../auth/crypto'
+
+export { decodeBase64Utf8, encodeBase64Utf8 }
+
 export interface WuKongImEnv {
   WUKONGIM_MODE?: string
   WUKONGIM_HTTP_URL?: string
@@ -46,12 +50,17 @@ export interface ImAdapter {
 
 // Extracts 64-bit integer fields from raw JSON before JSON.parse so snowflake message_id never loses precision.
 export function extractRawInt64Field(rawJson: string, field: string): string | null {
-  const strMatch = new RegExp(`"${field}_str"\\s*:\\s*"([^"]+)"`).exec(rawJson)
+  const strMatch = new RegExp(`"${field}(?:_str|str)"\\s*:\\s*"([^"]+)"`).exec(rawJson)
   if (strMatch) return strMatch[1]
   const numMatch = new RegExp(`"${field}"\\s*:\\s*([0-9]+)`).exec(rawJson)
   if (numMatch) return numMatch[1]
   const quotedMatch = new RegExp(`"${field}"\\s*:\\s*"([0-9]+)"`).exec(rawJson)
   return quotedMatch ? quotedMatch[1] : null
+}
+
+// Rewrites unquoted 64-bit `"message_id": 1234567890123456789` into quoted strings prior to JSON.parse.
+export function preserveRawInt64MessageIds(rawJson: string): string {
+  return rawJson.replace(/"message_id"\s*:\s*([0-9]{10,})/g, '"message_id":"$1"')
 }
 
 // Test-only fault injection seam for B09/B10 uncertain-state & retry testing in worker tests.
@@ -214,9 +223,43 @@ export function createImAdapter(env: WuKongImEnv): ImAdapter {
         client_msg_no: params.clientMsgNo,
         payload: params.payloadBase64,
       })
-      const parsed = JSON.parse(raw) as { message_seq?: number; message_id?: number | string }
-      const messageId = extractRawInt64Field(raw, 'message_id') ?? String(parsed.message_id ?? crypto.randomUUID())
-      const messageSeq = typeof parsed.message_seq === 'number' ? parsed.message_seq : 0
+      const safeParsed = JSON.parse(preserveRawInt64MessageIds(raw)) as {
+        message_seq?: number
+        message_id?: string | number
+        data?: { message_seq?: number; message_id?: string | number }
+      }
+      const messageId =
+        extractRawInt64Field(raw, 'message_id') ??
+        String(safeParsed.data?.message_id ?? safeParsed.message_id ?? crypto.randomUUID())
+      let messageSeq =
+        typeof safeParsed.data?.message_seq === 'number'
+          ? safeParsed.data.message_seq
+          : typeof safeParsed.message_seq === 'number'
+            ? safeParsed.message_seq
+            : 0
+      // WuKongIM v2.2.5 omits message_seq on /message/send and commits to /channel/messagesync asynchronously (~15-30ms).
+      if (messageSeq <= 0) {
+        const retryDelaysMs = [0, 25, 50, 100, 150, 250]
+        for (const delayMs of retryDelaysMs) {
+          if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+          const synced = await this.syncChannelMessages({
+            channelId: params.channelId,
+            channelType: params.channelType,
+            loginUid: params.fromUid,
+            limit: 20,
+          })
+          const matched =
+            synced.find((m) => m.clientMsgNo === params.clientMsgNo) ??
+            synced.find((m) => m.messageId === messageId)
+          if (matched && matched.messageSeq > 0) {
+            messageSeq = matched.messageSeq
+            break
+          }
+        }
+      }
+      if (messageSeq <= 0) {
+        throw new Error('WuKongIM did not return a valid positive message_seq after send')
+      }
       return { messageId, messageSeq }
     },
     async syncChannelMessages({ channelId, channelType, loginUid, limit = 50 }) {
@@ -227,12 +270,13 @@ export function createImAdapter(env: WuKongImEnv): ImAdapter {
         start_message_seq: 0,
         end_message_seq: 0,
         limit,
-        pull_mode: 1,
+        pull_mode: 0,
       })
-      const parsed = JSON.parse(raw) as {
+      const parsed = JSON.parse(preserveRawInt64MessageIds(raw)) as {
         messages?: Array<{
-          message_id?: number | string
+          message_id?: string | number
           message_idstr?: string
+          message_id_str?: string
           message_seq?: number
           client_msg_no?: string
           from_uid?: string
@@ -241,7 +285,7 @@ export function createImAdapter(env: WuKongImEnv): ImAdapter {
         }>
       }
       return (parsed.messages ?? []).map((m) => ({
-        messageId: m.message_idstr ?? String(m.message_id ?? ''),
+        messageId: m.message_id_str ?? m.message_idstr ?? String(m.message_id ?? ''),
         messageSeq: m.message_seq ?? 0,
         clientMsgNo: m.client_msg_no ?? '',
         fromUid: m.from_uid ?? '',
@@ -250,18 +294,4 @@ export function createImAdapter(env: WuKongImEnv): ImAdapter {
       }))
     },
   }
-}
-
-export function encodeBase64Utf8(input: string): string {
-  const bytes = new TextEncoder().encode(input)
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
-}
-
-export function decodeBase64Utf8(input: string): string {
-  const binary = atob(input)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return new TextDecoder().decode(bytes)
 }

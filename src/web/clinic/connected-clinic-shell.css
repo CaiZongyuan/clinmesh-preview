@@ -272,6 +272,10 @@
   background: var(--accent);
 }
 
+.cc-msg-part + .cc-msg-part {
+  margin-top: 6px;
+}
+
 .cc-login-wrap {
   min-height: 100vh;
   display: grid;

@@ -131,7 +131,10 @@ export class PatientServiceAgentDO extends DurableObject<Env> {
             )
             return true
           }
-          return false
+          if (!res.ok && (res.error.code === 'conversation-read-only' || res.error.code === 'conversation-member-forbidden')) {
+            return false
+          }
+          throw new Error(res.ok ? 'Empty message settlement' : res.error.message)
         },
       },
     }
@@ -150,6 +153,14 @@ export class PatientServiceAgentDO extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     return this.runtime.sockets.accept(request)
+  }
+
+  webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
+    this.runtime.sockets.onMessage(socket, message)
+  }
+
+  webSocketClose(socket: WebSocket, code: number, reason: string): void {
+    this.runtime.sockets.onClose(socket, code, reason)
   }
 
   async startRun(input: StartPatientServiceRunInput): Promise<{ runId: string; created: boolean }> {
@@ -188,7 +199,11 @@ export class PatientServiceAgentDO extends DurableObject<Env> {
     return enqueued
   }
 
-  async stopRun(): Promise<{ stoppedRunId: string | null }> {
+  async stopRun(runId: string): Promise<{ stoppedRunId: string | null }> {
+    const active = this.ctx.storage.sql
+      .exec<{ run_id: string }>(`SELECT run_id FROM agent_run WHERE run_id = ? AND status = 'running'`, runId)
+      .toArray()[0]
+    if (!active) return { stoppedRunId: null }
     return { stoppedRunId: this.runtime.stop() }
   }
 

@@ -183,9 +183,15 @@ export async function fetchVoiceConfig(): Promise<VoiceConfigResponse> {
   return request<VoiceConfigResponse>('/api/voice')
 }
 
-export function openVoiceSocket(encounterId: string): WebSocket {
+function wsUrl(path: string): string {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/voice`)
+  const token = getStaffToken()
+  const suffix = token ? `?token=${encodeURIComponent(token)}` : ''
+  return `${scheme}//${location.host}${path}${suffix}`
+}
+
+export function openVoiceSocket(encounterId: string): WebSocket {
+  return new WebSocket(wsUrl(`${encounterPath(encounterId)}/voice`))
 }
 
 export async function retryPatientTurn(encounterId: string, turnId: string): Promise<ConsultationTurn> {
@@ -197,7 +203,11 @@ export async function retryPatientTurn(encounterId: string, turnId: string): Pro
 // synthesis task, so a cancelled playback or a navigation does not leave a late job running.
 export async function synthesizePatientSpeech(encounterId: string, turnId: string, text: string, signal: AbortSignal): Promise<ArrayBuffer> {
   const path = `${encounterPath(encounterId)}/consultation/patient-turns/${encodeURIComponent(turnId)}/speech`
-  const response = await fetch(path, { ...post({ text }), signal })
+  const token = getStaffToken()
+  const init = post({ text })
+  const headers = new Headers(init.headers)
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  const response = await fetch(path, { ...init, headers, signal })
   if (!response.ok) throw new Error(((await response.json().catch(() => null)) as ErrorResponse | null)?.error.message ?? '语音合成失败')
   return response.arrayBuffer()
 }
@@ -257,8 +267,7 @@ export async function recordNoMedication(encounterId: string): Promise<Prescript
 }
 
 export function openPatientSocket(encounterId: string): WebSocket {
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/patient/socket`)
+  return new WebSocket(wsUrl(`${encounterPath(encounterId)}/patient/socket`))
 }
 
 // The Clinical Copilot: commands go over HTTP, its events stream over its socket.
@@ -322,8 +331,7 @@ export function compactCopilot(encounterId: string): Promise<CopilotCompactRespo
 }
 
 export function openCopilotSocket(encounterId: string, channel: 'socket' | 'bridge' = 'socket'): WebSocket {
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/copilot/${channel}`)
+  return new WebSocket(wsUrl(`${encounterPath(encounterId)}/copilot/${channel}`))
 }
 
 export function setCopilotAutomaticAnalysis(encounterId: string, enabled: boolean) {

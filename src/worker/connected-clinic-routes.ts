@@ -28,7 +28,6 @@ import type { EncounterError, ErrorResponse } from '../shared/encounter'
 import type { AgentRunSnapshot, FollowupPlanView, FollowupResponseView, FollowupSummaryView, QuestionnaireQuestion } from '../shared/followup'
 import { sha256Hex } from './auth/crypto'
 import { base64ToBytes, bytesToBase64 } from './communication/attachment-repository'
-import { workspaceName, type WorkspaceModeEnv } from './workspace-name'
 
 type AppContext = Context<{ Bindings: Env }>
 
@@ -49,8 +48,6 @@ const VALID_CONVERSATION_TYPES: readonly ConversationType[] = [
 ]
 
 export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: RouteHelpers): void {
-  // --- S2: Appointments & Check-in / Start Encounter ---
-
   app.get('/appointments/slots', async (c) => {
     const bearer = await h.requireBearer(c)
     if (!bearer.ok) return bearer.response
@@ -145,8 +142,6 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
     return result.ok ? c.json<StaffPatientsResponse>({ patients: result.patients }) : h.refuse(c, result.error)
   })
 
-  // --- S3: Controlled Patient Releases ---
-
   app.post('/staff/releases', async (c) => {
     const bearer = await h.requireBearer(c)
     if (!bearer.ok) return bearer.response
@@ -192,8 +187,6 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
     const result = await h.workspace(c).listEncounterReleases(bearer.token, c.req.param('encounterId'))
     return result.ok ? c.json<PatientReleasesResponse>({ items: result.items }) : h.refuse(c, result.error)
   })
-
-  // --- S4: IM Credentials, Conversations, Membership, Messages & Read Cursors ---
 
   app.get('/im/credentials', async (c) => {
     const bearer = await h.requireBearer(c)
@@ -329,8 +322,6 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
     return result.ok ? c.json({ lastReadSeq: result.lastReadSeq, unreadCount: result.unreadCount }) : h.refuse(c, result.error)
   })
 
-  // --- S5: Local Attachments & Signed Short-Lived Content Access ---
-
   app.post('/attachments/init', async (c) => {
     const bearer = await h.requireBearer(c)
     if (!bearer.ok) return bearer.response
@@ -384,13 +375,8 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
     const bearer = await h.requireBearer(c)
     if (!bearer.ok) return bearer.response
     const body = (await c.req.json().catch(() => null)) as { requestAsr?: unknown } | null
-    // Honest ASR status: without an active async ASR job, mark unavailable/none rather than fabricating transcript text.
-    const wantAsr = body?.requestAsr === true
-    const hasBailian = typeof (c.env as unknown as Record<string, unknown>).BAILIAN_TOKEN === 'string' &&
-      Boolean(String((c.env as unknown as Record<string, unknown>).BAILIAN_TOKEN).trim())
-    const transcript: { status: TranscriptStatus; text: string | null } = wantAsr
-      ? { status: hasBailian ? 'unavailable' : 'unavailable', text: null }
-      : { status: 'none', text: null }
+    const transcript: { status: TranscriptStatus; text: string | null } =
+      body?.requestAsr === true ? { status: 'unavailable', text: null } : { status: 'none', text: null }
     const result = await h.workspace(c).completeAttachment(bearer.token, c.req.param('id'), transcript)
     return result.ok ? c.json({ attachment: result.attachment }) : h.refuse(c, result.error)
   })
@@ -402,23 +388,24 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
     const ttlMs = Number.isFinite(ttlParam) && ttlParam > 0 ? Math.min(ttlParam, 900_000) : 300_000
     const result = await h.workspace(c).authorizeAttachmentAccess(bearer.token, c.req.param('id'), ttlMs)
     if (!result.ok) return h.refuse(c, result.error)
-    const url = `/api/attachments/${encodeURIComponent(result.attachment.attachmentId)}/content?exp=${result.exp}&sig=${encodeURIComponent(result.sig)}`
+    const url =
+      `/api/attachments/${encodeURIComponent(result.attachment.attachmentId)}/content` +
+      `?actor=${encodeURIComponent(result.actorId)}&exp=${result.exp}&sig=${encodeURIComponent(result.sig)}`
     return c.json<AttachmentAccessResponse>({ attachment: result.attachment, url, expiresAt: result.expiresAt })
   })
 
   app.get('/attachments/:id/content', async (c) => {
+    const actor = c.req.query('actor') ?? ''
     const exp = Number(c.req.query('exp'))
     const sig = c.req.query('sig') ?? ''
-    if (!sig) return h.refuse(c, { code: 'forbidden', message: '缺少附件访问签名。' })
-    const result = await h.workspace(c).readSignedAttachmentContent(c.req.param('id'), exp, sig)
+    if (!sig || !actor) return h.refuse(c, { code: 'forbidden', message: '缺少附件访问签名。' })
+    const result = await h.workspace(c).readSignedAttachmentContent(c.req.param('id'), actor, exp, sig)
     if (!result.ok) return h.refuse(c, result.error)
     const bytes = base64ToBytes(result.dataBase64)
     return new Response(bytes as unknown as BodyInit, {
       headers: { 'content-type': result.mime, 'cache-control': 'private, no-store' },
     })
   })
-
-  // --- S6/S7: Agent Runs, Streaming Socket, Stop & Action Results ---
 
   app.post('/agent/conversations/:id/runs', async (c) => {
     const bearer = await h.requireBearer(c)
@@ -472,12 +459,16 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
   app.post('/agent/runs/:id/stop', async (c) => {
     const bearer = await h.requireBearer(c)
     if (!bearer.ok) return bearer.response
-    const resolved = await h.workspace(c).resolveAuthorizedAgentRun(bearer.token, c.req.param('id'))
+    const runId = c.req.param('id')
+    const resolved = await h.workspace(c).resolveAuthorizedAgentRun(bearer.token, runId)
     if (!resolved.ok) return h.refuse(c, resolved.error)
+    if (resolved.principal.actorId !== resolved.triggerActorId && !resolved.principal.staffId) {
+      return h.refuse(c, { code: 'forbidden', message: '仅运行发起人或授权医护可停止该 Agent 运行。' })
+    }
     const stopped =
       resolved.agentKind === 'patient_service'
-        ? await c.env.PATIENT_SERVICE_AGENT.getByName(resolved.doName).stopRun()
-        : await c.env.FOLLOWUP_AGENT.getByName(resolved.doName).stopRun()
+        ? await c.env.PATIENT_SERVICE_AGENT.getByName(resolved.doName).stopRun(runId)
+        : await c.env.FOLLOWUP_AGENT.getByName(resolved.doName).stopRun(runId)
     return c.json(stopped)
   })
 
@@ -502,8 +493,6 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
     )
     return outcome.ok ? c.json({ ok: true }) : h.refuse(c, { code: outcome.code, message: outcome.message })
   })
-
-  // --- S7: Follow-up Plans, Responses, Summary Reviews & Close ---
 
   app.post('/followup/plans', async (c) => {
     const bearer = await h.requireBearer(c)
@@ -586,7 +575,4 @@ export function registerConnectedClinicRoutes(app: Hono<{ Bindings: Env }>, h: R
     const result = await h.workspace(c).closeFollowupPlan(bearer.token, c.req.param('id'))
     return result.ok ? c.json<{ plan: FollowupPlanView }>({ plan: result.plan }) : h.refuse(c, result.error)
   })
-
-  // Keep workspaceName import referenced for future workspace-scoped diagnostics.
-  void workspaceName({} as WorkspaceModeEnv)
 }

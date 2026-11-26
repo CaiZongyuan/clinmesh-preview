@@ -82,6 +82,18 @@ export class PatientReleaseRepository {
     if (encounter.status === 'abandoned') {
       return refuse({ code: 'encounter-not-active', message: '已放弃的就诊不能向患者发布临床资料。' })
     }
+    if (encounter.practitionerId !== verified.staffId && !this.hasCareRelationship(encounter.patientId, verified.staffId)) {
+      this.auth.audit({
+        actorId: principal.actorId,
+        actorRole: principal.role,
+        action: 'release.publish',
+        resourceType: input.resourceType,
+        resourceId: encounter.encounterId,
+        outcome: 'denied',
+        occurredAt: nowIso,
+      })
+      return refuse({ code: 'forbidden', message: '仅负责该就诊或具授权诊疗关系的医生可发布患者资料。' })
+    }
 
     const built = this.buildProjection(encounter, input, now.getTime())
     if (!built.ok) return built
@@ -154,21 +166,52 @@ export class PatientReleaseRepository {
     if (!principal.staffId || principal.role !== 'doctor') {
       return refuse({ code: 'forbidden', message: '仅授权医生可撤回已发布资料。' })
     }
-    const row = this.findById(releaseId)
-    if (!row) {
+    const verified = this.auth.verifyActiveStaff(principal.staffId, true)
+    if (!verified.ok) return verified
+    const raw = this.sql
+      .exec<{ release_id: string; patient_id: string; published_by: string; resource_type: PatientReleaseResourceType }>(
+        'SELECT release_id, patient_id, published_by, resource_type FROM patient_release WHERE release_id = ?',
+        releaseId,
+      )
+      .toArray()[0]
+    if (!raw) {
       return refuse({ code: 'release-not-found', message: `找不到已发布资料 ${releaseId}` })
+    }
+    if (raw.published_by !== principal.actorId && !this.hasCareRelationship(raw.patient_id, verified.staffId)) {
+      this.auth.audit({
+        actorId: principal.actorId,
+        actorRole: principal.role,
+        action: 'release.retract',
+        resourceType: raw.resource_type,
+        resourceId: releaseId,
+        outcome: 'denied',
+        occurredAt: nowIso,
+      })
+      return refuse({ code: 'forbidden', message: '仅发布医生或该患者授权医生可撤回已发布资料。' })
     }
     this.sql.exec('UPDATE patient_release SET retracted_at = ? WHERE release_id = ?', nowIso, releaseId)
     this.auth.audit({
       actorId: principal.actorId,
       actorRole: principal.role,
       action: 'release.retract',
-      resourceType: row.resourceType,
+      resourceType: raw.resource_type,
       resourceId: releaseId,
       outcome: 'allowed',
       occurredAt: nowIso,
     })
     return { ok: true, releaseId }
+  }
+
+  private hasCareRelationship(patientId: string, staffId: string): boolean {
+    return (
+      this.sql
+        .exec<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM care_relationship WHERE patient_id = ? AND staff_id = ?',
+          patientId,
+          staffId,
+        )
+        .one().count > 0
+    )
   }
 
   listForEncounter(principal: Principal, encounterId: string): { ok: true; items: PatientReleaseView[] } | Refusal {
@@ -281,10 +324,19 @@ export class PatientReleaseRepository {
       route: line.route,
       days: line.days,
     }))
+    const rxResourceId = `rx_${encounter.encounterId}`
+    const prevVersion =
+      this.sql
+        .exec<{ v: number | null }>(
+          `SELECT MAX(version) AS v FROM patient_release WHERE resource_type = 'prescription' AND resource_id = ?`,
+          rxResourceId,
+        )
+        .one().v ?? 0
+    const nextVersion = prevVersion === 0 ? 1 : prevVersion + 1
     return {
       ok: true,
-      resourceId: `rx_${encounter.encounterId}`,
-      version: Math.max(1, items.length),
+      resourceId: rxResourceId,
+      version: nextVersion,
       title: input.title?.trim() || `${encounter.patient.department}正式处方（${visitedDate}）`,
       summary:
         input.summary?.trim() ||

@@ -172,6 +172,19 @@ export function ConnectedClinicFollowup({ principal, plans, patients, onRefresh 
               ))
             )}
           </div>
+          {plan.reviewTasks.length > 0 ? (
+            <div style={{ marginTop: 12 }}>
+              <strong style={{ fontSize: 13 }}>待人工复核任务</strong>
+              {plan.reviewTasks.map((rt) => (
+                <div key={rt.reviewTaskId} style={{ marginTop: 6, padding: 8, background: 'var(--muted)', borderRadius: 6, fontSize: 12 }}>
+                  <span className="cc-badge cc-badge-warn" style={{ marginRight: 8 }}>
+                    {rt.status}
+                  </span>
+                  {rt.reason}（来源：{rt.sourceRef}）
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

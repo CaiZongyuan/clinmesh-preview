@@ -15,6 +15,7 @@ Page({
     mentionAgent: false,
     recording: false,
     sending: false,
+    attachmentUrls: {} as Record<string, string>,
     error: '',
   },
 
@@ -145,6 +146,53 @@ Page({
       audio.play()
     } catch (err) {
       this.setData({ error: err instanceof Error ? err.message : '语音播放失败' })
+    }
+  },
+
+  async onLoadImage(e: WechatMiniprogram.BaseEvent) {
+    const id = String(e.currentTarget.dataset.id || '')
+    if (!id) return
+    try {
+      const access = await hisApi.getAttachmentAccess(id)
+      this.setData({ [`attachmentUrls.${id}`]: `${getApiBaseUrl()}${access.url}` })
+    } catch (err) {
+      this.setData({ error: err instanceof Error ? err.message : '获取图片授权失败' })
+    }
+  },
+
+  onChooseImage() {
+    wx.chooseMedia({
+      count: 1,
+      mediaType: ['image'],
+      success: (res) => {
+        const tempFilePath = res.tempFiles[0]?.tempFilePath
+        if (tempFilePath) void this.uploadAndSendImage(tempFilePath)
+      },
+    })
+  },
+
+  async uploadAndSendImage(filePath: string) {
+    this.setData({ sending: true, error: '' })
+    try {
+      const fs = wx.getFileSystemManager()
+      const buffer = fs.readFileSync(filePath) as ArrayBuffer
+      const init = await hisApi.initAttachment({
+        conversationId: this.data.conversationId,
+        kind: 'image',
+        mime: 'image/jpeg',
+        size: buffer.byteLength,
+      })
+      await hisApi.uploadAttachmentBuffer(init.uploadUrl, 'image/jpeg', buffer)
+      await hisApi.completeAttachment(init.attachment.attachmentId, false)
+      await hisApi.sendMessage(this.data.conversationId, {
+        clientMessageId: `mp-img-${Date.now()}`,
+        parts: [{ type: 'image', attachmentId: init.attachment.attachmentId }],
+      })
+      await this.load()
+    } catch (err) {
+      this.setData({ error: err instanceof Error ? err.message : '图片上传发送失败' })
+    } finally {
+      this.setData({ sending: false })
     }
   },
 

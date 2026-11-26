@@ -3,8 +3,8 @@ import { hisApi } from './his-api'
 
 type PushListener = () => void
 
-// Thin WuKongIM live subscription wrapper for WeChat MiniProgram.
-// Persistent sends and read cursors stay authoritative in HIS (ADR-0004); this socket drives instant refresh.
+// Foreground message sync client for WeChat MiniProgram.
+// Fetches scoped WuKongIM credentials from HIS and triggers periodic history sync; persistent sends & read cursors remain HIS-owned (ADR-0004).
 export class MiniProgramImClient {
   private credentials: ImCredentialsResponse | null = null
   private listeners = new Set<PushListener>()

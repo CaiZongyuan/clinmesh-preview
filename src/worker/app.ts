@@ -150,12 +150,18 @@ const refuse = (c: AppContext, error: EncounterError) => c.json<ErrorResponse>({
 const investigationsOr = (c: AppContext, result: InvestigationsResult, status: ContentfulStatusCode = 200) =>
   result.ok ? c.json<InvestigationsResponse>({ investigations: result.investigations }, status) : refuse(c, result.error)
 
-// Parses `Authorization: Bearer <token>`. Returns null when no Authorization header was sent; empty string when malformed.
+// Parses `Authorization: Bearer <token>`, or `?token=<token>` on WebSocket upgrades where browsers cannot set headers.
 function extractBearer(c: AppContext): string | null {
   const header = c.req.header('authorization')
-  if (header === undefined) return null
-  const match = /^Bearer\s+(\S+)$/i.exec(header.trim())
-  return match ? match[1] : ''
+  if (header !== undefined) {
+    const match = /^Bearer\s+(\S+)$/i.exec(header.trim())
+    return match ? match[1] : ''
+  }
+  if (c.req.header('upgrade')?.toLowerCase() === 'websocket') {
+    const queryToken = c.req.query('token')
+    if (queryToken !== undefined) return queryToken.trim()
+  }
+  return null
 }
 
 async function requireBearer(c: AppContext): Promise<{ ok: true; token: string } | { ok: false; response: Response }> {

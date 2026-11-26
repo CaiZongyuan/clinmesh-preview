@@ -1,3 +1,5 @@
+import { parseClientAction } from './agent-stream-reducer'
+
 export type ConversationType =
   | 'patient_assistant'
   | 'patient_doctor'
@@ -245,12 +247,9 @@ export function validateMessageParts(raw: unknown): MessagePart[] | null {
       if (!Array.isArray(part.actions) || part.actions.length > 6) return null
       const actions: UIAction[] = []
       for (const act of part.actions) {
-        if (!act || typeof act !== 'object' || Array.isArray(act)) return null
-        const a = act as Record<string, unknown>
-        if (typeof a.name !== 'string' || !SAFE_ID.test(a.name) || !a.args || typeof a.args !== 'object' || Array.isArray(a.args)) {
-          return null
-        }
-        actions.push({ name: a.name, args: a.args as JsonRecord })
+        const parsedAction = parseClientAction(act)
+        if (!parsedAction) return null
+        actions.push({ name: parsedAction.name, args: parsedAction.args as JsonRecord })
       }
       parts.push({
         type: 'card',

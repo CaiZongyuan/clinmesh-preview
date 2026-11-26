@@ -2,7 +2,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { Button } from '@ui-sdk/react/button'
 import { useCallback, useEffect, useState } from 'react'
 import type { AppointmentView, StaffPatientView } from '../../shared/appointment'
-import type { ContactView, Principal } from '../../shared/auth'
+import type { ContactView, DoctorView, Principal } from '../../shared/auth'
 import type { ConversationView } from '../../shared/communication'
 import type { EncounterView } from '../../shared/encounter'
 import type { AgentRunSnapshot, FollowupPlanView } from '../../shared/followup'
@@ -30,21 +30,38 @@ import './connected-clinic-shell.css'
 
 type ClinicSection = 'dashboard' | 'appointments' | 'patients' | 'messages' | 'followup' | 'runs'
 
+const SHOW_DEMO_CONTROLS = import.meta.env.DEV || import.meta.env.MODE === 'test'
+
+function formatShanghaiTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
 export function ConnectedClinicShell() {
   const navigate = useNavigate()
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
-  const [username, setUsername] = useState('dr.wang')
-  const [password, setPassword] = useState('demo-doctor-a-pass')
+  const [username, setUsername] = useState(SHOW_DEMO_CONTROLS ? 'dr.wang' : '')
+  const [password, setPassword] = useState(SHOW_DEMO_CONTROLS ? 'demo-doctor-a-pass' : '')
   const [section, setSection] = useState<ClinicSection>('dashboard')
   const [appointments, setAppointments] = useState<AppointmentView[]>([])
   const [patients, setPatients] = useState<StaffPatientView[]>([])
+  const [doctors, setDoctors] = useState<DoctorView[]>([])
   const [conversations, setConversations] = useState<ConversationView[]>([])
   const [contacts, setContacts] = useState<ContactView[]>([])
   const [plans, setPlans] = useState<FollowupPlanView[]>([])
   const [activeEncounter, setActiveEncounter] = useState<EncounterView | null>(null)
   const [recentRunIds, setRecentRunIds] = useState<string[]>([])
   const [runs, setRuns] = useState<AgentRunSnapshot[]>([])
+  const [doctorFilter, setDoctorFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +78,7 @@ export function ConnectedClinicShell() {
     ])
     setAppointments(appts)
     setPatients(pats)
+    setDoctors(dir.doctors)
     setConversations(convs)
     setContacts(dir.contacts)
     setPlans(fPlans)
@@ -215,44 +233,46 @@ export function ConnectedClinicShell() {
           <Button className="cc-btn cc-btn-primary" disabled={busy} onClick={() => void handleLogin()}>
             登录医护工作台
           </Button>
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 8 }}>演示账号快捷登录：</div>
-            <div className="cc-row">
-              <Button
-                className="cc-btn"
-                disabled={busy}
-                onClick={() => {
-                  setUsername('dr.wang')
-                  setPassword('demo-doctor-a-pass')
-                  void handleLogin('dr.wang', 'demo-doctor-a-pass')
-                }}
-              >
-                王明医生 (全科)
-              </Button>
-              <Button
-                className="cc-btn"
-                disabled={busy}
-                onClick={() => {
-                  setUsername('dr.lin')
-                  setPassword('demo-doctor-b-pass')
-                  void handleLogin('dr.lin', 'demo-doctor-b-pass')
-                }}
-              >
-                林悦医生 (心内科)
-              </Button>
-              <Button
-                className="cc-btn"
-                disabled={busy}
-                onClick={() => {
-                  setUsername('nurse.zhou')
-                  setPassword('demo-nurse-n-pass')
-                  void handleLogin('nurse.zhou', 'demo-nurse-n-pass')
-                }}
-              >
-                周岚护士
-              </Button>
+          {SHOW_DEMO_CONTROLS ? (
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 8 }}>本地开发演示账号快捷登录：</div>
+              <div className="cc-row">
+                <Button
+                  className="cc-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setUsername('dr.wang')
+                    setPassword('demo-doctor-a-pass')
+                    void handleLogin('dr.wang', 'demo-doctor-a-pass')
+                  }}
+                >
+                  王明医生 (全科)
+                </Button>
+                <Button
+                  className="cc-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setUsername('dr.lin')
+                    setPassword('demo-doctor-b-pass')
+                    void handleLogin('dr.lin', 'demo-doctor-b-pass')
+                  }}
+                >
+                  林悦医生 (心内科)
+                </Button>
+                <Button
+                  className="cc-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setUsername('nurse.zhou')
+                    setPassword('demo-nurse-n-pass')
+                    void handleLogin('nurse.zhou', 'demo-nurse-n-pass')
+                  }}
+                >
+                  周岚护士
+                </Button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </section>
       </main>
     )
@@ -260,7 +280,9 @@ export function ConnectedClinicShell() {
 
   const totalUnread = conversations.reduce((sum, c) => sum + c.unreadCount, 0)
   const pendingSummaries = plans.reduce((sum, p) => sum + p.summaries.filter((s) => s.status === 'draft').length, 0)
-  const filteredAppointments = statusFilter ? appointments.filter((a) => a.status === statusFilter) : appointments
+  const filteredAppointments = appointments.filter(
+    (a) => (!statusFilter || a.status === statusFilter) && (!doctorFilter || a.doctorId === doctorFilter),
+  )
 
   return (
     <div className="cc-shell">
@@ -311,9 +333,11 @@ export function ConnectedClinicShell() {
           <Button className="cc-btn" disabled={busy} onClick={() => void refreshAll()}>
             刷新数据
           </Button>
-          <Button className="cc-btn cc-btn-danger" disabled={busy} onClick={() => void handleResetDemo()}>
-            重置演示数据
-          </Button>
+          {SHOW_DEMO_CONTROLS ? (
+            <Button className="cc-btn cc-btn-danger" disabled={busy} onClick={() => void handleResetDemo()}>
+              重置演示数据
+            </Button>
+          ) : null}
           <Button className="cc-btn" onClick={() => void handleLogout()}>
             退出登录
           </Button>
@@ -401,19 +425,34 @@ export function ConnectedClinicShell() {
                 <h3 className="cc-card-title" style={{ margin: 0 }}>
                   预约队列（单 active encounter 排队）
                 </h3>
-                <select
-                  aria-label="按状态筛选预约"
-                  className="cc-select"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                  <option value="">全部状态</option>
-                  <option value="booked">已预约</option>
-                  <option value="checked_in">已签到</option>
-                  <option value="in_encounter">接诊中</option>
-                  <option value="completed">已完诊</option>
-                  <option value="cancelled">已取消</option>
-                </select>
+                <div className="cc-row">
+                  <select
+                    aria-label="按医生筛选预约"
+                    className="cc-select"
+                    value={doctorFilter}
+                    onChange={(e) => setDoctorFilter(e.target.value)}
+                  >
+                    <option value="">全部医生</option>
+                    {doctors.map((d) => (
+                      <option key={d.staffId} value={d.staffId}>
+                        {d.displayName} ({d.departmentName})
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="按状态筛选预约"
+                    className="cc-select"
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                  >
+                    <option value="">全部状态</option>
+                    <option value="booked">已预约</option>
+                    <option value="checked_in">已签到</option>
+                    <option value="in_encounter">接诊中</option>
+                    <option value="completed">已完诊</option>
+                    <option value="cancelled">已取消</option>
+                  </select>
+                </div>
               </div>
               {activeEncounter ? (
                 <div style={{ fontSize: 12, color: 'var(--warning)', marginBottom: 10 }}>
@@ -440,7 +479,7 @@ export function ConnectedClinicShell() {
                       <td>
                         {appt.doctorName} · {appt.departmentName}
                       </td>
-                      <td>{appt.startsAt.slice(0, 16).replace('T', ' ')} UTC</td>
+                      <td>{formatShanghaiTime(appt.startsAt)} (北京时间)</td>
                       <td>
                         <span className="cc-badge">{appt.status}</span>
                       </td>

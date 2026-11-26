@@ -219,6 +219,26 @@ export class FollowupRepository {
     if (!patient) {
       return refuse({ code: 'resource-not-found', message: `找不到患者 ${input.patientId}` })
     }
+    const hasCareRel =
+      this.sql
+        .exec<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM care_relationship WHERE patient_id = ? AND staff_id = ?',
+          patient.patient_id,
+          verified.staffId,
+        )
+        .one().count > 0
+    if (!hasCareRel) {
+      this.auth.audit({
+        actorId: principal.actorId,
+        actorRole: principal.role,
+        action: 'followup.plan.create',
+        resourceType: 'patient_profile',
+        resourceId: patient.patient_id,
+        outcome: 'denied',
+        occurredAt: nowIso,
+      })
+      return refuse({ code: 'forbidden', message: '与该患者未建立授权诊疗关系，无权创建随访计划。' })
+    }
 
     const memberActorIds = [patient.actor_id, 'actor_agent_followup']
     const nurseStaffId = input.nurseStaffId?.trim() || 'staff_nurse_n'
@@ -515,6 +535,8 @@ export class FollowupRepository {
     if (!principal.staffId || principal.role !== 'doctor') {
       return refuse({ code: 'forbidden', message: '仅授权医生可关闭随访计划。' })
     }
+    const verified = this.auth.verifyActiveStaff(principal.staffId, true)
+    if (!verified.ok) return verified
     const plan = this.loadPlan(planId)
     if (!plan || !this.canViewPlan(principal, plan)) {
       return refuse({ code: 'followup-plan-not-found', message: `找不到随访计划 ${planId}` })

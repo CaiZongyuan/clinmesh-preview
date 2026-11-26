@@ -181,8 +181,36 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
   }
 
   private attachmentSigningSecret(): string {
-    const raw = (this.env as unknown as Record<string, unknown>).WUKONGIM_MANAGER_TOKEN
-    return typeof raw === 'string' && raw.trim() ? raw.trim() : 'clinmesh-local-attachment-secret'
+    const raw = (this.env as unknown as Record<string, unknown>).ATTACHMENT_SIGNING_SECRET
+    if (typeof raw === 'string' && raw.trim()) return raw.trim()
+    const existing = this.ctx.storage.sql
+      .exec<{ value: string }>(`SELECT value FROM workspace_state WHERE key = 'attachment_signing_secret'`)
+      .toArray()[0]
+    if (existing) return existing.value
+    const generated = generateOpaqueToken()
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO workspace_state (key, value) VALUES ('attachment_signing_secret', ?)`,
+      generated,
+    )
+    return this.ctx.storage.sql
+      .exec<{ value: string }>(`SELECT value FROM workspace_state WHERE key = 'attachment_signing_secret'`)
+      .one().value
+  }
+
+  private workspaceEpoch(): string {
+    const row = this.ctx.storage.sql
+      .exec<{ value: string }>(`SELECT value FROM workspace_state WHERE key = 'reset_epoch'`)
+      .toArray()[0]
+    return row?.value ?? '0'
+  }
+
+  private bumpWorkspaceEpoch(): void {
+    const next = String(Number(this.workspaceEpoch()) + 1)
+    this.ctx.storage.sql.exec(
+      `INSERT INTO workspace_state (key, value) VALUES ('reset_epoch', ?)
+       ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+      next,
+    )
   }
 
   // Checks practitioner eligibility inside the same transaction that mutates state, preventing TOCTOU bypass.
@@ -342,6 +370,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('DELETE FROM audit_event')
       this.ctx.storage.sql.exec(`UPDATE encounter SET status = 'abandoned', ended_at = COALESCE(ended_at, ?) WHERE status = 'active'`, nowIso)
       this.goldenCases.reconcile(goldenCaseRegistrations())
+      this.bumpWorkspaceEpoch()
       const summary = this.auth.resetDemo(workspace, seedHashes, nowIso)
       this.comm.ensureDemoConversationsSeeded(nowIso)
       this.followup.ensureDemoPlansSeeded(nowIso)
@@ -865,8 +894,6 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return { ok: true, doctorTurn: exchange.doctorTurn, patientTurn: this.consultation.find(exchange.patientTurn.turnId)! }
   }
 
-  // --- Connected Clinic S2/S3: Appointments, Staff Patients & Patient Releases ---
-
   async listAppointmentSlots(
     token: string,
     filters: { departmentId?: string; doctorId?: string; date?: string } = {},
@@ -982,8 +1009,6 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return this.releases.listForEncounter(auth.principal, encounterId)
   }
 
-  // --- Connected Clinic S4/S5: IM Credentials, Conversations, Reliable Messaging & Local Attachments ---
-
   async issueImCredentials(token: string): Promise<{ ok: true; credentials: ImCredentialsResponse } | Refusal> {
     const auth = await this.authenticateBearer(token)
     if (!auth.ok) return auth
@@ -1089,7 +1114,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     if (!updated.ok) return updated
     await this.imAdapter().removeSubscribers(updated.imChannelId, updated.imChannelType, [updated.targetImUid]).catch(() => {})
     if (targetActorId === 'actor_agent_followup') {
-      const doName = `${updated.conversation.conversationId}:actor_agent_followup`
+      const doName = `${this.workspaceEpoch()}:${updated.conversation.conversationId}:actor_agent_followup`
       await this.env.FOLLOWUP_AGENT.getByName(doName).haltForRevocation().catch(() => {})
     }
     return { ok: true, conversation: updated.conversation }
@@ -1247,8 +1272,6 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     })
   }
 
-  // --- S5 Local Attachments ---
-
   async initAttachment(token: string, input: InitAttachmentRequest): Promise<{ ok: true; attachment: AttachmentView } | Refusal> {
     await this.ensureClinicSeeded()
     const tokenHash = await sha256Hex(token)
@@ -1296,28 +1319,43 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     token: string,
     attachmentId: string,
     ttlMs = 300_000,
-  ): Promise<{ ok: true; attachment: AttachmentView; exp: number; sig: string; expiresAt: string } | Refusal> {
-    const auth = await this.authenticateBearer(token)
-    if (!auth.ok) return auth
+  ): Promise<{ ok: true; attachment: AttachmentView; actorId: string; exp: number; sig: string; expiresAt: string } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
     const now = Date.now()
-    const checked = this.ctx.storage.transactionSync(() =>
-      this.attachments.authorizeAccess(auth.principal, attachmentId, new Date(now).toISOString()),
-    )
+    const checked = this.ctx.storage.transactionSync(() => {
+      const auth = this.auth.authenticateSession(tokenHash, new Date(now))
+      if (!auth.ok) return auth
+      const allowed = this.attachments.authorizeAccess(auth.principal, attachmentId, new Date(now).toISOString())
+      if (!allowed.ok) return allowed
+      return {
+        ok: true as const,
+        attachment: allowed.attachment,
+        actorId: auth.principal.actorId,
+        secret: this.attachmentSigningSecret(),
+      }
+    })
     if (!checked.ok) return checked
     const exp = now + ttlMs
-    const sig = await signAttachmentAccess(this.attachmentSigningSecret(), attachmentId, exp)
-    return { ok: true, attachment: checked.attachment, exp, sig, expiresAt: new Date(exp).toISOString() }
+    const sig = await signAttachmentAccess(checked.secret, attachmentId, checked.actorId, exp)
+    return {
+      ok: true,
+      attachment: checked.attachment,
+      actorId: checked.actorId,
+      exp,
+      sig,
+      expiresAt: new Date(exp).toISOString(),
+    }
   }
 
   async readSignedAttachmentContent(
     attachmentId: string,
+    actorId: string,
     expMs: number,
     sig: string,
   ): Promise<{ ok: true; mime: string; dataBase64: string } | Refusal> {
-    return this.attachments.readSignedContent(attachmentId, expMs, sig, this.attachmentSigningSecret(), Date.now())
+    return this.attachments.readSignedContent(attachmentId, actorId, expMs, sig, this.attachmentSigningSecret(), Date.now())
   }
-
-  // --- S6/S7 Agent Runs & Follow-up Plans ---
 
   async startAgentRunForConversation(
     token: string,
@@ -1325,25 +1363,31 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     conversationId: string,
     input: { text: string; clientRequestId: string; agentActorId?: string },
   ): Promise<{ ok: true; runId: string; agentKind: 'patient_service' | 'followup'; created: boolean } | Refusal> {
-    const auth = await this.authenticateBearer(token)
-    if (!auth.ok) return auth
-    const conv = this.comm.getConversation(auth.principal, conversationId)
-    if (!conv.ok) return conv
-    if (conv.conversation.status !== 'active') {
-      return { ok: false, error: { code: 'conversation-read-only', message: '该会话已只读，不能触发 Agent 运行。' } }
-    }
-    const targetAgent =
-      input.agentActorId ??
-      (conv.conversation.type === 'patient_assistant' ? 'actor_agent_patient_svc' : 'actor_agent_followup')
-    const hasAgent = conv.conversation.members.some((m) => m.actorId === targetAgent && m.status === 'active')
-    if (!hasAgent) {
-      return { ok: false, error: { code: 'conversation-member-forbidden', message: '目标 Agent 不是当前会话的有效成员。' } }
-    }
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    const authorized = this.ctx.storage.transactionSync(() => {
+      const auth = this.auth.authenticateSession(tokenHash, new Date())
+      if (!auth.ok) return auth
+      const conv = this.comm.getConversation(auth.principal, conversationId)
+      if (!conv.ok) return conv
+      if (conv.conversation.status !== 'active') {
+        return { ok: false as const, error: { code: 'conversation-read-only' as const, message: '该会话已只读，不能触发 Agent 运行。' } }
+      }
+      const targetAgent =
+        input.agentActorId ??
+        (conv.conversation.type === 'patient_assistant' ? 'actor_agent_patient_svc' : 'actor_agent_followup')
+      const hasAgent = conv.conversation.members.some((m) => m.actorId === targetAgent && m.status === 'active')
+      if (!hasAgent) {
+        return { ok: false as const, error: { code: 'conversation-member-forbidden' as const, message: '目标 Agent 不是当前会话的有效成员。' } }
+      }
+      return { ok: true as const, principal: auth.principal, targetAgent }
+    })
+    if (!authorized.ok) return authorized
     return this.dispatchAgentRunInternal({
       workspaceName,
-      principal: auth.principal,
+      principal: authorized.principal,
       conversationId,
-      agentActorId: targetAgent,
+      agentActorId: authorized.targetAgent,
       externalRef: `req:${input.clientRequestId}`,
       userText: input.text,
     })
@@ -1361,11 +1405,12 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     if (!convCtx || convCtx.status !== 'active') {
       return { ok: false, error: { code: 'conversation-read-only', message: '当前会话不可用。' } }
     }
+    const epoch = this.workspaceEpoch()
     if (input.agentActorId === 'actor_agent_patient_svc') {
       if (input.principal.role !== 'patient' || !input.principal.patientId || convCtx.type !== 'patient_assistant') {
         return { ok: false, error: { code: 'forbidden', message: '仅患者本人可在私人助手会话中调用 AI 就医助手。' } }
       }
-      const doName = `${input.principal.clinicId}:${input.principal.actorId}`
+      const doName = `${input.principal.clinicId}:${epoch}:${input.principal.actorId}`
       const started = await this.env.PATIENT_SERVICE_AGENT.getByName(doName).startRun({
         workspaceName: input.workspaceName,
         clinicId: input.principal.clinicId,
@@ -1388,7 +1433,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       return { ok: true, runId: started.runId, agentKind: 'patient_service', created: started.created }
     }
 
-    const doName = `${input.conversationId}:actor_agent_followup`
+    const doName = `${epoch}:${input.conversationId}:actor_agent_followup`
     const started = await this.env.FOLLOWUP_AGENT.getByName(doName).startRun({
       workspaceName: input.workspaceName,
       clinicId: input.principal.clinicId,
@@ -1415,30 +1460,40 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     token: string,
     runId: string,
   ): Promise<
-    | { ok: true; principal: Principal; agentKind: 'patient_service' | 'followup'; doName: string; conversationId: string }
+    | {
+        ok: true
+        principal: Principal
+        agentKind: 'patient_service' | 'followup'
+        doName: string
+        conversationId: string
+        triggerActorId: string
+      }
     | Refusal
   > {
-    const auth = await this.authenticateBearer(token)
-    if (!auth.ok) return auth
-    const row = this.ctx.storage.sql
-      .exec<{ agent_kind: 'patient_service' | 'followup'; do_name: string; conversation_id: string }>(
-        'SELECT agent_kind, do_name, conversation_id FROM agent_run_index WHERE run_id = ?',
-        runId,
-      )
-      .toArray()[0]
-    if (!row || !this.comm.isActiveMember(row.conversation_id, auth.principal.actorId)) {
-      return { ok: false, error: { code: 'agent-run-not-found', message: '找不到该 Agent 运行或无权访问。' } }
-    }
-    return {
-      ok: true,
-      principal: auth.principal,
-      agentKind: row.agent_kind,
-      doName: row.do_name,
-      conversationId: row.conversation_id,
-    }
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const auth = this.auth.authenticateSession(tokenHash, new Date())
+      if (!auth.ok) return auth
+      const row = this.ctx.storage.sql
+        .exec<{ agent_kind: 'patient_service' | 'followup'; do_name: string; conversation_id: string; trigger_actor_id: string }>(
+          'SELECT agent_kind, do_name, conversation_id, trigger_actor_id FROM agent_run_index WHERE run_id = ?',
+          runId,
+        )
+        .toArray()[0]
+      if (!row || !this.comm.isActiveMember(row.conversation_id, auth.principal.actorId)) {
+        return { ok: false, error: { code: 'agent-run-not-found', message: '找不到该 Agent 运行或无权访问。' } }
+      }
+      return {
+        ok: true,
+        principal: auth.principal,
+        agentKind: row.agent_kind,
+        doName: row.do_name,
+        conversationId: row.conversation_id,
+        triggerActorId: row.trigger_actor_id,
+      }
+    })
   }
-
-  // --- Follow-up Plan RPCs ---
 
   async createFollowupPlan(
     token: string,
@@ -1453,7 +1508,17 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       return this.followup.createPlan(auth.principal, input, now.toISOString())
     })
     if (!created.ok) return created
-    await this.imAdapter().ensureChannel(created.imChannelId, created.imChannelType, created.subscriberImUids).catch(() => {})
+    try {
+      await this.imAdapter().ensureChannel(created.imChannelId, created.imChannelType, created.subscriberImUids)
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: 'im-delivery-failed',
+          message: `随访群 IM 频道创建失败（会话保持 provisioning，未开放写入）：${error instanceof Error ? error.message : String(error)}`,
+        },
+      }
+    }
     if (created.plan.conversationId) {
       this.ctx.storage.transactionSync(() => {
         this.comm.activateProvisionedConversation(created.plan.conversationId!, new Date().toISOString())
@@ -1516,8 +1581,6 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     })
   }
 
-  // --- Agent-Scoped Internal Workspace RPCs (never expose Case Truth or cross-patient reads) ---
-
   agentListDepartments(): DepartmentView[] {
     return this.auth.listDepartments()
   }
@@ -1530,73 +1593,8 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     return this.appointments.listSlots(filters).filter((s) => s.status === 'open' && s.remaining > 0)
   }
 
-  agentListPatientAppointments(patientId: string): AppointmentView[] {
-    const res = this.appointments.listForPatient(
-      {
-        sessionId: 'agent',
-        accountId: 'agent',
-        actorId: 'actor_agent_patient_svc',
-        clinicId: 'clinic_clinmesh_demo',
-        kind: 'agent',
-        role: 'patient',
-        displayName: 'Agent',
-        imUid: 'agent_patient_svc',
-        patientId,
-        staffId: null,
-        departmentId: null,
-        expiresAt: '',
-      },
-    )
-    return res.ok ? res.appointments : []
-  }
-
-  agentListPatientReleases(patientId: string, resourceType: PatientReleaseResourceType): PatientReleaseView[] {
-    const res = this.auth.listPatientReleases(
-      {
-        sessionId: 'agent',
-        accountId: 'agent',
-        actorId: 'actor_agent_patient_svc',
-        clinicId: 'clinic_clinmesh_demo',
-        kind: 'agent',
-        role: 'patient',
-        displayName: 'Agent',
-        imUid: 'agent_patient_svc',
-        patientId,
-        staffId: null,
-        departmentId: null,
-        expiresAt: '',
-      },
-      resourceType,
-      new Date().toISOString(),
-    )
-    return res.ok ? res.items : []
-  }
-
-  agentGetPatientRelease(patientId: string, resourceType: PatientReleaseResourceType, id: string): PatientReleaseView | null {
-    const res = this.auth.getPatientRelease(
-      {
-        sessionId: 'agent',
-        accountId: 'agent',
-        actorId: 'actor_agent_patient_svc',
-        clinicId: 'clinic_clinmesh_demo',
-        kind: 'agent',
-        role: 'patient',
-        displayName: 'Agent',
-        imUid: 'agent_patient_svc',
-        patientId,
-        staffId: null,
-        departmentId: null,
-        expiresAt: '',
-      },
-      resourceType,
-      id,
-      new Date().toISOString(),
-    )
-    return res.ok ? res.item : null
-  }
-
-  agentListPatientCareTeam(patientId: string): ContactView[] {
-    return this.auth.listContacts({
+  private agentPatientPrincipal(patientId: string): Principal {
+    return {
       sessionId: 'agent',
       accountId: 'agent',
       actorId: 'actor_agent_patient_svc',
@@ -1609,7 +1607,26 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       staffId: null,
       departmentId: null,
       expiresAt: '',
-    })
+    }
+  }
+
+  agentListPatientAppointments(patientId: string): AppointmentView[] {
+    const res = this.appointments.listForPatient(this.agentPatientPrincipal(patientId))
+    return res.ok ? res.appointments : []
+  }
+
+  agentListPatientReleases(patientId: string, resourceType: PatientReleaseResourceType): PatientReleaseView[] {
+    const res = this.auth.listPatientReleases(this.agentPatientPrincipal(patientId), resourceType, new Date().toISOString())
+    return res.ok ? res.items : []
+  }
+
+  agentGetPatientRelease(patientId: string, resourceType: PatientReleaseResourceType, id: string): PatientReleaseView | null {
+    const res = this.auth.getPatientRelease(this.agentPatientPrincipal(patientId), resourceType, id, new Date().toISOString())
+    return res.ok ? res.item : null
+  }
+
+  agentListPatientCareTeam(patientId: string): ContactView[] {
+    return this.auth.listContacts(this.agentPatientPrincipal(patientId))
   }
 
   agentVerifyGroupScope(conversationId: string, triggerActorId: string): { allowed: boolean; followupPlanId: string | null } {

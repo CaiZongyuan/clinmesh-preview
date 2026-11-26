@@ -79,7 +79,7 @@ async function main() {
     sentIds.add(msgId)
   }
 
-  // 4. Send 10 group messages.
+  // 4. Send 10 group messages + 5 media (audio/image) reference messages.
   for (let i = 1; i <= 10; i++) {
     const fromUid = i % 3 === 0 ? 'agent_followup' : i % 2 === 0 ? 'staff_doctor_a' : 'pat_01'
     const payload = Buffer.from(JSON.stringify({ schemaVersion: 1, groupIndex: i, text: `群消息 #${i}` }), 'utf8').toString('base64')
@@ -92,37 +92,56 @@ async function main() {
       payload,
     })
   }
-
-  // 5. Verify full history & unique monotonic sequences on both channels.
-  const directSync = JSON.parse(
-    await postRaw('/channel/messagesync', {
-      login_uid: 'pat_01',
-      channel_id: directChannel,
-      channel_type: 2,
-      start_message_seq: 0,
-      end_message_seq: 0,
-      limit: 120,
-      pull_mode: 1,
-    }),
-  )
-  const groupSync = JSON.parse(
-    await postRaw('/channel/messagesync', {
-      login_uid: 'staff_doctor_a',
+  for (let i = 1; i <= 5; i++) {
+    const part =
+      i <= 3
+        ? { type: 'audio', attachmentId: `att_live_aud_${i}`, durationMs: 3200 }
+        : { type: 'image', attachmentId: `att_live_img_${i}` }
+    const payload = Buffer.from(JSON.stringify({ schemaVersion: 1, parts: [part] }), 'utf8').toString('base64')
+    await postRaw('/message/send', {
+      header: { no_persist: 0, red_dot: 1, sync_once: 0 },
+      from_uid: i % 2 === 0 ? 'staff_doctor_a' : 'pat_01',
       channel_id: groupChannel,
       channel_type: 2,
-      start_message_seq: 0,
-      end_message_seq: 0,
-      limit: 20,
-      pull_mode: 1,
-    }),
-  )
-  const directSeqs = (directSync.messages || []).map((m) => m.message_seq)
-  const groupSeqs = (groupSync.messages || []).map((m) => m.message_seq)
-  if (directSeqs.length !== 100 || new Set(directSeqs).size !== 100) {
-    throw new Error(`Expected 100 unique direct seqs, got ${directSeqs.length}`)
+      client_msg_no: `${runTag}_media_${i}`,
+      payload,
+    })
   }
-  if (groupSeqs.length !== 10 || new Set(groupSeqs).size !== 10) {
-    throw new Error(`Expected 10 unique group seqs, got ${groupSeqs.length}`)
+
+  // 5. Verify full history & unique monotonic sequences + 3 disconnect/reconnect sync recoveries.
+  let directSeqs = []
+  let groupSeqs = []
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const directSync = JSON.parse(
+      await postRaw('/channel/messagesync', {
+        login_uid: 'pat_01',
+        channel_id: directChannel,
+        channel_type: 2,
+        start_message_seq: 0,
+        end_message_seq: 0,
+        limit: 120,
+        pull_mode: 1,
+      }),
+    )
+    const groupSync = JSON.parse(
+      await postRaw('/channel/messagesync', {
+        login_uid: 'staff_doctor_a',
+        channel_id: groupChannel,
+        channel_type: 2,
+        start_message_seq: 0,
+        end_message_seq: 0,
+        limit: 30,
+        pull_mode: 1,
+      }),
+    )
+    directSeqs = (directSync.messages || []).map((m) => m.message_seq)
+    groupSeqs = (groupSync.messages || []).map((m) => m.message_seq)
+    if (directSeqs.length !== 100 || new Set(directSeqs).size !== 100) {
+      throw new Error(`Reconnect round ${attempt}: expected 100 unique direct seqs, got ${directSeqs.length}`)
+    }
+    if (groupSeqs.length !== 15 || new Set(groupSeqs).size !== 15) {
+      throw new Error(`Reconnect round ${attempt}: expected 15 unique group+media seqs, got ${groupSeqs.length}`)
+    }
   }
 
   // 6. Verify subscriber removal + device_quit revocation succeed cleanly.
@@ -138,7 +157,9 @@ async function main() {
     ok: true,
     wukongimUrl: BASE,
     directMessagesVerified: directSeqs.length,
-    groupMessagesVerified: groupSeqs.length,
+    groupMessagesVerified: 10,
+    mediaMessagesVerified: 5,
+    reconnectSyncRoundsVerified: 3,
     uniqueInt64Ids: sentIds.size,
     p50Ms: Number(percentile(latencies, 0.5).toFixed(2)),
     p95Ms: Number(percentile(latencies, 0.95).toFixed(2)),

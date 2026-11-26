@@ -508,6 +508,10 @@ const MIGRATIONS: readonly string[] = [
      conversation_id TEXT NOT NULL REFERENCES conversation (conversation_id),
      trigger_actor_id TEXT NOT NULL,
      created_at TEXT NOT NULL
+   );
+   CREATE TABLE workspace_state (
+     key TEXT PRIMARY KEY,
+     value TEXT NOT NULL
    );`,
 ]
 

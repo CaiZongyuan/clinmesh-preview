@@ -1,11 +1,12 @@
 import { Button } from '@ui-sdk/react/button'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ContactView, Principal } from '../../shared/auth'
 import type { ChatMessage, ConversationView, MessagePart } from '../../shared/communication'
 import {
   createConversation,
   fetchAttachmentAccess,
   fetchConversationMessages,
+  fetchImCredentials,
   inviteConversationMember,
   markConversationRead,
   removeConversationMember,
@@ -21,6 +22,12 @@ interface Props {
   onRunTriggered: (runId: string) => void
 }
 
+function partKey(messageId: string, part: MessagePart): string {
+  if (part.type === 'audio' || part.type === 'image') return `${messageId}:${part.type}:${part.attachmentId}`
+  if (part.type === 'card') return `${messageId}:card:${part.component}:${part.resourceRef.id}`
+  return `${messageId}:text:${part.text.slice(0, 32)}:${part.text.length}`
+}
+
 export function ConnectedClinicMessages({ principal, conversations, contacts, onRefresh, onRunTriggered }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(conversations[0]?.conversationId ?? null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -29,32 +36,62 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
   const [mentionAgent, setMentionAgent] = useState(false)
   const [groupTitle, setGroupTitle] = useState('')
   const [inviteActorId, setInviteActorId] = useState('')
+  const [recording, setRecording] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [audioUrls, setAudioUrls] = useState<Record<string, string>>({})
+  const [attachmentUrls, setAttachmentUrls] = useState<Record<string, string>>({})
+
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const recordStartRef = useRef<number>(0)
 
   const activeConversation = conversations.find((c) => c.conversationId === selectedId) ?? conversations[0] ?? null
   const activeId = activeConversation?.conversationId ?? null
 
+  async function syncMessages(conversationId: string, markRead: boolean) {
+    try {
+      const page = await fetchConversationMessages(conversationId)
+      setMessages(page.messages)
+      setNextCursor(page.nextCursor)
+      if (markRead) {
+        const maxSeq = page.messages.at(-1)?.sequence ?? 0
+        if (maxSeq > 0) await markConversationRead(conversationId, maxSeq).catch(() => {})
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载消息失败')
+    }
+  }
+
+  // External timer sync for live incoming messages alongside WuKongIM credential bootstrap.
   useEffect(() => {
     if (!activeId) return
-    let cancelled = false
+    let active = true
+    void fetchImCredentials().catch(() => {})
     void (async () => {
-      try {
-        const page = await fetchConversationMessages(activeId)
-        if (cancelled) return
+      const page = await fetchConversationMessages(activeId).catch(() => null)
+      if (!active || !page) return
+      setMessages(page.messages)
+      setNextCursor(page.nextCursor)
+    })()
+    const timer = window.setInterval(() => {
+      void (async () => {
+        const page = await fetchConversationMessages(activeId).catch(() => null)
+        if (!active || !page) return
         setMessages(page.messages)
         setNextCursor(page.nextCursor)
-        const maxSeq = page.messages.at(-1)?.sequence ?? 0
-        if (maxSeq > 0) await markConversationRead(activeId, maxSeq).catch(() => {})
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : '加载消息失败')
-      }
-    })()
+      })()
+    }, 4000)
     return () => {
-      cancelled = true
+      active = false
+      window.clearInterval(timer)
     }
   }, [activeId])
+
+  function handleSelectConversation(conversationId: string) {
+    setSelectedId(conversationId)
+    setError(null)
+    void syncMessages(conversationId, true)
+  }
 
   async function loadOlder() {
     if (!activeId || !nextCursor) return
@@ -78,8 +115,7 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
       setMentionAgent(false)
       if (res.message) setMessages((prev) => [...prev.filter((m) => m.messageId !== res.message!.messageId), res.message!])
       for (const run of res.triggeredAgentRuns) onRunTriggered(run.runId)
-      const latest = await fetchConversationMessages(activeConversation.conversationId)
-      setMessages(latest.messages)
+      await syncMessages(activeConversation.conversationId, true)
       await onRefresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : '发送失败')
@@ -88,7 +124,7 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
     }
   }
 
-  async function handleUploadFile(kind: 'image' | 'audio', file: File) {
+  async function handleUploadFile(kind: 'image' | 'audio', file: Blob, mime: string, durationMs?: number) {
     if (!activeConversation) return
     setBusy(true)
     setError(null)
@@ -97,9 +133,9 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
         {
           conversationId: activeConversation.conversationId,
           kind,
-          mime: file.type || (kind === 'audio' ? 'audio/webm' : 'image/png'),
+          mime: mime || (kind === 'audio' ? 'audio/webm' : 'image/png'),
           size: file.size,
-          ...(kind === 'audio' ? { durationMs: 3000 } : {}),
+          ...(kind === 'audio' ? { durationMs: Math.max(1000, Math.min(60_000, durationMs ?? 3000)) } : {}),
         },
         file,
       )
@@ -111,11 +147,75 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
         clientMessageId: `web-att-${crypto.randomUUID()}`,
         parts: [part],
       })
-      const latest = await fetchConversationMessages(activeConversation.conversationId)
-      setMessages(latest.messages)
+      await syncMessages(activeConversation.conversationId, true)
       await onRefresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : '附件发送失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleToggleRecording() {
+    if (recording && recorderRef.current) {
+      recorderRef.current.stop()
+      setRecording(false)
+      return
+    }
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('当前浏览器不支持麦克风录音，请使用音频文件上传。')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      chunksRef.current = []
+      recordStartRef.current = Date.now()
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) chunksRef.current.push(ev.data)
+      }
+      recorder.onstop = () => {
+        for (const track of stream.getTracks()) track.stop()
+        const durationMs = Math.max(1000, Date.now() - recordStartRef.current)
+        const mime = recorder.mimeType || 'audio/webm'
+        const blob = new Blob(chunksRef.current, { type: mime })
+        if (blob.size > 0) void handleUploadFile('audio', blob, mime, durationMs)
+      }
+      recorderRef.current = recorder
+      recorder.start()
+      setRecording(true)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法开启麦克风录音')
+    }
+  }
+
+  async function handleShareReportCard() {
+    if (!activeConversation || !activeConversation.patientId) return
+    setBusy(true)
+    setError(null)
+    try {
+      const reportId = activeConversation.patientId === 'pat_01' ? 'rel_rep_pat01_v1' : 'rel_rep_pat02_v1'
+      await sendConversationMessage(activeConversation.conversationId, {
+        clientMessageId: `web-card-${crypto.randomUUID()}`,
+        parts: [
+          {
+            type: 'card',
+            component: 'ReportCard',
+            version: 1,
+            resourceRef: { kind: 'report', id: reportId },
+            safeProps: {
+              title: '检查检验报告引用卡片',
+              summary: '点击后将由服务端重新核验发布权限与患者归属。',
+            },
+            actions: [{ name: 'report.open', args: { reportId } }],
+          },
+        ],
+      })
+      await syncMessages(activeConversation.conversationId, true)
+      await onRefresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '分享报告卡片失败')
     } finally {
       setBusy(false)
     }
@@ -174,7 +274,7 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
   async function loadAttachmentUrl(attachmentId: string) {
     try {
       const access = await fetchAttachmentAccess(attachmentId)
-      setAudioUrls((prev) => ({ ...prev, [attachmentId]: access.url }))
+      setAttachmentUrls((prev) => ({ ...prev, [attachmentId]: access.url }))
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取附件授权失败')
     }
@@ -213,7 +313,7 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
               type="button"
               className="cc-list-item"
               data-selected={conv.conversationId === activeId}
-              onClick={() => setSelectedId(conv.conversationId)}
+              onClick={() => handleSelectConversation(conv.conversationId)}
             >
               <div className="cc-row" style={{ justifyContent: 'space-between' }}>
                 <strong>{conv.title}</strong>
@@ -298,14 +398,14 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
                     <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 4 }}>
                       {msg.senderName} · #{msg.sequence} · {msg.senderKind}
                     </div>
-                    {msg.parts.map((part, idx) => (
-                      <div key={`${msg.messageId}-${idx}`} style={{ marginTop: idx > 0 ? 6 : 0 }}>
+                    {msg.parts.map((part) => (
+                      <div key={partKey(msg.messageId, part)} className="cc-msg-part">
                         {part.type === 'text' ? <div>{part.text}</div> : null}
                         {part.type === 'audio' ? (
                           <div className="cc-row">
                             <span>语音 ({Math.max(1, Math.round(part.durationMs / 1000))}s)</span>
-                            {audioUrls[part.attachmentId] ? (
-                              <audio controls src={audioUrls[part.attachmentId]} />
+                            {attachmentUrls[part.attachmentId] ? (
+                              <audio controls src={attachmentUrls[part.attachmentId]} />
                             ) : (
                               <Button className="cc-btn" onClick={() => void loadAttachmentUrl(part.attachmentId)}>
                                 授权播放
@@ -315,8 +415,8 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
                         ) : null}
                         {part.type === 'image' ? (
                           <div>
-                            {audioUrls[part.attachmentId] ? (
-                              <img src={audioUrls[part.attachmentId]} alt="会话图片" style={{ maxWidth: 220, borderRadius: 6 }} />
+                            {attachmentUrls[part.attachmentId] ? (
+                              <img src={attachmentUrls[part.attachmentId]} alt="会话图片" style={{ maxWidth: 220, borderRadius: 6 }} />
                             ) : (
                               <Button className="cc-btn" onClick={() => void loadAttachmentUrl(part.attachmentId)}>
                                 查看图片附件
@@ -370,6 +470,9 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
                   </Button>
                 </div>
                 <div className="cc-row" style={{ fontSize: 12 }}>
+                  <Button className="cc-btn" disabled={busy} onClick={() => void handleToggleRecording()}>
+                    {recording ? '停止并发送录音' : '麦克风录音'}
+                  </Button>
                   <label className="cc-btn">
                     发图片
                     <input
@@ -378,7 +481,7 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
                       hidden
                       onChange={(e) => {
                         const file = e.target.files?.[0]
-                        if (file) void handleUploadFile('image', file)
+                        if (file) void handleUploadFile('image', file, file.type)
                       }}
                     />
                   </label>
@@ -390,10 +493,15 @@ export function ConnectedClinicMessages({ principal, conversations, contacts, on
                       hidden
                       onChange={(e) => {
                         const file = e.target.files?.[0]
-                        if (file) void handleUploadFile('audio', file)
+                        if (file) void handleUploadFile('audio', file, file.type)
                       }}
                     />
                   </label>
+                  {activeConversation.patientId ? (
+                    <Button className="cc-btn" disabled={busy} onClick={() => void handleShareReportCard()}>
+                      分享报告引用卡片
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             ) : (

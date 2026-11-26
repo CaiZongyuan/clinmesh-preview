@@ -11,8 +11,10 @@ import {
 } from '../../shared/communication'
 import type { EncounterError } from '../../shared/encounter'
 import type { AuthRepository } from '../auth/auth-repository'
-import { sha256Hex, timingSafeEqual } from '../auth/crypto'
+import { base64ToBytes, bytesToBase64, hmacSha256Hex, timingSafeEqual } from '../auth/crypto'
 import type { CommunicationRepository } from './communication-repository'
+
+export { base64ToBytes, bytesToBase64 }
 
 type Refusal = { ok: false; error: EncounterError }
 const refuse = (error: EncounterError): Refusal => ({ ok: false, error })
@@ -63,21 +65,13 @@ function toView(row: AttachmentRow): AttachmentView {
   }
 }
 
-export async function signAttachmentAccess(secret: string, attachmentId: string, expMs: number): Promise<string> {
-  return sha256Hex(`att:${secret}:${attachmentId}:${expMs}`)
-}
-
-export function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  return btoa(binary)
-}
-
-export function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64)
-  const out = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
-  return out
+export async function signAttachmentAccess(
+  secret: string,
+  attachmentId: string,
+  actorId: string,
+  expMs: number,
+): Promise<string> {
+  return hmacSha256Hex(secret, `att:v1:${attachmentId}:${actorId}:${expMs}`)
 }
 
 // Local development attachment store backed by DO SQLite (`attachment_blob`), keeping the exact
@@ -127,7 +121,7 @@ export class AttachmentRepository {
       mime,
       Math.round(input.size),
       input.kind === 'audio' ? Math.round(input.durationMs!) : null,
-      input.kind === 'audio' ? 'none' : 'none',
+      'none',
       nowIso,
       nowIso,
     )
@@ -241,6 +235,7 @@ export class AttachmentRepository {
 
   async readSignedContent(
     attachmentId: string,
+    actorId: string,
     expMs: number,
     sig: string,
     secret: string,
@@ -249,13 +244,27 @@ export class AttachmentRepository {
     if (!Number.isFinite(expMs) || expMs <= nowMs) {
       return refuse({ code: 'attachment-expired', message: '附件访问链接已过期，请重新获取授权。' })
     }
-    const expected = await signAttachmentAccess(secret, attachmentId, expMs)
+    const expected = await signAttachmentAccess(secret, attachmentId, actorId, expMs)
     if (!timingSafeEqual(expected, sig)) {
       return refuse({ code: 'forbidden', message: '附件签名无效。' })
     }
     const row = this.findRow(attachmentId)
     if (!row || row.status !== 'ready') {
       return refuse({ code: 'attachment-not-found', message: '找不到附件内容。' })
+    }
+    // Re-check active conversation membership and active session so revocation invalidates issued URLs immediately.
+    if (!this.comm.isActiveMember(row.conversation_id, actorId)) {
+      return refuse({ code: 'forbidden', message: '当前账号已不再拥有该附件的访问权限。' })
+    }
+    const activeSession = this.sql
+      .exec<{ count: number }>(
+        `SELECT COUNT(*) AS count FROM auth_session WHERE actor_id = ? AND revoked_at IS NULL AND expires_at > ?`,
+        actorId,
+        new Date(nowMs).toISOString(),
+      )
+      .one().count
+    if (activeSession === 0) {
+      return refuse({ code: 'unauthorized', message: '会话已注销，附件访问链接已失效。' })
     }
     const blob = this.sql
       .exec<{ data_base64: string }>('SELECT data_base64 FROM attachment_blob WHERE attachment_id = ?', attachmentId)
