@@ -17,14 +17,6 @@ import {
   CommandList,
 } from '@ui-sdk/react/command'
 import { Dialog, DialogBackdrop, DialogContent, DialogTitle } from '@ui-sdk/react/dialog'
-import {
-  Drawer,
-  DrawerBackdrop,
-  DrawerClose,
-  DrawerContent,
-  DrawerTitle,
-  DrawerTrigger,
-} from '@ui-sdk/react/drawer'
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@ui-sdk/react/popover'
 import {
   SegmentedControl,
@@ -50,11 +42,13 @@ import {
   ChevronRightIcon,
   ClipboardCheckIcon,
   ClockIcon,
+  CheckCheckIcon,
   CpuIcon,
   FileTextIcon,
   FlaskConicalIcon,
   LayoutDashboardIcon,
   LockIcon,
+  PanelRightCloseIcon,
   MessageSquareIcon,
   MicIcon,
   PlusIcon,
@@ -75,6 +69,8 @@ import {
 import { useEffect, useState } from 'react'
 import { WorkbenchAppearance } from '../workbench/workbench-preferences'
 import { AudioVoiceBubble, ClinicalRichCard } from './clinical-cards'
+import { NotificationRegion, StatusToastRegion, type ClinicFeedback, type NotificationTarget } from './clinic-feedback'
+import { AgentSteps, RevealAfter, Spinner, StreamingText } from './clinic-motion'
 import {
   PATIENTS,
   STAFF_ACTORS,
@@ -96,7 +92,6 @@ type HisModule =
   | 'agents'
 
 type ChannelFilter = 'all' | 'followup' | 'patient' | 'staff'
-type DossierTab = 'context' | 'phone'
 
 const NAV_ITEMS: { id: HisModule; label: string; icon: typeof LayoutDashboardIcon }[] = [
   { id: 'dashboard', label: '工作台', icon: LayoutDashboardIcon },
@@ -145,16 +140,17 @@ function channelAvatarTone(type: ConversationType) {
 export function ConnectedClinicStudio({
   state,
   actions,
+  feedback,
 }: {
   state: ConnectedClinicState
   actions: ClinicActions
+  feedback: ClinicFeedback
 }) {
   const [activeModule, setActiveModule] = useState<HisModule>('dashboard')
-  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
+  const [dockOpen, setDockOpen] = useState(() => window.innerWidth >= 1280)
   const [commandOpen, setCommandOpen] = useState(false)
   const [doctorFilter, setDoctorFilter] = useState<string>('all')
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all')
-  const [dossierTab, setDossierTab] = useState<DossierTab>('context')
   const [selectedPatient, setSelectedPatient] = useState<PatientKey>('patient_a')
   const [selectedConvId, setSelectedConvId] = useState<string>('conv_followup_a')
   const [selectedPlanId, setSelectedPlanId] = useState<string>('fp_01')
@@ -199,6 +195,7 @@ export function ConnectedClinicStudio({
     ? state.followupPlans.find((p) => p.id === activeConv.followupPlanId)
     : state.followupPlans.find((p) => p.conversationId === activeConv?.id)
   const pendingDraftSummary = linkedPlan?.summaries.find((s) => s.status === 'draft')
+  const lastStaffMessageId = activeConv?.messages.findLast((m) => m.senderId === state.currentStaff)?.id
 
   const activePlan =
     state.followupPlans.find((p) => p.id === selectedPlanId) ?? state.followupPlans[0]
@@ -207,10 +204,62 @@ export function ConnectedClinicStudio({
     doctorFilter === 'all' ? true : apt.doctorId === doctorFilter,
   )
 
+  const openModule = (module: HisModule) => {
+    setActiveModule(module)
+    actions.focusConversation('staff', module === 'messages' ? activeConv?.id ?? null : null)
+  }
+
+  const openConversation = (conversationId: string) => {
+    setSelectedConvId(conversationId)
+    setActiveModule('messages')
+    setChatInput('')
+    actions.setTyping('staff', null)
+    actions.focusConversation('staff', conversationId)
+  }
+
+  const openStaffTarget = (target: NotificationTarget) => {
+    if (target.kind === 'conversation') openConversation(target.conversationId)
+    else if (target.kind === 'module') openModule(target.module)
+    else openModule('patients')
+  }
+
+  const appointmentActions = (apt: (typeof state.appointments)[number]) => (
+        <div className="inline-flex items-center gap-2">
+          {apt.status === 'booked' && (
+            <button
+              type="button"
+              onClick={() => actions.checkInAppointment(apt.id)}
+              className="cc-btn-ghost h-7.5 px-3 text-[12px]"
+            >
+              签到
+            </button>
+          )}
+          {(apt.status === 'booked' || apt.status === 'checked_in') && (
+            <button
+              type="button"
+              disabled={staff.role !== 'doctor'}
+              onClick={() => handleStartEncounter(apt.id)}
+              className="cc-btn-primary h-7.5 px-3 text-[12px]"
+            >
+              开始接诊
+            </button>
+          )}
+          {apt.status === 'in_encounter' && (
+            <button
+              type="button"
+              onClick={() => openModule('workbench')}
+              className="cc-btn-ai h-7.5 px-3 text-[12px]"
+            >
+              进入工作台 →
+            </button>
+          )}
+        </div>
+  )
+
   const handleStartEncounter = (appointmentId: string) => {
     const res = actions.startEncounterFromAppointment(appointmentId)
     setEncounterBanner(res.message)
-    if (res.ok) setActiveModule('workbench')
+    if (res.ok) openModule('workbench')
   }
 
   return (
@@ -300,7 +349,7 @@ export function ConnectedClinicStudio({
                 key={item.id}
                 type="button"
                 data-active={activeModule === item.id}
-                onClick={() => setActiveModule(item.id)}
+                onClick={() => openModule(item.id)}
                 className="cc-nav-item"
               >
                 <item.icon size={15} strokeWidth={1.85} />
@@ -343,7 +392,7 @@ export function ConnectedClinicStudio({
       </aside>
 
       {/* Main Elevated Floating Workspace Sheet */}
-      <div className="cc-main-sheet">
+      <div className="cc-main-sheet @container">
         <header className="cc-glass cc-divider-b flex h-[54px] flex-none items-center justify-between gap-4 px-6">
           <div className="flex items-center gap-2.5 text-[13px]">
             <span className="text-muted-foreground">Connected Clinic</span>
@@ -354,7 +403,7 @@ export function ConnectedClinicStudio({
             {activeEncounter && activeEncPatient && (
               <button
                 type="button"
-                onClick={() => setActiveModule('workbench')}
+                onClick={() => openModule('workbench')}
                 className="ml-2 inline-flex items-center gap-2 rounded-full bg-[var(--cc-emerald-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--cc-emerald)] transition-opacity hover:opacity-85 cursor-pointer"
               >
                 <span className="cc-live-dot text-[var(--cc-emerald)]" />
@@ -406,35 +455,15 @@ export function ConnectedClinicStudio({
 
             <WorkbenchAppearance />
 
-            {/* Patient Mobile App Drawer */}
-            <Drawer side="right" open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
-              <DrawerTrigger className="cc-btn-primary h-8.5 px-3.5 text-[12px]">
-                <SmartphoneIcon size={13.5} />
-                患者手机版
-              </DrawerTrigger>
-              <DrawerBackdrop className="bg-black/35 backdrop-blur-[3px]" />
-              <DrawerContent className="cc-mobile-drawer">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <DrawerTitle className="m-0 text-[14.5px] font-semibold tracking-tight">
-                      ClinMesh 患者手机版 · 实时联动
-                    </DrawerTitle>
-                    <p className="m-0 mt-0.5 text-[11.5px] text-muted-foreground">
-                      预约、资料发布、消息与随访问卷与医生端实时共享状态
-                    </p>
-                  </div>
-                  <DrawerClose
-                    aria-label="关闭患者手机版抽屉"
-                    className="cc-btn-ghost size-7.5 p-0"
-                  >
-                    <XIcon size={15} />
-                  </DrawerClose>
-                </div>
-                <div className="flex min-h-0 flex-1 items-center justify-center">
-                  <PatientMobileApp state={state} actions={actions} compact />
-                </div>
-              </DrawerContent>
-            </Drawer>
+            <button
+              type="button"
+              aria-pressed={dockOpen}
+              onClick={() => setDockOpen(!dockOpen)}
+              className={`${dockOpen ? 'cc-btn-ghost' : 'cc-btn-primary'} h-8.5 px-3.5 text-[12px]`}
+            >
+              {dockOpen ? <PanelRightCloseIcon size={14} /> : <SmartphoneIcon size={13.5} />}
+              {dockOpen ? '收起患者端' : '患者手机版'}
+            </button>
           </div>
         </header>
 
@@ -464,7 +493,7 @@ export function ConnectedClinicStudio({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setActiveModule('messages')}
+                    onClick={() => openModule('messages')}
                     className="cc-btn-ghost h-9 px-3.5 text-[12.5px]"
                   >
                     <MessageSquareIcon size={14} className="text-[var(--cc-ai)]" />
@@ -472,7 +501,7 @@ export function ConnectedClinicStudio({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveModule('workbench')}
+                    onClick={() => openModule('workbench')}
                     className="cc-btn-primary h-9 px-4 text-[12.5px]"
                   >
                     进入临床工作台
@@ -558,7 +587,7 @@ export function ConnectedClinicStudio({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setActiveModule('workbench')}
+                      onClick={() => openModule('workbench')}
                       className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--cc-ai)] hover:underline cursor-pointer"
                     >
                       完诊并发布至患者手机版 <ArrowRightIcon size={12} />
@@ -577,7 +606,7 @@ export function ConnectedClinicStudio({
                     icon: CalendarIcon,
                     accent: 'text-[var(--cc-ai)] bg-[var(--cc-ai-soft)]',
                     progress: 68,
-                    onClick: () => setActiveModule('appointments'),
+                    onClick: () => openModule('appointments'),
                   },
                   {
                     label: '待医生显式确认',
@@ -586,7 +615,7 @@ export function ConnectedClinicStudio({
                     icon: ShieldCheckIcon,
                     accent: 'text-[var(--cc-amber)] bg-[var(--cc-amber-soft)]',
                     progress: 40,
-                    onClick: () => setActiveModule('followup'),
+                    onClick: () => openModule('followup'),
                   },
                   {
                     label: '医患与随访群未读',
@@ -595,7 +624,7 @@ export function ConnectedClinicStudio({
                     icon: MessageSquareIcon,
                     accent: 'text-[var(--cc-emerald)] bg-[var(--cc-emerald-soft)]',
                     progress: 75,
-                    onClick: () => setActiveModule('messages'),
+                    onClick: () => openModule('messages'),
                   },
                   {
                     label: 'Durable Agent 运行',
@@ -604,7 +633,7 @@ export function ConnectedClinicStudio({
                     icon: SparklesIcon,
                     accent: 'text-[var(--cc-ai)] bg-[var(--cc-ai-soft)]',
                     progress: 100,
-                    onClick: () => setActiveModule('agents'),
+                    onClick: () => openModule('agents'),
                   },
                 ].map((metric) => (
                   <button
@@ -711,8 +740,7 @@ export function ConnectedClinicStudio({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setSelectedConvId(plan.conversationId)
-                                  setActiveModule('messages')
+                                  openConversation(plan.conversationId)
                                 }}
                                 className="cc-btn-ai h-8 shrink-0 px-3 text-[12px]"
                               >
@@ -739,7 +767,7 @@ export function ConnectedClinicStudio({
                       </span>
                       <button
                         type="button"
-                        onClick={() => setActiveModule('appointments')}
+                        onClick={() => openModule('appointments')}
                         className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--cc-ai)] hover:underline cursor-pointer"
                       >
                         全部预约队列 <ArrowRightIcon size={12} />
@@ -844,7 +872,7 @@ export function ConnectedClinicStudio({
             MODULE 2: UNIFIED 3-COLUMN AMBIENT CHAT CENTER
            ============================================================ */}
         {activeModule === 'messages' && activeConv && (
-          <div className="grid min-h-0 flex-1 grid-cols-[296px_minmax(0,1fr)_348px] overflow-hidden">
+          <div className="grid min-h-0 flex-1 grid-cols-[264px_minmax(0,1fr)] overflow-hidden @min-[1120px]:grid-cols-[296px_minmax(0,1fr)_348px]">
             {/* Column 1: Triage & Channels */}
             <aside className="cc-divider-r flex min-h-0 flex-col bg-[var(--cc-surface-subtle)]/75">
               <div className="cc-divider-b flex flex-none flex-col gap-2.5 px-3.5 py-3">
@@ -898,7 +926,7 @@ export function ConnectedClinicStudio({
                           <button
                             key={sum.id}
                             type="button"
-                            onClick={() => setSelectedConvId(plan.conversationId)}
+                            onClick={() => openConversation(plan.conversationId)}
                             className="flex items-center justify-between gap-2 rounded-xl bg-[var(--cc-ai-soft)] px-3 py-2 text-left text-[11.5px] transition-opacity hover:opacity-90 cursor-pointer"
                           >
                             <div className="min-w-0">
@@ -932,7 +960,7 @@ export function ConnectedClinicStudio({
                       <button
                         key={conv.id}
                         type="button"
-                        onClick={() => setSelectedConvId(conv.id)}
+                        onClick={() => openConversation(conv.id)}
                         className={`flex items-start gap-2.5 rounded-xl p-2.5 text-left transition-all cursor-pointer ${
                           active
                             ? 'bg-[var(--cc-sheet)] shadow-[var(--cc-shadow-xs)]'
@@ -1139,8 +1167,8 @@ export function ConnectedClinicStudio({
                 </div>
               )}
 
-              {/* Message River */}
-              <div className="cc-scroll flex flex-1 flex-col gap-5 overflow-y-auto px-6 py-5">
+              <div className="cc-scroll flex flex-1 flex-col-reverse overflow-y-auto">
+              <div className="flex flex-col gap-5 px-6 py-5" role="log" aria-label={`${activeConv.title} 消息记录`}>
                 {activeConv.messages.map((msg) => {
                   if (msg.senderKind === 'system') {
                     return (
@@ -1189,11 +1217,12 @@ export function ConnectedClinicStudio({
                           </span>
                         </div>
 
+                        {isAgent && msg.stream && <AgentSteps stream={msg.stream} />}
                         {msg.parts.map((part, idx) => {
                           if (part.type === 'text') {
                             return (
+                              <RevealAfter key={idx} stream={msg.stream} afterMs={msg.stream ? msg.stream.textStartsAfterMs - 120 : 0}>
                               <div
-                                key={idx}
                                 className={`rounded-2xl px-4 py-2.5 text-[13px] leading-[1.6] ${
                                   isSelfStaff
                                     ? 'rounded-tr-sm bg-foreground text-background shadow-xs'
@@ -1202,8 +1231,9 @@ export function ConnectedClinicStudio({
                                       : 'rounded-tl-sm bg-[var(--cc-surface-subtle)] text-foreground shadow-[0_0_0_1px_var(--cc-hairline)]'
                                 }`}
                               >
-                                {part.text}
+                                {isAgent ? <StreamingText text={part.text} stream={msg.stream} /> : part.text}
                               </div>
+                              </RevealAfter>
                             )
                           }
                           if (part.type === 'audio') {
@@ -1231,10 +1261,27 @@ export function ConnectedClinicStudio({
                             />
                           )
                         })}
+                        {isSelfStaff && msg.id === lastStaffMessageId && msg.delivery && (
+                          <span className={`inline-flex items-center gap-1 px-0.5 text-[11px] ${msg.delivery === 'read' ? 'text-[var(--cc-ai)]' : 'text-muted-foreground'}`}>
+                            {msg.delivery === 'sending' ? <Spinner size={11} /> : msg.delivery === 'read' ? <CheckCheckIcon size={13} /> : <CheckIcon size={12} />}
+                            {msg.delivery === 'sending' ? '发送中' : msg.delivery === 'read' ? '患者已读' : '已送达'}
+                          </span>
+                        )}
                       </div>
                     </div>
                   )
                 })}
+                {state.typing.patient === activeConv.id && (
+                  <div className="flex items-center gap-2 pl-1 text-[12px] text-muted-foreground" aria-live="polite">
+                    <span className="cc-typing-dots" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    {contextPatient.name} 正在输入…
+                  </div>
+                )}
+              </div>
               </div>
 
               {/* Unified Floating Elevated Composer Dock */}
@@ -1249,8 +1296,13 @@ export function ConnectedClinicStudio({
                     <textarea
                       rows={2}
                       value={chatInput}
-                      onChange={(e) => setChatInput(e.target.value)}
+                      aria-label={`以 ${staff.name} 身份回复`}
+                      onChange={(e) => {
+                        setChatInput(e.target.value)
+                        actions.setTyping('staff', e.target.value.trim() ? activeConv.id : null)
+                      }}
                       onKeyDown={(e) => {
+                        if (e.nativeEvent.isComposing) return
                         if (e.key === 'Enter' && !e.shiftKey && chatInput.trim()) {
                           e.preventDefault()
                           actions.sendMessage(activeConv.id, 'staff', chatInput.trim())
@@ -1346,20 +1398,16 @@ export function ConnectedClinicStudio({
             </section>
 
             {/* Column 3: Living Contextual Patient Dossier & Embedded Mobile View */}
-            <aside className="cc-divider-l flex min-h-0 flex-col bg-[var(--cc-surface-subtle)]/55">
-              <div className="cc-divider-b flex flex-none items-center justify-center px-4 py-2.5">
-                <SegmentedControl
-                  aria-label="右侧患者上下文与患者手机版"
-                  value={dossierTab}
-                  onValueChange={(v) => v && setDossierTab(v as DossierTab)}
-                >
-                  <SegmentedControlIndicator />
-                  <SegmentedControlItem value="context">患者实时档案</SegmentedControlItem>
-                  <SegmentedControlItem value="phone">患者手机版</SegmentedControlItem>
-                </SegmentedControl>
+            <aside className="cc-divider-l hidden min-h-0 flex-col bg-[var(--cc-surface-subtle)]/55 @min-[1120px]:flex">
+              <div className="cc-divider-b flex flex-none items-center justify-between px-4 py-3">
+                <span className="text-[13px] font-semibold tracking-tight">患者实时档案</span>
+                {!dockOpen && (
+                  <button type="button" onClick={() => setDockOpen(true)} className="cc-btn-ghost h-7 px-2.5 text-[11.5px]">
+                    <SmartphoneIcon size={12} />
+                    看患者端
+                  </button>
+                )}
               </div>
-
-              {dossierTab === 'context' ? (
                 <div className="cc-scroll flex flex-1 flex-col divide-y divide-[var(--cc-hairline)] overflow-y-auto">
                   <div className="p-4">
                     <div className="flex items-center gap-3">
@@ -1523,11 +1571,6 @@ export function ConnectedClinicStudio({
                     </div>
                   </div>
                 </div>
-              ) : (
-                <div className="cc-studio-mat flex min-h-0 flex-1 p-3">
-                  <PatientMobileApp state={state} actions={actions} embedded initialTab="messages" />
-                </div>
-              )}
             </aside>
           </div>
         )}
@@ -1571,7 +1614,44 @@ export function ConnectedClinicStudio({
                 </div>
               )}
 
-              <div className="cc-surface overflow-hidden">
+              <ul className="cc-surface m-0 flex list-none flex-col divide-y divide-[var(--cc-hairline)] p-0 @min-[1040px]:hidden">
+                {filteredAppointments.map((apt) => {
+                  const p = PATIENTS[apt.patientKey]
+                  const meta = APT_STATUS_META[apt.status]
+                  return (
+                    <li key={apt.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3.5 text-[12.5px]">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--cc-surface-subtle)] font-semibold">{p.avatar}</span>
+                      <div className="min-w-[220px] flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground">{p.name}</span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {p.sex} · {p.age} 岁
+                          </span>
+                          <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-medium ${meta.badge}`}>
+                            <span className={`size-1.5 rounded-full ${meta.dot}`} />
+                            {meta.label}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1 text-[11.5px] text-muted-foreground tabular-nums">
+                          <ClockIcon size={11} />
+                          {apt.dateLabel} {apt.timeRange} · {apt.doctorName}
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 text-foreground/85">
+                          <span className="truncate">{apt.chiefComplaint}</span>
+                          {apt.source === 'agent_assisted' && (
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--cc-ai-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--cc-ai)]">
+                              <SparklesIcon size={9.5} /> 助手预填
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {appointmentActions(apt)}
+                    </li>
+                  )
+                })}
+              </ul>
+
+              <div className="cc-surface hidden overflow-hidden @min-[1040px]:block">
                 <table className="w-full border-collapse text-left text-[12.5px]">
                   <thead>
                     <tr className="cc-divider-b bg-[var(--cc-surface-subtle)] text-[11px] font-semibold text-muted-foreground">
@@ -1625,36 +1705,7 @@ export function ConnectedClinicStudio({
                             </span>
                           </td>
                           <td className="px-5 py-3.5 text-right">
-                            <div className="inline-flex items-center gap-2">
-                              {apt.status === 'booked' && (
-                                <button
-                                  type="button"
-                                  onClick={() => actions.checkInAppointment(apt.id)}
-                                  className="cc-btn-ghost h-7.5 px-3 text-[12px]"
-                                >
-                                  签到
-                                </button>
-                              )}
-                              {(apt.status === 'booked' || apt.status === 'checked_in') && (
-                                <button
-                                  type="button"
-                                  disabled={staff.role !== 'doctor'}
-                                  onClick={() => handleStartEncounter(apt.id)}
-                                  className="cc-btn-primary h-7.5 px-3 text-[12px]"
-                                >
-                                  开始接诊
-                                </button>
-                              )}
-                              {apt.status === 'in_encounter' && (
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveModule('workbench')}
-                                  className="cc-btn-ai h-7.5 px-3 text-[12px]"
-                                >
-                                  进入工作台 →
-                                </button>
-                              )}
-                            </div>
+                            {appointmentActions(apt)}
                           </td>
                         </tr>
                       )
@@ -1706,7 +1757,7 @@ export function ConnectedClinicStudio({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setActiveModule('appointments')}
+                    onClick={() => openModule('appointments')}
                     className="cc-btn-primary h-9 px-4 text-[12.5px]"
                   >
                     前往预约队列接诊
@@ -2002,8 +2053,7 @@ export function ConnectedClinicStudio({
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedConvId(activePlan.conversationId)
-                        setActiveModule('messages')
+                        openConversation(activePlan.conversationId)
                       }}
                       className="cc-btn-ghost h-8 px-3 text-[12px]"
                     >
@@ -2190,6 +2240,42 @@ export function ConnectedClinicStudio({
         )}
       </div>
 
+      {dockOpen && (
+        <aside className="cc-phone-dock" aria-label="患者端实时预览">
+          <div className="flex items-start justify-between gap-2 px-1">
+            <div>
+              <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+                <span className="cc-live-dot text-[var(--cc-emerald)]" />
+                患者端 · 小程序预览
+              </div>
+              <div className="mt-0.5 text-[11.5px] text-muted-foreground">与医生端共享同一份实时状态，可同时操作</div>
+            </div>
+            <button type="button" aria-label="收起患者端预览" onClick={() => setDockOpen(false)} className="cc-btn-ghost size-7.5 p-0">
+              <XIcon size={14} />
+            </button>
+          </div>
+          <SegmentedControl
+            aria-label="切换演示患者"
+            className="cc-dock-switch"
+            value={state.currentPatient}
+            onValueChange={(value) => value && actions.setPatient(value as PatientKey)}
+          >
+            <SegmentedControlIndicator />
+            {(Object.keys(PATIENTS) as PatientKey[]).map((key) => (
+              <SegmentedControlItem key={key} value={key}>
+                {PATIENTS[key].name}
+              </SegmentedControlItem>
+            ))}
+          </SegmentedControl>
+          <div className="cc-phone-dock-stage">
+            <PatientMobileApp key={state.currentPatient} state={state} actions={actions} feedback={feedback} mode="device" />
+          </div>
+        </aside>
+      )}
+
+      <StatusToastRegion toaster={feedback.toast.staff} placement="desk" label="医生端提示" />
+      <NotificationRegion toaster={feedback.notify.staff} placement="desk" label="医生端通知" onOpen={openStaffTarget} />
+
       {/* ⌘K Command Palette */}
       <Dialog open={commandOpen} onOpenChange={setCommandOpen}>
         <DialogBackdrop />
@@ -2197,14 +2283,13 @@ export function ConnectedClinicStudio({
           <DialogTitle className="sr-only">快捷命令面板</DialogTitle>
           <Command
             onAction={(value) => {
-              if (value === 'open-mobile') setMobileDrawerOpen(true)
+              if (value === 'open-mobile') setDockOpen(true)
               else if (value === 'publish-ct') actions.toggleResourcePublish('rep_lijg_ct_unpub')
               else if (value === 'trigger-followup') {
                 actions.triggerFollowupAgentSummary('fp_01')
-                setSelectedConvId('conv_followup_a')
-                setActiveModule('messages')
+                openConversation('conv_followup_a')
               } else if (NAV_ITEMS.some((i) => i.id === value)) {
-                setActiveModule(value as HisModule)
+                openModule(value as HisModule)
               }
               setCommandOpen(false)
             }}
@@ -2226,7 +2311,7 @@ export function ConnectedClinicStudio({
                   快捷演示动作
                 </CommandGroupLabel>
                 <CommandItem value="open-mobile" className="rounded-lg px-2.5 py-2 text-[12.5px]">
-                  打开患者手机版联动抽屉
+                  显示患者端实时预览
                 </CommandItem>
                 <CommandItem value="publish-ct" className="rounded-lg px-2.5 py-2 text-[12.5px]">
                   显式发布 / 撤回李建国「胸部低剂量 CT 报告」

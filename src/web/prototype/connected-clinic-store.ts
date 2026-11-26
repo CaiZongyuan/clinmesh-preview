@@ -108,12 +108,21 @@ export interface ConversationMember {
   status: 'active' | 'removed'
 }
 
+export type CardComponent =
+  | 'AppointmentCard'
+  | 'MedicalRecordCard'
+  | 'ReportCard'
+  | 'PrescriptionCard'
+  | 'FollowupFormCard'
+  | 'TaskCard'
+  | 'HandoffCard'
+
 export type MessagePart =
   | { type: 'text'; text: string }
-  | { type: 'audio'; attachmentId: string; durationSec: number; transcript?: string; asrStatus: 'ready' | 'unavailable' }
+  | { type: 'audio'; attachmentId: string; durationSec: number; transcript?: string; asrStatus: 'pending' | 'ready' | 'unavailable' }
   | {
       type: 'card'
-      component: 'AppointmentCard' | 'MedicalRecordCard' | 'ReportCard' | 'FollowupFormCard' | 'TaskCard'
+      component: CardComponent
       resourceId: string
       title: string
       subtitle: string
@@ -123,7 +132,23 @@ export type MessagePart =
       statusTag?: string
       slotIds?: string[]
       taskId?: string
+      handoff?: { conversationId: string; draft: string; recipient: string; sentAt?: string }
     }
+
+export type DeliveryStatus = 'sending' | 'sent' | 'read'
+
+export interface AgentStreamStep {
+  label: string
+  doneAfterMs: number
+}
+
+export interface AgentStream {
+  startedAt: number
+  steps: AgentStreamStep[]
+  textStartsAfterMs: number
+  chunkMs: number
+  status: 'streaming' | 'settled' | 'stopped'
+}
 
 export interface ChatMessage {
   id: string
@@ -137,6 +162,8 @@ export interface ChatMessage {
   parts: MessagePart[]
   mentions?: string[]
   agentRunId?: string
+  delivery?: DeliveryStatus
+  stream?: AgentStream
 }
 
 export interface ClinicConversation {
@@ -224,6 +251,7 @@ export interface ConnectedClinicState {
   agentRuns: AgentRunRecord[]
   syncEvents: SyncEvent[]
   lastIsolationBlock: string | null
+  typing: { staff: string | null; patient: string | null }
 }
 
 export const STAFF_ACTORS: Record<StaffRole, StaffActor> = {
@@ -329,6 +357,7 @@ export function createInitialClinicState(): ConnectedClinicState {
     currentStaff: 'doctor_a',
     currentPatient: 'patient_a',
     lastIsolationBlock: null,
+    typing: { staff: null, patient: null },
     slots: [
       {
         id: 'slot_wang_am_0900',
@@ -536,7 +565,7 @@ export function createInitialClinicState(): ConnectedClinicState {
       {
         id: 'conv_assistant_a',
         type: 'patient_assistant',
-        title: 'ClinMesh 患者助手',
+        title: 'AI 就医助手',
         subtitle: '李建国 · 专属私人服务会话',
         patientKey: 'patient_a',
         status: 'active',
@@ -545,7 +574,7 @@ export function createInitialClinicState(): ConnectedClinicState {
         membershipVersion: 1,
         members: [
           { id: 'patient_a', name: '李建国', kind: 'human', roleLabel: '患者本人', avatar: '李', status: 'active' },
-          { id: 'agent_patient_svc', name: '患者服务助手', kind: 'agent', roleLabel: 'Patient Service Agent', avatar: 'AI', status: 'active' },
+          { id: 'agent_patient_svc', name: 'AI 就医助手', kind: 'agent', roleLabel: 'Patient Service Agent', avatar: 'AI', status: 'active' },
         ],
         messages: [
           {
@@ -553,7 +582,7 @@ export function createInitialClinicState(): ConnectedClinicState {
             conversationId: 'conv_assistant_a',
             sequence: 1,
             senderId: 'agent_patient_svc',
-            senderName: '患者服务助手',
+            senderName: 'AI 就医助手',
             senderKind: 'agent',
             senderRole: 'Patient Service Agent',
             createdAt: '09:05',
@@ -590,6 +619,7 @@ export function createInitialClinicState(): ConnectedClinicState {
             senderKind: 'human',
             senderRole: '患者',
             createdAt: '10:02',
+            delivery: 'read',
             parts: [
               { type: 'text', text: '王医生您好，我刚才在药房取了药，想问下今天抽血结果大概什么时候可以在手机上看到？' },
             ],
@@ -603,6 +633,7 @@ export function createInitialClinicState(): ConnectedClinicState {
             senderKind: 'human',
             senderRole: '患者',
             createdAt: '10:03',
+            delivery: 'sent',
             parts: [
               {
                 type: 'audio',
@@ -703,6 +734,7 @@ export function createInitialClinicState(): ConnectedClinicState {
             senderKind: 'human',
             senderRole: '患者',
             createdAt: '10:28',
+            delivery: 'read',
             parts: [
               {
                 type: 'audio',
@@ -728,6 +760,185 @@ export function createInitialClinicState(): ConnectedClinicState {
                 text: '收到李先生，体温回落是个好信号。请多喝温水，按时完成 5 天疗程，晚上 8 点前点击上方卡片打卡即可；若再次超过 38.5°C 或胸闷加重请随时在群里告知。',
               },
             ],
+          },
+        ],
+      },
+      {
+        id: 'conv_assistant_b',
+        type: 'patient_assistant',
+        title: 'AI 就医助手',
+        subtitle: '陈志远 · 专属私人服务会话',
+        patientKey: 'patient_b',
+        status: 'active',
+        unreadStaff: 0,
+        unreadPatient: 0,
+        membershipVersion: 1,
+        members: [
+          { id: 'patient_b', name: '陈志远', kind: 'human', roleLabel: '患者本人', avatar: '陈', status: 'active' },
+          { id: 'agent_patient_svc', name: 'AI 就医助手', kind: 'agent', roleLabel: 'Patient Service Agent', avatar: 'AI', status: 'active' },
+        ],
+        messages: [
+          {
+            id: 'msg_pb_1',
+            conversationId: 'conv_assistant_b',
+            sequence: 1,
+            senderId: 'agent_patient_svc',
+            senderName: 'AI 就医助手',
+            senderKind: 'agent',
+            senderRole: 'Patient Service Agent',
+            createdAt: '09:31',
+            parts: [
+              {
+                type: 'text',
+                text: '陈先生您好，您已在心内科签到候诊。我可以帮您查看排队进度、医生已发布的病历，或把问题整理好转给林悦医生。如胸痛加重、大汗或呼吸困难，请立即告知分诊护士或拨打 120。',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'conv_pd_b',
+        type: 'patient_doctor',
+        title: '陈志远 · 医患直连',
+        subtitle: '患者 B ↔ 林悦 医生（心内科）',
+        patientKey: 'patient_b',
+        status: 'active',
+        unreadStaff: 0,
+        unreadPatient: 1,
+        membershipVersion: 1,
+        members: [
+          { id: 'patient_b', name: '陈志远', kind: 'human', roleLabel: '患者 B', avatar: '陈', status: 'active' },
+          { id: 'doctor_b', name: '林悦', kind: 'human', roleLabel: '副主任医师', avatar: '林', status: 'active' },
+        ],
+        messages: [
+          {
+            id: 'msg_pdb_1',
+            conversationId: 'conv_pd_b',
+            sequence: 1,
+            senderId: 'doctor_b',
+            senderName: '林悦 医生',
+            senderKind: 'human',
+            senderRole: '副主任医师',
+            createdAt: '09:24',
+            parts: [
+              { type: 'text', text: '陈先生，已看到您的分诊信息。请在候诊区坐下休息，不要自行走动，护士会先给您复测血压和心电图，我这边马上接诊。' },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'conv_assistant_c',
+        type: 'patient_assistant',
+        title: 'AI 就医助手',
+        subtitle: '王秀英 · 专属私人服务会话',
+        patientKey: 'patient_c',
+        status: 'active',
+        unreadStaff: 0,
+        unreadPatient: 0,
+        membershipVersion: 1,
+        members: [
+          { id: 'patient_c', name: '王秀英', kind: 'human', roleLabel: '患者本人', avatar: '王', status: 'active' },
+          { id: 'agent_patient_svc', name: 'AI 就医助手', kind: 'agent', roleLabel: 'Patient Service Agent', avatar: 'AI', status: 'active' },
+        ],
+        messages: [
+          {
+            id: 'msg_pc_1',
+            conversationId: 'conv_assistant_c',
+            sequence: 1,
+            senderId: 'agent_patient_svc',
+            senderName: 'AI 就医助手',
+            senderKind: 'agent',
+            senderRole: 'Patient Service Agent',
+            createdAt: '09:12',
+            parts: [
+              {
+                type: 'text',
+                text: '王女士您好，您今天 10:30 的全科门诊已预约成功。我可以帮您改约、查看已发布的检查结果，或提醒您完成血糖打卡。',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'conv_pd_c',
+        type: 'patient_doctor',
+        title: '王秀英 · 医患直连',
+        subtitle: '患者 C ↔ 王明 医生（全科）',
+        patientKey: 'patient_c',
+        status: 'active',
+        unreadStaff: 0,
+        unreadPatient: 0,
+        membershipVersion: 1,
+        members: [
+          { id: 'patient_c', name: '王秀英', kind: 'human', roleLabel: '患者 C', avatar: '王', status: 'active' },
+          { id: 'doctor_a', name: '王明', kind: 'human', roleLabel: '主治医师', avatar: '王', status: 'active' },
+        ],
+        messages: [
+          {
+            id: 'msg_pdc_1',
+            conversationId: 'conv_pd_c',
+            sequence: 1,
+            senderId: 'patient_c',
+            senderName: '王秀英',
+            senderKind: 'human',
+            senderRole: '患者',
+            createdAt: '08:40',
+            delivery: 'read',
+            parts: [{ type: 'text', text: '王医生早，今天复诊需要空腹抽血吗？' }],
+          },
+          {
+            id: 'msg_pdc_2',
+            conversationId: 'conv_pd_c',
+            sequence: 2,
+            senderId: 'doctor_a',
+            senderName: '王明 医生',
+            senderKind: 'human',
+            senderRole: '主治医师',
+            createdAt: '08:46',
+            parts: [{ type: 'text', text: '需要的，早餐先不吃，带上这两周的血糖记录本，抽完血再吃东西。' }],
+          },
+        ],
+      },
+      {
+        id: 'conv_followup_c',
+        type: 'followup_group',
+        title: '王秀英 · 血糖 14 日随访群',
+        subtitle: '4 位成员 · 含 Follow-up Agent · 关联计划 #FP-02',
+        patientKey: 'patient_c',
+        followupPlanId: 'fp_02',
+        status: 'active',
+        unreadStaff: 0,
+        unreadPatient: 0,
+        membershipVersion: 2,
+        members: [
+          { id: 'patient_c', name: '王秀英', kind: 'human', roleLabel: '患者本人', avatar: '王', status: 'active' },
+          { id: 'doctor_a', name: '王明', kind: 'human', roleLabel: '主管医生', avatar: '王', status: 'active' },
+          { id: 'nurse_n', name: '周岚', kind: 'human', roleLabel: '随访护士', avatar: '周', status: 'active' },
+          { id: 'agent_followup', name: '随访助手', kind: 'agent', roleLabel: 'Follow-up Agent', avatar: 'AI', status: 'active' },
+        ],
+        messages: [
+          {
+            id: 'msg_fc_1',
+            conversationId: 'conv_followup_c',
+            sequence: 1,
+            senderId: 'patient_c',
+            senderName: '王秀英',
+            senderKind: 'human',
+            senderRole: '患者',
+            createdAt: '昨日 19:40',
+            delivery: 'read',
+            parts: [{ type: 'text', text: '已提交第 2 次血糖打卡：空腹 7.4，夜里起夜两次。' }],
+          },
+          {
+            id: 'msg_fc_2',
+            conversationId: 'conv_followup_c',
+            sequence: 2,
+            senderId: 'agent_followup',
+            senderName: '随访助手',
+            senderKind: 'agent',
+            senderRole: 'Follow-up Agent',
+            createdAt: '08:15',
+            parts: [{ type: 'text', text: '王女士，您的打卡已收到并转交王医生审核。今天复诊记得带上血糖记录。' }],
           },
         ],
       },
@@ -826,7 +1037,7 @@ export function createInitialClinicState(): ConnectedClinicState {
         title: '血糖与泌尿道症状 14 日监测随访',
         department: '全科医学科',
         status: 'active',
-        conversationId: 'conv_staff_direct',
+        conversationId: 'conv_followup_c',
         startDate: '2026-11-20',
         endDate: '2026-12-04',
         taskStatus: 'submitted',
@@ -914,23 +1125,43 @@ export function createInitialClinicState(): ConnectedClinicState {
   }
 }
 
+export type ClinicSide = 'staff' | 'patient'
+
+export interface BookingResult {
+  ok: boolean
+  message: string
+  appointmentId?: string
+}
+
+export interface FollowupPayload {
+  symptomScore: string
+  temperature: string
+  adherence: string
+  note: string
+}
+
 export interface ClinicActions {
   setStaff: (role: StaffRole) => void
   setPatient: (patient: PatientKey) => void
   resetDemo: () => void
-  bookAppointment: (slotId: string, source: 'manual' | 'agent_assisted', complaint?: string) => { ok: boolean; message: string; appointmentId?: string }
+  bookAppointment: (slotId: string, source: 'manual' | 'agent_assisted', complaint?: string) => BookingResult
   checkInAppointment: (appointmentId: string) => void
   startEncounterFromAppointment: (appointmentId: string) => { ok: boolean; message: string }
   completeActiveEncounter: () => void
   toggleResourcePublish: (resourceId: string) => void
-  sendMessage: (conversationId: string, senderType: 'staff' | 'patient', text: string) => void
-  sendVoiceMessage: (conversationId: string, senderType: 'staff' | 'patient', transcript: string, durationSec?: number) => void
+  sendMessage: (conversationId: string, senderType: ClinicSide, text: string) => void
+  sendVoiceMessage: (conversationId: string, senderType: ClinicSide, transcript: string, durationSec?: number) => void
   shareResourceCard: (conversationId: string, resourceId: string) => void
   toggleGroupMember: (conversationId: string, memberId: string) => void
-  triggerPatientAgentPrompt: (prompt: string) => void
-  submitFollowupQuestionnaire: (planId: string, payload: { symptomScore: string; temperature: string; adherence: string; note: string }) => void
+  askPatientAgent: (prompt: string) => void
+  stopAgentRun: (messageId: string) => void
+  sendHandoff: (messageId: string) => void
+  submitFollowupQuestionnaire: (planId: string, payload: FollowupPayload) => void
   triggerFollowupAgentSummary: (planId: string) => void
   reviewFollowupSummary: (planId: string, summaryId: string, decision: 'approved' | 'rejected') => void
   closeFollowupPlan: (planId: string) => void
   testCrossPatientIsolation: () => void
+  dismissIsolationBlock: () => void
+  focusConversation: (side: ClinicSide, conversationId: string | null) => void
+  setTyping: (side: ClinicSide, conversationId: string | null) => void
 }
