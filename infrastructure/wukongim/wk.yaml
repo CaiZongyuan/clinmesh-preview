@@ -1,0 +1,7 @@
+# WuKongIM v2.2.5-20260422 local development / acceptance configuration
+# Manager token is supplied via environment (WK_MANAGERTOKEN) or replaced per environment; never commit real production secrets.
+mode: "release"
+tokenAuthOn: true
+managerUID: "system_manager"
+demo:
+  on: false

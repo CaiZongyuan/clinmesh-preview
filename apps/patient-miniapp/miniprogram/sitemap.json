@@ -1,0 +1,4 @@
+{
+  "desc": "ClinMesh Connected Clinic demo miniapp sitemap",
+  "rules": [{ "action": "disallow", "page": "*" }]
+}

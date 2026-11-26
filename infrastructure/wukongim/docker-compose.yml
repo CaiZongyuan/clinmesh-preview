@@ -1,0 +1,25 @@
+services:
+  wukongim:
+    # Pinned digest for WuKongIM v2.2.5-20260422 (Apache-2.0)
+    image: registry.cn-shanghai.aliyuncs.com/wukongim/wukongim:v2@sha256:aaa2b3c0f7501083b44ee7414517dbcf7ff906aa049a1ed5c4e764ae4f05b65f
+    container_name: clinmesh-wukongim
+    restart: unless-stopped
+    environment:
+      # Override in .env for non-local deployments; HTTP management API must stay internal-only.
+      WK_MANAGERTOKEN: ${WUKONGIM_MANAGER_TOKEN:-clinmesh-local-dev-manager-token}
+    ports:
+      # HTTP management API: loopback only (never expose publicly without reverse-proxy isolation)
+      - "127.0.0.1:${WUKONGIM_HTTP_PORT:-15001}:5001"
+      # WebSocket endpoint for HIS Web and WeChat MiniProgram clients (terminate WSS at reverse proxy in staging/prod)
+      - "127.0.0.1:${WUKONGIM_WS_PORT:-15200}:5200"
+    volumes:
+      - ./wk.yaml:/root/wukongim/wk.yaml:ro
+      - wukongim_data:/root/wukongim/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  wukongim_data:

@@ -1,0 +1,29 @@
+{
+  "description": "ClinMesh Connected Clinic native WeChat MiniProgram (Patient端)",
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "node_modules" },
+      { "type": "file", "value": "tsconfig.json" }
+    ]
+  },
+  "miniprogramRoot": "miniprogram/",
+  "compileType": "miniprogram",
+  "libVersion": "3.7.0",
+  "appid": "wx0000000000000000",
+  "projectname": "clinmesh-patient-miniapp",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "packNpmManually": true,
+    "packNpmRelationList": [
+      {
+        "packageJsonPath": "./package.json",
+        "miniprogramNpmDistDir": "./miniprogram/"
+      }
+    ],
+    "useCompilerPlugins": ["typescript"]
+  }
+}

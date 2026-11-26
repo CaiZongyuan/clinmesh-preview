@@ -1,0 +1,41 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/messages/index",
+    "pages/assistant/index",
+    "pages/profile/index",
+    "pages/login/index",
+    "pages/chat/index",
+    "pages/appointments/index",
+    "pages/appointments/book/index",
+    "pages/records/index",
+    "pages/records/detail/index",
+    "pages/reports/index",
+    "pages/reports/detail/index",
+    "pages/prescriptions/index",
+    "pages/followup/index",
+    "pages/followup/detail/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "ClinMesh 互联门诊",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f3f4f7"
+  },
+  "tabBar": {
+    "color": "#64748b",
+    "selectedColor": "#2563eb",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "首页" },
+      { "pagePath": "pages/messages/index", "text": "消息" },
+      { "pagePath": "pages/assistant/index", "text": "助手" },
+      { "pagePath": "pages/profile/index", "text": "我的" }
+    ]
+  },
+  "componentFramework": "glass-easel",
+  "renderer": "webview",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

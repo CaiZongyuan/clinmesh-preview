@@ -1,0 +1,15 @@
+{
+  "name": "clinmesh-patient-miniapp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native WeChat MiniProgram for ClinMesh Connected Clinic (Patient端)",
+  "dependencies": {
+    "easyjssdk": "2.0.5",
+    "tdesign-miniprogram": "1.18.0"
+  },
+  "devDependencies": {
+    "miniprogram-api-typings": "5.3.1",
+    "miniprogram-simulate": "1.7.0",
+    "typescript": "6.0.3"
+  }
+}
