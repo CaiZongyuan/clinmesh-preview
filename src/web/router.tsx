@@ -8,6 +8,7 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router'
 import { fetchActiveEncounter, fetchCaseDebrief, fetchEncounter, fetchGoldenCaseQueue, fetchPhysicalExaminations } from './api'
+import { ConnectedClinicShell } from './clinic/connected-clinic-shell'
 import { ConnectedClinicPrototype } from './prototype/connected-clinic-prototype'
 import { Workbench } from './workbench/workbench'
 
@@ -63,13 +64,19 @@ function WorkbenchLoadError({ error }: ErrorComponentProps) {
   )
 }
 
+const connectedClinicRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/clinic',
+  component: ConnectedClinicShell,
+})
+
 const connectedClinicPrototypeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/prototype/connected-clinic',
   component: ConnectedClinicPrototype,
 })
 
-const routeTree = rootRoute.addChildren([workbenchRoute, encounterRoute, connectedClinicPrototypeRoute])
+const routeTree = rootRoute.addChildren([workbenchRoute, encounterRoute, connectedClinicRoute, connectedClinicPrototypeRoute])
 
 export function createAppRouter(options: { history?: RouterHistory } = {}) {
   return createRouter({ routeTree, history: options.history })

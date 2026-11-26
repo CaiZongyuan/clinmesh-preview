@@ -15,6 +15,9 @@ export default defineConfig({
             miniflare: {
               bindings: {
                 LLM_PROVIDER: 'scripted',
+                LLM_MODEL: 'glm-5.3-flash',
+                LLM_REASONING_EFFORT: 'low',
+                LLM_MODEL_OPTIONS: 'glm-5.3-flash,glm-5.3',
                 PATIENT_TURN_TIMEOUT_MS: '1500',
                 PATIENT_TURN_EXPIRY_GRACE_MS: '400',
                 AGENT_STALL_TIMEOUT_MS: '1500',
@@ -23,6 +26,7 @@ export default defineConfig({
                 CLINIC_MODE: 'simulation',
                 DEMO_RESET_ENABLED: 'false',
                 WECHAT_AUTH_MODE: 'scripted',
+                WUKONGIM_MODE: 'fake',
               },
             },
           }),

@@ -1,0 +1,12 @@
+<view class="page-pad">
+  <view class="demo-banner">正式已发布处方（只读）· 请严格遵医嘱用药，勿自行调整剂量或停药</view>
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view wx:if="{{items.length === 0}}" class="card muted">暂无已发布正式处方</view>
+  <view wx:for="{{items}}" wx:key="releaseId" class="card">
+    <view class="card-title">{{item.title}}</view>
+    <view class="muted">{{item.summary}}</view>
+    <view wx:for="{{item.payload.items}}" wx:for-item="med" wx:key="drugName" style="margin-top: 10rpx; padding-top: 10rpx; border-top: 1rpx solid #e2e8f0;">
+      <text>{{med.drugName}} · {{med.dosage}} · {{med.frequency}} · {{med.route}} · {{med.days}}天</text>
+    </view>
+  </view>
+</view>

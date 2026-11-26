@@ -1,0 +1,8 @@
+<view class="page-pad">
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view wx:if="{{items.length === 0}}" class="card muted">暂无已发布检查检验报告</view>
+  <view wx:for="{{items}}" wx:key="releaseId" class="card" data-id="{{item.releaseId}}" bindtap="openDetail">
+    <view class="card-title">{{item.title}}</view>
+    <view class="muted">{{item.summary}}</view>
+  </view>
+</view>

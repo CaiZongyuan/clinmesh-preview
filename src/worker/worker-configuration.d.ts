@@ -15,11 +15,13 @@ interface __BaseEnv_Env {
 	SIMULATED_PATIENT: DurableObjectNamespace<import("./index").SimulatedPatientDO>;
 	CLINICAL_COPILOT: DurableObjectNamespace<import("./index").ClinicalCopilotDO>;
 	CONSULTATION_VOICE: DurableObjectNamespace<import("./index").ConsultationVoiceAgent>;
+	PATIENT_SERVICE_AGENT: DurableObjectNamespace<import("./index").PatientServiceAgentDO>;
+	FOLLOWUP_AGENT: DurableObjectNamespace<import("./index").FollowUpAgentDO>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./index");
-		durableNamespaces: "ClinicWorkspaceDO" | "SimulatedPatientDO" | "ClinicalCopilotDO" | "ConsultationVoiceAgent";
+		durableNamespaces: "ClinicWorkspaceDO" | "SimulatedPatientDO" | "ClinicalCopilotDO" | "ConsultationVoiceAgent" | "PatientServiceAgentDO" | "FollowUpAgentDO";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

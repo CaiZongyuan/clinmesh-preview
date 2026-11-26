@@ -1,0 +1,40 @@
+<view class="page-pad">
+  <view class="demo-banner">AI 就医助手 · 仅查询本人已发布资料与真实号源，不做自主诊断或开方</view>
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+
+  <view class="row" style="margin-bottom: 16rpx; flex-wrap: wrap;">
+    <view class="btn-secondary" data-text="帮我预约王医生明天上午的门诊" bindtap="onQuickPrompt">预约王医生门诊</view>
+    <view class="btn-secondary" data-text="查看最近一次病历" bindtap="onQuickPrompt">查看最近病历</view>
+    <view class="btn-secondary" data-text="打开最近一次病历" bindtap="onQuickPrompt">直接打开病历</view>
+  </view>
+
+  <view wx:for="{{messages}}" wx:key="messageId" class="card">
+    <view class="muted">{{item.senderName}} · #{{item.sequence}}</view>
+    <block wx:for="{{item.parts}}" wx:for-item="part" wx:key="index">
+      <view wx:if="{{part.type === 'text'}}" style="margin-top: 8rpx;">{{part.text}}</view>
+      <view wx:if="{{part.type === 'card'}}" style="margin-top: 12rpx; padding: 16rpx; background: #f8fafc; border-radius: 12rpx; border: 1rpx solid #cbd5e1;">
+        <view class="badge">{{part.component}}</view>
+        <view class="card-title" style="margin-top: 8rpx;">{{part.safeProps.title}}</view>
+        <view wx:if="{{part.safeProps.summary}}" class="muted">{{part.safeProps.summary}}</view>
+        <view wx:for="{{part.actions}}" wx:for-item="act" wx:key="name" style="margin-top: 12rpx;">
+          <view class="btn-primary" data-action="{{act}}" bindtap="onCardAction">
+            {{act.name === 'appointment.open' ? '前往核对并确认预约' : '查看详情'}}
+          </view>
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <view wx:if="{{stream.activeRunId}}" class="card">
+    <view class="row">
+      <text class="badge">助手生成中</text>
+      <text class="muted" bindtap="onStopRun">停止</text>
+    </view>
+    <view style="margin-top: 8rpx;">{{stream.runs[stream.activeRunId].text}}</view>
+  </view>
+
+  <view class="card">
+    <input class="input-box" value="{{inputText}}" placeholder="向 AI 就医助手提问，例如预约或查病历..." bindinput="onInput" confirm-type="send" bindconfirm="onSend" />
+    <button class="btn-primary" loading="{{sending}}" bindtap="onSend">发送</button>
+  </view>
+</view>

@@ -1,12 +1,43 @@
 import { DurableObject } from 'cloudflare:workers'
 import type {
+  AppointmentSlotView,
+  AppointmentStatus,
+  AppointmentView,
+  BookAppointmentRequest,
+  PublishPatientReleaseRequest,
+  StaffPatientView,
+} from '../shared/appointment'
+import type {
   ContactView,
   DemoResetResponse,
   DepartmentView,
   DoctorView,
   PatientReleaseResourceType,
+  PatientReleaseView,
   Principal,
 } from '../shared/auth'
+import type {
+  AttachmentView,
+  ChatMessage,
+  ConversationView,
+  CreateConversationRequest,
+  ImCredentialsResponse,
+  InitAttachmentRequest,
+  MessagePart,
+  SendCommandStatus,
+  SendMessageRequest,
+  SendMessageResponse,
+  TranscriptStatus,
+} from '../shared/communication'
+import type {
+  CreateFollowupPlanRequest,
+  FollowupPlanView,
+  FollowupResponseView,
+  FollowupSummaryView,
+  ReviewFollowupSummaryRequest,
+  ReviewTaskView,
+  SubmitFollowupResponseRequest,
+} from '../shared/followup'
 import type { DraftAuthor, NoteSection, NoteSections } from '../shared/clinical-note'
 import { COMPLETION_GATE_LABELS, completionGates, dispositionRecorded, type CaseDebrief, type ClinicalDrafts } from '../shared/completion'
 import { isVoiceCapture, MAX_QUESTION_LENGTH, type AskPatientRequest, type ConsultationTurn } from '../shared/consultation'
@@ -18,6 +49,7 @@ import type { GoldenCaseQueueEntry } from '../shared/golden-case-queue'
 import type { InvestigationCatalogResponse } from '../shared/investigation'
 import type { PrescriptionLineRequest } from '../shared/medication'
 import { BODY_SYSTEM_NAME, type BodySystem } from '../shared/physical-examination'
+import { AppointmentRepository } from './appointments/appointment-repository'
 import {
   AuthRepository,
   normalizeInviteCode,
@@ -27,6 +59,11 @@ import {
   type PrincipalResult,
 } from './auth/auth-repository'
 import { generateOpaqueToken, hashSecret, sha256Hex } from './auth/crypto'
+import { AttachmentRepository, signAttachmentAccess } from './communication/attachment-repository'
+import { CommunicationRepository } from './communication/communication-repository'
+import { createImAdapter, encodeBase64Utf8, type WuKongImEnv } from './communication/wukongim-adapter'
+import { FollowupRepository } from './followup/followup-repository'
+import { PatientReleaseRepository } from './patient-portal/release-repository'
 import { isGreeting } from './clinical-copilot/ambient-drafts'
 import type { CopilotNoteMention, CopilotRead, CopilotReadResult } from './clinical-copilot/copilot-reads'
 import { ClinicalNoteRepository, type ClinicalNoteResult } from './clinical-note-repository'
@@ -65,6 +102,11 @@ const millis = (value: unknown, fallback: number) => {
 
 export class ClinicWorkspaceDO extends DurableObject<Env> {
   private readonly auth: AuthRepository
+  private readonly appointments: AppointmentRepository
+  private readonly releases: PatientReleaseRepository
+  private readonly comm: CommunicationRepository
+  private readonly attachments: AttachmentRepository
+  private readonly followup: FollowupRepository
   private readonly goldenCases: GoldenCaseRepository
   private readonly encounters: EncounterRepository
   private readonly completion: EncounterCompletionRepository
@@ -94,6 +136,11 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     this.prescriptions = new PrescriptionRepository(ctx.storage.sql, this.encounters)
     this.draftAssistance = new DraftAssistanceRepository(ctx.storage.sql, this.completion, this.diagnosis, this.clinicalNote, this.prescriptions)
     this.copilotReads = new CopilotReadModel(this.encounters, this.examinations, this.investigations, this.consultation, this.clinicalNote)
+    this.appointments = new AppointmentRepository(ctx.storage.sql, this.auth, this.encounters)
+    this.releases = new PatientReleaseRepository(ctx.storage.sql, this.auth, this.encounters, this.clinicalNote, this.investigations, this.prescriptions)
+    this.comm = new CommunicationRepository(ctx.storage.sql, this.auth)
+    this.attachments = new AttachmentRepository(ctx.storage.sql, this.auth, this.comm)
+    this.followup = new FollowupRepository(ctx.storage.sql, this.auth, this.comm)
     this.turnTimeoutMs = millis(env.PATIENT_TURN_TIMEOUT_MS, 30_000)
     this.expiryGraceMs = millis(env.PATIENT_TURN_EXPIRY_GRACE_MS, 5_000)
     ctx.blockConcurrencyWhile(async () => {
@@ -101,17 +148,41 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       ctx.storage.transactionSync(() => {
         migrateWorkspaceSchema(ctx.storage.sql)
         this.goldenCases.reconcile(goldenCaseRegistrations())
-        if (seedHashes) this.auth.ensureSeeded(seedHashes, new Date().toISOString())
+        if (seedHashes) {
+          const nowIso = new Date().toISOString()
+          this.auth.ensureSeeded(seedHashes, nowIso)
+          this.comm.ensureDemoConversationsSeeded(nowIso)
+          this.followup.ensureDemoPlansSeeded(nowIso)
+        }
       })
     })
   }
 
   private async ensureClinicSeeded(): Promise<void> {
-    if (this.auth.isSeeded()) return
+    if (this.auth.isSeeded()) {
+      this.ctx.storage.transactionSync(() => {
+        const nowIso = new Date().toISOString()
+        this.comm.ensureDemoConversationsSeeded(nowIso)
+        this.followup.ensureDemoPlansSeeded(nowIso)
+      })
+      return
+    }
     const seedHashes = await prepareSeedHashes()
     this.ctx.storage.transactionSync(() => {
-      this.auth.ensureSeeded(seedHashes, new Date().toISOString())
+      const nowIso = new Date().toISOString()
+      this.auth.ensureSeeded(seedHashes, nowIso)
+      this.comm.ensureDemoConversationsSeeded(nowIso)
+      this.followup.ensureDemoPlansSeeded(nowIso)
     })
+  }
+
+  private imAdapter() {
+    return createImAdapter(this.env as unknown as WuKongImEnv)
+  }
+
+  private attachmentSigningSecret(): string {
+    const raw = (this.env as unknown as Record<string, unknown>).WUKONGIM_MANAGER_TOKEN
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : 'clinmesh-local-attachment-secret'
   }
 
   // Checks practitioner eligibility inside the same transaction that mutates state, preventing TOCTOU bypass.
@@ -163,7 +234,21 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
     if (!token) return { ok: false, error: { code: 'unauthorized', message: '缺少认证凭据。' } }
     await this.ensureClinicSeeded()
     const tokenHash = await sha256Hex(token)
-    return this.ctx.storage.transactionSync(() => this.auth.revokeSession(tokenHash, new Date()))
+    const rotated = generateOpaqueToken()
+    const result = this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const revoked = this.auth.revokeSession(tokenHash, now)
+      if (revoked.ok) {
+        this.comm.rotateImToken(revoked.principal.actorId, revoked.principal.imUid, rotated, now.toISOString())
+      }
+      return revoked
+    })
+    if (result.ok) {
+      const im = this.imAdapter()
+      await im.kickUserDevice(result.principal.imUid).catch(() => {})
+      await im.registerUserToken(result.principal.imUid, rotated).catch(() => {})
+    }
+    return result
   }
 
   async listDepartments(token: string): Promise<{ ok: true; departments: DepartmentView[] } | Refusal> {
@@ -240,10 +325,27 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec('DELETE FROM investigation_cancellation')
       this.ctx.storage.sql.exec('DELETE FROM investigation')
       this.ctx.storage.sql.exec('DELETE FROM physical_examination')
+      this.ctx.storage.sql.exec('DELETE FROM agent_run_index')
+      this.ctx.storage.sql.exec('DELETE FROM review_task')
+      this.ctx.storage.sql.exec('DELETE FROM followup_summary')
+      this.ctx.storage.sql.exec('DELETE FROM followup_response')
+      this.ctx.storage.sql.exec('DELETE FROM followup_task')
+      this.ctx.storage.sql.exec('DELETE FROM followup_plan')
+      this.ctx.storage.sql.exec('DELETE FROM attachment_blob')
+      this.ctx.storage.sql.exec('DELETE FROM attachment')
+      this.ctx.storage.sql.exec('DELETE FROM im_user_token')
+      this.ctx.storage.sql.exec('DELETE FROM im_message_mirror')
+      this.ctx.storage.sql.exec('DELETE FROM send_command')
+      this.ctx.storage.sql.exec('DELETE FROM conversation_member')
+      this.ctx.storage.sql.exec('DELETE FROM conversation')
+      this.ctx.storage.sql.exec('DELETE FROM appointment')
       this.ctx.storage.sql.exec('DELETE FROM audit_event')
       this.ctx.storage.sql.exec(`UPDATE encounter SET status = 'abandoned', ended_at = COALESCE(ended_at, ?) WHERE status = 'active'`, nowIso)
       this.goldenCases.reconcile(goldenCaseRegistrations())
-      return this.auth.resetDemo(workspace, seedHashes, nowIso)
+      const summary = this.auth.resetDemo(workspace, seedHashes, nowIso)
+      this.comm.ensureDemoConversationsSeeded(nowIso)
+      this.followup.ensureDemoPlansSeeded(nowIso)
+      return summary
     })
   }
 
@@ -317,6 +419,7 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       if (!truth.ok) return truth
       this.completion.recordDebrief(encounterId, truth.caseTruth.debriefReference)
       this.consultation.failPending(encounterId, 'encounter-ended', now)
+      this.appointments.markCompletedByEncounter(encounterId, now.toISOString())
       return this.encounters.end(encounterId, 'completed', actor.practitionerId, now.toISOString())
     })
     if (result.ok) await this.freezeCopilot(encounterId)
@@ -760,5 +863,780 @@ export class ClinicWorkspaceDO extends DurableObject<Env> {
       }
     }
     return { ok: true, doctorTurn: exchange.doctorTurn, patientTurn: this.consultation.find(exchange.patientTurn.turnId)! }
+  }
+
+  // --- Connected Clinic S2/S3: Appointments, Staff Patients & Patient Releases ---
+
+  async listAppointmentSlots(
+    token: string,
+    filters: { departmentId?: string; doctorId?: string; date?: string } = {},
+  ): Promise<{ ok: true; slots: AppointmentSlotView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return { ok: true, slots: this.appointments.listSlots(filters) }
+  }
+
+  async bookAppointment(
+    token: string,
+    input: BookAppointmentRequest,
+  ): Promise<{ ok: true; appointment: AppointmentView; created: boolean } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.appointments.book(auth.principal, input, now.toISOString())
+    })
+  }
+
+  async listPatientAppointments(
+    token: string,
+    status?: AppointmentStatus,
+  ): Promise<{ ok: true; appointments: AppointmentView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return this.appointments.listForPatient(auth.principal, status)
+  }
+
+  async cancelAppointment(token: string, appointmentId: string): Promise<{ ok: true; appointment: AppointmentView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.appointments.cancel(auth.principal, appointmentId, now.toISOString())
+    })
+  }
+
+  async listStaffAppointments(
+    token: string,
+    filters: { doctorId?: string; status?: AppointmentStatus } = {},
+  ): Promise<{ ok: true; appointments: AppointmentView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return this.appointments.listForStaff(auth.principal, filters)
+  }
+
+  async checkInAppointment(token: string, appointmentId: string): Promise<{ ok: true; appointment: AppointmentView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.appointments.checkIn(auth.principal, appointmentId, now.toISOString())
+    })
+  }
+
+  async startAppointmentEncounter(
+    token: string,
+    appointmentId: string,
+    caseId?: string,
+  ): Promise<{ ok: true; appointment: AppointmentView; encounter: EncounterView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.appointments.startEncounter(auth.principal, appointmentId, caseId, now.toISOString())
+    })
+  }
+
+  async listStaffPatients(token: string): Promise<{ ok: true; patients: StaffPatientView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return this.appointments.listAuthorizedPatients(auth.principal)
+  }
+
+  async publishStaffRelease(
+    token: string,
+    input: PublishPatientReleaseRequest,
+  ): Promise<{ ok: true; item: PatientReleaseView; created: boolean } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.releases.publish(auth.principal, input, now)
+    })
+  }
+
+  async retractStaffRelease(token: string, releaseId: string): Promise<{ ok: true; releaseId: string } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.releases.retract(auth.principal, releaseId, now.toISOString())
+    })
+  }
+
+  async listEncounterReleases(token: string, encounterId: string): Promise<{ ok: true; items: PatientReleaseView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return this.releases.listForEncounter(auth.principal, encounterId)
+  }
+
+  // --- Connected Clinic S4/S5: IM Credentials, Conversations, Reliable Messaging & Local Attachments ---
+
+  async issueImCredentials(token: string): Promise<{ ok: true; credentials: ImCredentialsResponse } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    const freshToken = generateOpaqueToken()
+    const issued = this.ctx.storage.transactionSync(() =>
+      this.comm.getOrIssueImToken(auth.principal.actorId, auth.principal.imUid, freshToken, new Date().toISOString()),
+    )
+    const im = this.imAdapter()
+    await im.registerUserToken(auth.principal.imUid, issued.token).catch((error) => {
+      console.error('WuKongIM registerUserToken failed', error)
+    })
+    return {
+      ok: true,
+      credentials: {
+        uid: auth.principal.imUid,
+        token: issued.token,
+        wsUrl: im.wsUrl,
+        mode: im.mode,
+      },
+    }
+  }
+
+  async listConversations(token: string): Promise<{ ok: true; conversations: ConversationView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return { ok: true, conversations: this.comm.listConversations(auth.principal) }
+  }
+
+  async getConversation(token: string, conversationId: string): Promise<{ ok: true; conversation: ConversationView } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return this.comm.getConversation(auth.principal, conversationId)
+  }
+
+  async createConversation(
+    token: string,
+    input: CreateConversationRequest,
+  ): Promise<{ ok: true; conversation: ConversationView; created: boolean } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    const created = this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.comm.createConversation(auth.principal, input, now.toISOString())
+    })
+    if (!created.ok) return created
+    if (created.conversation.status === 'provisioning') {
+      const im = this.imAdapter()
+      try {
+        await im.ensureChannel(created.conversation.imChannelId, created.conversation.imChannelType, created.subscriberImUids)
+        const activated = this.ctx.storage.transactionSync(() =>
+          this.comm.activateProvisionedConversation(created.conversation.conversationId, new Date().toISOString()),
+        )
+        return { ok: true, conversation: activated ?? created.conversation, created: created.created }
+      } catch (error) {
+        return {
+          ok: false,
+          error: { code: 'im-delivery-failed', message: `IM 频道创建失败，请重试：${error instanceof Error ? error.message : String(error)}` },
+        }
+      }
+    }
+    return { ok: true, conversation: created.conversation, created: created.created }
+  }
+
+  async addConversationMember(
+    token: string,
+    conversationId: string,
+    targetActorId: string,
+  ): Promise<{ ok: true; conversation: ConversationView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    const updated = this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.comm.addMember(auth.principal, conversationId, targetActorId, now.toISOString())
+    })
+    if (!updated.ok) return updated
+    const im = this.imAdapter()
+    await im.ensureChannel(
+      updated.imChannelId,
+      updated.imChannelType,
+      updated.conversation.members.filter((m) => m.status === 'active').map((m) => m.imUid),
+    ).catch(() => {})
+    await im.addSubscribers(updated.imChannelId, updated.imChannelType, [updated.targetImUid]).catch(() => {})
+    return { ok: true, conversation: updated.conversation }
+  }
+
+  async removeConversationMember(
+    token: string,
+    conversationId: string,
+    targetActorId: string,
+  ): Promise<{ ok: true; conversation: ConversationView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    const updated = this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.comm.removeMember(auth.principal, conversationId, targetActorId, now.toISOString())
+    })
+    if (!updated.ok) return updated
+    await this.imAdapter().removeSubscribers(updated.imChannelId, updated.imChannelType, [updated.targetImUid]).catch(() => {})
+    if (targetActorId === 'actor_agent_followup') {
+      const doName = `${updated.conversation.conversationId}:actor_agent_followup`
+      await this.env.FOLLOWUP_AGENT.getByName(doName).haltForRevocation().catch(() => {})
+    }
+    return { ok: true, conversation: updated.conversation }
+  }
+
+  async sendConversationMessage(
+    token: string,
+    workspaceName: string,
+    conversationId: string,
+    input: SendMessageRequest,
+  ): Promise<{ ok: true; result: SendMessageResponse } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    const prep = this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      const prepared = this.comm.prepareSendCommand(auth.principal.actorId, 'human', conversationId, input, now.toISOString())
+      if (!prepared.ok) return prepared
+      return { ok: true as const, principal: auth.principal, prepared: prepared.prepared }
+    })
+    if (!prep.ok) return prep
+
+    const delivered = await this.executePreparedSend(prep.prepared)
+    if (!delivered.ok) return delivered
+
+    const triggeredAgentRuns: SendMessageResponse['triggeredAgentRuns'] = []
+    if (delivered.triggerAgents.length > 0 && delivered.message) {
+      const userText = input.parts
+        .map((p) => (p.type === 'text' ? p.text : p.type === 'audio' ? `[语音消息${p.transcript ? `: ${p.transcript}` : ''}]` : p.type === 'image' ? '[图片消息]' : `[卡片 ${p.component}]`))
+        .join('\n')
+      for (const trigger of delivered.triggerAgents) {
+        const started = await this.dispatchAgentRunInternal({
+          workspaceName,
+          principal: prep.principal,
+          conversationId,
+          agentActorId: trigger.agentActorId,
+          externalRef: `msg:${delivered.message.messageId}`,
+          userText,
+        })
+        if (started.ok) {
+          triggeredAgentRuns.push({ agentActorId: trigger.agentActorId, runId: started.runId, conversationId })
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      result: {
+        commandId: prep.prepared.commandId,
+        status: 'sent' as SendCommandStatus,
+        message: delivered.message,
+        triggeredAgentRuns,
+      },
+    }
+  }
+
+  async postAgentMessage(
+    conversationId: string,
+    agentActorId: string,
+    clientMessageId: string,
+    parts: MessagePart[],
+    agentRunId: string,
+  ): Promise<{ ok: true; message: ChatMessage | null } | Refusal> {
+    const prep = this.ctx.storage.transactionSync(() =>
+      this.comm.prepareSendCommand(
+        agentActorId,
+        'agent',
+        conversationId,
+        { clientMessageId, parts, mentions: [] },
+        new Date().toISOString(),
+        { agentRunId },
+      ),
+    )
+    if (!prep.ok) return prep
+    const delivered = await this.executePreparedSend(prep.prepared)
+    if (!delivered.ok) return delivered
+    return { ok: true, message: delivered.message }
+  }
+
+  private async executePreparedSend(
+    prepared: import('./communication/communication-repository').PreparedSendCommand,
+  ): Promise<
+    | { ok: true; message: ChatMessage; triggerAgents: Array<{ agentActorId: string; conversationType: import('../shared/communication').ConversationType }> }
+    | Refusal
+  > {
+    if (prepared.mode === 'already_sent' && prepared.existingMessage) {
+      return { ok: true, message: prepared.existingMessage, triggerAgents: [] }
+    }
+    const im = this.imAdapter()
+    try {
+      await im.ensureChannel(prepared.imChannelId, prepared.imChannelType, prepared.activeMemberImUids)
+      let externalMessageId: string | null = null
+      let sequence = 0
+
+      if (prepared.mode === 'reconcile') {
+        const synced = await im.syncChannelMessages({
+          channelId: prepared.imChannelId,
+          channelType: prepared.imChannelType,
+          loginUid: prepared.senderImUid,
+          limit: 50,
+        })
+        const matched = synced.find((m) => m.clientMsgNo === prepared.clientMessageId)
+        if (matched) {
+          externalMessageId = matched.messageId
+          sequence = matched.messageSeq
+        }
+      }
+
+      if (!externalMessageId) {
+        const sent = await im.sendMessage({
+          channelId: prepared.imChannelId,
+          channelType: prepared.imChannelType,
+          fromUid: prepared.senderImUid,
+          clientMsgNo: prepared.clientMessageId,
+          payloadBase64: encodeBase64Utf8(prepared.payloadJson),
+        })
+        externalMessageId = sent.messageId
+        sequence = sent.messageSeq
+      }
+
+      const settled = this.ctx.storage.transactionSync(() =>
+        this.comm.settleSendCommandSuccess(prepared, externalMessageId!, sequence, new Date().toISOString()),
+      )
+      return { ok: true, message: settled.message, triggerAgents: settled.triggerAgents }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      this.ctx.storage.transactionSync(() => this.comm.settleSendCommandFailure(prepared.commandId, detail, new Date().toISOString()))
+      return { ok: false, error: { code: 'im-delivery-failed', message: `消息投递失败（已记录待重试补偿）：${detail}` } }
+    }
+  }
+
+  async listConversationMessages(
+    token: string,
+    conversationId: string,
+    cursor?: number,
+    limit?: number,
+  ): Promise<{ ok: true; messages: ChatMessage[]; nextCursor: number | null; hasMore: boolean } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return this.comm.listMessages(auth.principal, conversationId, { cursor, limit })
+  }
+
+  async markConversationRead(
+    token: string,
+    conversationId: string,
+    seq: number,
+  ): Promise<{ ok: true; lastReadSeq: number; unreadCount: number } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const auth = this.auth.authenticateSession(tokenHash, new Date())
+      if (!auth.ok) return auth
+      return this.comm.markRead(auth.principal, conversationId, seq)
+    })
+  }
+
+  // --- S5 Local Attachments ---
+
+  async initAttachment(token: string, input: InitAttachmentRequest): Promise<{ ok: true; attachment: AttachmentView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.attachments.init(auth.principal, input, now.toISOString())
+    })
+  }
+
+  async uploadAttachmentBytes(
+    token: string,
+    attachmentId: string,
+    dataBase64: string,
+    byteLength: number,
+    hashHex: string,
+  ): Promise<{ ok: true; attachment: AttachmentView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.attachments.upload(auth.principal, attachmentId, dataBase64, byteLength, hashHex, now.toISOString())
+    })
+  }
+
+  async completeAttachment(
+    token: string,
+    attachmentId: string,
+    transcript: { status: TranscriptStatus; text: string | null },
+  ): Promise<{ ok: true; attachment: AttachmentView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.attachments.complete(auth.principal, attachmentId, transcript, now.toISOString())
+    })
+  }
+
+  async authorizeAttachmentAccess(
+    token: string,
+    attachmentId: string,
+    ttlMs = 300_000,
+  ): Promise<{ ok: true; attachment: AttachmentView; exp: number; sig: string; expiresAt: string } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    const now = Date.now()
+    const checked = this.ctx.storage.transactionSync(() =>
+      this.attachments.authorizeAccess(auth.principal, attachmentId, new Date(now).toISOString()),
+    )
+    if (!checked.ok) return checked
+    const exp = now + ttlMs
+    const sig = await signAttachmentAccess(this.attachmentSigningSecret(), attachmentId, exp)
+    return { ok: true, attachment: checked.attachment, exp, sig, expiresAt: new Date(exp).toISOString() }
+  }
+
+  async readSignedAttachmentContent(
+    attachmentId: string,
+    expMs: number,
+    sig: string,
+  ): Promise<{ ok: true; mime: string; dataBase64: string } | Refusal> {
+    return this.attachments.readSignedContent(attachmentId, expMs, sig, this.attachmentSigningSecret(), Date.now())
+  }
+
+  // --- S6/S7 Agent Runs & Follow-up Plans ---
+
+  async startAgentRunForConversation(
+    token: string,
+    workspaceName: string,
+    conversationId: string,
+    input: { text: string; clientRequestId: string; agentActorId?: string },
+  ): Promise<{ ok: true; runId: string; agentKind: 'patient_service' | 'followup'; created: boolean } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    const conv = this.comm.getConversation(auth.principal, conversationId)
+    if (!conv.ok) return conv
+    if (conv.conversation.status !== 'active') {
+      return { ok: false, error: { code: 'conversation-read-only', message: '该会话已只读，不能触发 Agent 运行。' } }
+    }
+    const targetAgent =
+      input.agentActorId ??
+      (conv.conversation.type === 'patient_assistant' ? 'actor_agent_patient_svc' : 'actor_agent_followup')
+    const hasAgent = conv.conversation.members.some((m) => m.actorId === targetAgent && m.status === 'active')
+    if (!hasAgent) {
+      return { ok: false, error: { code: 'conversation-member-forbidden', message: '目标 Agent 不是当前会话的有效成员。' } }
+    }
+    return this.dispatchAgentRunInternal({
+      workspaceName,
+      principal: auth.principal,
+      conversationId,
+      agentActorId: targetAgent,
+      externalRef: `req:${input.clientRequestId}`,
+      userText: input.text,
+    })
+  }
+
+  private async dispatchAgentRunInternal(input: {
+    workspaceName: string
+    principal: Principal
+    conversationId: string
+    agentActorId: string
+    externalRef: string
+    userText: string
+  }): Promise<{ ok: true; runId: string; agentKind: 'patient_service' | 'followup'; created: boolean } | Refusal> {
+    const convCtx = this.comm.getConversationContextForAgent(input.conversationId)
+    if (!convCtx || convCtx.status !== 'active') {
+      return { ok: false, error: { code: 'conversation-read-only', message: '当前会话不可用。' } }
+    }
+    if (input.agentActorId === 'actor_agent_patient_svc') {
+      if (input.principal.role !== 'patient' || !input.principal.patientId || convCtx.type !== 'patient_assistant') {
+        return { ok: false, error: { code: 'forbidden', message: '仅患者本人可在私人助手会话中调用 AI 就医助手。' } }
+      }
+      const doName = `${input.principal.clinicId}:${input.principal.actorId}`
+      const started = await this.env.PATIENT_SERVICE_AGENT.getByName(doName).startRun({
+        workspaceName: input.workspaceName,
+        clinicId: input.principal.clinicId,
+        conversationId: input.conversationId,
+        patientActorId: input.principal.actorId,
+        patientId: input.principal.patientId,
+        sessionId: input.principal.sessionId,
+        externalRef: input.externalRef,
+        userText: input.userText,
+      })
+      this.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO agent_run_index (run_id, agent_kind, do_name, conversation_id, trigger_actor_id, created_at)
+         VALUES (?, 'patient_service', ?, ?, ?, ?)`,
+        started.runId,
+        doName,
+        input.conversationId,
+        input.principal.actorId,
+        new Date().toISOString(),
+      )
+      return { ok: true, runId: started.runId, agentKind: 'patient_service', created: started.created }
+    }
+
+    const doName = `${input.conversationId}:actor_agent_followup`
+    const started = await this.env.FOLLOWUP_AGENT.getByName(doName).startRun({
+      workspaceName: input.workspaceName,
+      clinicId: input.principal.clinicId,
+      conversationId: input.conversationId,
+      followupPlanId: convCtx.followupPlanId,
+      triggerActorId: input.principal.actorId,
+      membershipVersion: convCtx.membershipVersion,
+      externalRef: input.externalRef,
+      userText: input.userText,
+    })
+    this.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO agent_run_index (run_id, agent_kind, do_name, conversation_id, trigger_actor_id, created_at)
+       VALUES (?, 'followup', ?, ?, ?, ?)`,
+      started.runId,
+      doName,
+      input.conversationId,
+      input.principal.actorId,
+      new Date().toISOString(),
+    )
+    return { ok: true, runId: started.runId, agentKind: 'followup', created: started.created }
+  }
+
+  async resolveAuthorizedAgentRun(
+    token: string,
+    runId: string,
+  ): Promise<
+    | { ok: true; principal: Principal; agentKind: 'patient_service' | 'followup'; doName: string; conversationId: string }
+    | Refusal
+  > {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    const row = this.ctx.storage.sql
+      .exec<{ agent_kind: 'patient_service' | 'followup'; do_name: string; conversation_id: string }>(
+        'SELECT agent_kind, do_name, conversation_id FROM agent_run_index WHERE run_id = ?',
+        runId,
+      )
+      .toArray()[0]
+    if (!row || !this.comm.isActiveMember(row.conversation_id, auth.principal.actorId)) {
+      return { ok: false, error: { code: 'agent-run-not-found', message: '找不到该 Agent 运行或无权访问。' } }
+    }
+    return {
+      ok: true,
+      principal: auth.principal,
+      agentKind: row.agent_kind,
+      doName: row.do_name,
+      conversationId: row.conversation_id,
+    }
+  }
+
+  // --- Follow-up Plan RPCs ---
+
+  async createFollowupPlan(
+    token: string,
+    input: CreateFollowupPlanRequest,
+  ): Promise<{ ok: true; plan: FollowupPlanView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    const created = this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.followup.createPlan(auth.principal, input, now.toISOString())
+    })
+    if (!created.ok) return created
+    await this.imAdapter().ensureChannel(created.imChannelId, created.imChannelType, created.subscriberImUids).catch(() => {})
+    if (created.plan.conversationId) {
+      this.ctx.storage.transactionSync(() => {
+        this.comm.activateProvisionedConversation(created.plan.conversationId!, new Date().toISOString())
+      })
+    }
+    return { ok: true, plan: created.plan }
+  }
+
+  async listFollowupPlans(token: string): Promise<{ ok: true; plans: FollowupPlanView[] } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return { ok: true, plans: this.followup.listPlans(auth.principal) }
+  }
+
+  async getFollowupPlan(token: string, planId: string): Promise<{ ok: true; plan: FollowupPlanView } | Refusal> {
+    const auth = await this.authenticateBearer(token)
+    if (!auth.ok) return auth
+    return this.followup.getPlan(auth.principal, planId)
+  }
+
+  async submitFollowupResponse(
+    token: string,
+    taskId: string,
+    input: SubmitFollowupResponseRequest,
+  ): Promise<{ ok: true; response: FollowupResponseView; created: boolean } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      const res = this.followup.submitResponse(auth.principal, taskId, input, now.toISOString())
+      return res.ok ? { ok: true, response: res.response, created: res.created } : res
+    })
+  }
+
+  async reviewFollowupSummary(
+    token: string,
+    summaryId: string,
+    input: ReviewFollowupSummaryRequest,
+  ): Promise<{ ok: true; summary: FollowupSummaryView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.followup.reviewSummary(auth.principal, summaryId, input, now.toISOString())
+    })
+  }
+
+  async closeFollowupPlan(token: string, planId: string): Promise<{ ok: true; plan: FollowupPlanView } | Refusal> {
+    await this.ensureClinicSeeded()
+    const tokenHash = await sha256Hex(token)
+    return this.ctx.storage.transactionSync(() => {
+      const now = new Date()
+      const auth = this.auth.authenticateSession(tokenHash, now)
+      if (!auth.ok) return auth
+      return this.followup.closePlan(auth.principal, planId, now.toISOString())
+    })
+  }
+
+  // --- Agent-Scoped Internal Workspace RPCs (never expose Case Truth or cross-patient reads) ---
+
+  agentListDepartments(): DepartmentView[] {
+    return this.auth.listDepartments()
+  }
+
+  agentListDoctors(): DoctorView[] {
+    return this.auth.listDoctors()
+  }
+
+  agentListAvailableSlots(filters: { departmentId?: string; doctorId?: string; date?: string }): AppointmentSlotView[] {
+    return this.appointments.listSlots(filters).filter((s) => s.status === 'open' && s.remaining > 0)
+  }
+
+  agentListPatientAppointments(patientId: string): AppointmentView[] {
+    const res = this.appointments.listForPatient(
+      {
+        sessionId: 'agent',
+        accountId: 'agent',
+        actorId: 'actor_agent_patient_svc',
+        clinicId: 'clinic_clinmesh_demo',
+        kind: 'agent',
+        role: 'patient',
+        displayName: 'Agent',
+        imUid: 'agent_patient_svc',
+        patientId,
+        staffId: null,
+        departmentId: null,
+        expiresAt: '',
+      },
+    )
+    return res.ok ? res.appointments : []
+  }
+
+  agentListPatientReleases(patientId: string, resourceType: PatientReleaseResourceType): PatientReleaseView[] {
+    const res = this.auth.listPatientReleases(
+      {
+        sessionId: 'agent',
+        accountId: 'agent',
+        actorId: 'actor_agent_patient_svc',
+        clinicId: 'clinic_clinmesh_demo',
+        kind: 'agent',
+        role: 'patient',
+        displayName: 'Agent',
+        imUid: 'agent_patient_svc',
+        patientId,
+        staffId: null,
+        departmentId: null,
+        expiresAt: '',
+      },
+      resourceType,
+      new Date().toISOString(),
+    )
+    return res.ok ? res.items : []
+  }
+
+  agentGetPatientRelease(patientId: string, resourceType: PatientReleaseResourceType, id: string): PatientReleaseView | null {
+    const res = this.auth.getPatientRelease(
+      {
+        sessionId: 'agent',
+        accountId: 'agent',
+        actorId: 'actor_agent_patient_svc',
+        clinicId: 'clinic_clinmesh_demo',
+        kind: 'agent',
+        role: 'patient',
+        displayName: 'Agent',
+        imUid: 'agent_patient_svc',
+        patientId,
+        staffId: null,
+        departmentId: null,
+        expiresAt: '',
+      },
+      resourceType,
+      id,
+      new Date().toISOString(),
+    )
+    return res.ok ? res.item : null
+  }
+
+  agentListPatientCareTeam(patientId: string): ContactView[] {
+    return this.auth.listContacts({
+      sessionId: 'agent',
+      accountId: 'agent',
+      actorId: 'actor_agent_patient_svc',
+      clinicId: 'clinic_clinmesh_demo',
+      kind: 'agent',
+      role: 'patient',
+      displayName: 'Agent',
+      imUid: 'agent_patient_svc',
+      patientId,
+      staffId: null,
+      departmentId: null,
+      expiresAt: '',
+    })
+  }
+
+  agentVerifyGroupScope(conversationId: string, triggerActorId: string): { allowed: boolean; followupPlanId: string | null } {
+    const ctx = this.comm.getConversationContextForAgent(conversationId)
+    if (!ctx || ctx.status !== 'active') return { allowed: false, followupPlanId: null }
+    const agentActive = ctx.members.some((m) => m.actorId === 'actor_agent_followup' && m.status === 'active')
+    const triggerActive = ctx.members.some((m) => m.actorId === triggerActorId && m.status === 'active')
+    return { allowed: agentActive && triggerActive, followupPlanId: ctx.followupPlanId }
+  }
+
+  agentGetFollowupPlan(planId: string): FollowupPlanView | null {
+    return this.followup.getPlanForAgent(planId)
+  }
+
+  agentCreateFollowupSummary(planId: string, draftText: string): { ok: true; summary: FollowupSummaryView } | Refusal {
+    return this.ctx.storage.transactionSync(() =>
+      this.followup.createDraftSummary('actor_agent_followup', planId, draftText, new Date().toISOString()),
+    )
+  }
+
+  agentCreateReviewTask(
+    planId: string,
+    sourceRef: string,
+    reason: string,
+  ): { ok: true; reviewTask: ReviewTaskView; created: boolean } | Refusal {
+    return this.ctx.storage.transactionSync(() =>
+      this.followup.createReviewTask('actor_agent_followup', planId, sourceRef, reason, new Date().toISOString()),
+    )
   }
 }

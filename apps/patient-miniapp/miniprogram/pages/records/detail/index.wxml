@@ -1,0 +1,10 @@
+<view class="page-pad">
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view wx:if="{{item}}" class="card">
+    <view class="card-title">{{item.title}}</view>
+    <view class="muted" style="margin-bottom: 12rpx;">发布医生：{{item.publishedByName}} · 版本 v{{item.version}}</view>
+    <view style="margin-bottom: 10rpx;">摘要：{{item.summary}}</view>
+    <view wx:if="{{item.payload.chiefComplaint}}" class="muted">主诉：{{item.payload.chiefComplaint}}</view>
+    <view wx:if="{{item.payload.plan}}" class="muted" style="margin-top: 8rpx;">诊疗建议：{{item.payload.plan}}</view>
+  </view>
+</view>

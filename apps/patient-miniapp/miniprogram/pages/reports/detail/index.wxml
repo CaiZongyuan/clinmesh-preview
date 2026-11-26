@@ -1,0 +1,8 @@
+<view class="page-pad">
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view wx:if="{{item}}" class="card">
+    <view class="card-title">{{item.title}}</view>
+    <view class="muted">发布医生：{{item.publishedByName}} · v{{item.version}}</view>
+    <view style="margin-top: 12rpx;">结论：{{item.payload.conclusion || item.summary}}</view>
+  </view>
+</view>

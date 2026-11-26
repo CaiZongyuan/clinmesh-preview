@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "types": ["miniprogram-api-typings"]
+  },
+  "include": [
+    "miniprogram/**/*.ts",
+    "../../src/shared/agent-wire.ts",
+    "../../src/shared/agent-stream-reducer.ts",
+    "../../src/shared/auth.ts",
+    "../../src/shared/appointment.ts",
+    "../../src/shared/communication.ts",
+    "../../src/shared/followup.ts"
+  ]
+}

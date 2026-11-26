@@ -33,8 +33,33 @@ import type {
   PrescriptionsView,
 } from '../shared/medication'
 
+const STAFF_TOKEN_KEY = 'clinmesh.staff.token'
+
+export function getStaffToken(): string | null {
+  try {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STAFF_TOKEN_KEY) : null
+  } catch {
+    return null
+  }
+}
+
+export function setStaffToken(token: string | null): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    if (token) sessionStorage.setItem(STAFF_TOKEN_KEY, token)
+    else sessionStorage.removeItem(STAFF_TOKEN_KEY)
+  } catch {}
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  const token = getStaffToken()
+  let nextInit = init
+  if (token) {
+    const headers = new Headers(init?.headers)
+    if (!headers.has('authorization')) headers.set('authorization', `Bearer ${token}`)
+    nextInit = { ...init, headers }
+  }
+  const response = await fetch(path, nextInit)
   const body: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     throw new Error((body as Partial<ErrorResponse> | null)?.error?.message ?? `请求失败（HTTP ${response.status}）`)

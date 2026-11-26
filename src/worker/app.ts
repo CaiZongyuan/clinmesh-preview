@@ -59,6 +59,7 @@ import {
 import { SAMBERT_MAX_TEXT, type PatientSpeechRequest, type VoiceConfigResponse } from '../shared/voice'
 import { resolveWeChatOpenId, type WeChatAuthEnv } from './auth/wechat'
 import type { ClinicalNoteResult } from './clinical-note-repository'
+import { registerConnectedClinicRoutes } from './connected-clinic-routes'
 import { diagnosisEntries, type DiagnosisResult } from './diagnosis-repository'
 import type { InvestigationsResult } from './investigation-repository'
 import { medicationCatalog } from './medication-catalog'
@@ -111,6 +112,32 @@ const ERROR_STATUS: Record<EncounterErrorCode, ContentfulStatusCode> = {
   'wechat-not-configured': 503,
   'resource-not-found': 404,
   'demo-reset-disabled': 403,
+  'slot-not-found': 404,
+  'slot-closed': 409,
+  'slot-full': 409,
+  'duplicate-appointment': 409,
+  'appointment-not-found': 404,
+  'appointment-invalid-transition': 409,
+  'release-source-not-ready': 409,
+  'release-not-found': 404,
+  'conversation-not-found': 404,
+  'conversation-read-only': 409,
+  'conversation-member-forbidden': 403,
+  'conversation-member-invalid': 400,
+  'invalid-message-payload': 400,
+  'im-delivery-failed': 502,
+  'attachment-not-found': 404,
+  'attachment-not-ready': 409,
+  'attachment-invalid': 400,
+  'attachment-expired': 403,
+  'followup-plan-not-found': 404,
+  'followup-plan-closed': 409,
+  'followup-task-not-found': 404,
+  'followup-task-already-submitted': 409,
+  'followup-summary-not-found': 404,
+  'followup-summary-immutable': 409,
+  'agent-run-not-found': 404,
+  'agent-action-invalid': 400,
 }
 
 type AppContext = Context<{ Bindings: Env }>
@@ -325,6 +352,13 @@ app.post('/demo/reset', async (c) => {
   }
   const summary = await workspace(c).resetDemoClinic(currentWorkspaceName(c))
   return c.json<DemoResetResponse>(summary)
+})
+
+registerConnectedClinicRoutes(app, {
+  workspace,
+  currentWorkspaceName,
+  requireBearer,
+  refuse,
 })
 
 // --- Clinical HIS Routes (Phase 1 Outpatient MVP + Connected Clinic RBAC) ---

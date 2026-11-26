@@ -1,0 +1,48 @@
+<view class="page-pad">
+  <view class="demo-banner">模拟演示模式 · {{principal ? principal.displayName : '未登录'}} · 非真实临床诊疗服务</view>
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+
+  <view class="card">
+    <view class="card-title">门诊服务入口</view>
+    <view class="row" style="margin-bottom: 14rpx;">
+      <view class="btn-primary" style="flex: 1;" data-url="/pages/appointments/book/index" bindtap="goTo">预约挂号</view>
+      <view class="btn-secondary" style="flex: 1;" data-url="/pages/assistant/index" bindtap="goTo">AI 就医助手</view>
+    </view>
+    <view class="row">
+      <view class="btn-secondary" style="flex: 1;" data-url="/pages/records/index" bindtap="goTo">我的病历</view>
+      <view class="btn-secondary" style="flex: 1;" data-url="/pages/reports/index" bindtap="goTo">检查报告</view>
+      <view class="btn-secondary" style="flex: 1;" data-url="/pages/prescriptions/index" bindtap="goTo">我的处方</view>
+      <view class="btn-secondary" style="flex: 1;" data-url="/pages/followup/index" bindtap="goTo">随访计划</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="row" style="margin-bottom: 12rpx;">
+      <view class="card-title" style="margin-bottom: 0;">近期门诊预约</view>
+      <view class="muted" data-url="/pages/appointments/index" bindtap="goTo">查看全部 ›</view>
+    </view>
+    <view wx:if="{{appointments.length === 0}}" class="muted">暂无预约记录，可点击上方预约挂号或咨询 AI 助手。</view>
+    <view wx:for="{{appointments}}" wx:key="appointmentId" style="padding: 12rpx 0; border-top: 1rpx solid #e2e8f0;">
+      <view class="row">
+        <text>{{item.doctorName}} · {{item.departmentName}}</text>
+        <text class="badge">{{item.status}}</text>
+      </view>
+      <view class="muted">{{item.startsAt}}</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="row" style="margin-bottom: 12rpx;">
+      <view class="card-title" style="margin-bottom: 0;">院外随访计划</view>
+      <view class="muted" data-url="/pages/followup/index" bindtap="goTo">管理 ›</view>
+    </view>
+    <view wx:if="{{plans.length === 0}}" class="muted">暂无进行中的随访计划。</view>
+    <view wx:for="{{plans}}" wx:key="planId" data-url="/pages/followup/detail/index?planId={{item.planId}}" bindtap="goTo" style="padding: 12rpx 0; border-top: 1rpx solid #e2e8f0;">
+      <view class="row">
+        <text>{{item.title}}</text>
+        <text class="badge">{{item.status}}</text>
+      </view>
+      <view class="muted">负责医生：{{item.ownerStaffName}}</view>
+    </view>
+  </view>
+</view>

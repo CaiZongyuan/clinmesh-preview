@@ -1,0 +1,21 @@
+<view class="page-pad">
+  <view class="demo-banner">模拟演示环境 · 所有患者、病历与随访数据均为合成演示数据，非真实医疗服务</view>
+  <view class="card">
+    <view class="card-title">ClinMesh 互联门诊 · 患者端</view>
+    <view class="muted" style="margin-bottom: 20rpx;">首次登录需绑定演示邀请码，绑定后可查看本人已发布病历、预约挂号并与医护及 AI 助手协同。</view>
+
+    <view wx:if="{{error}}" class="error-box">{{error}}</view>
+
+    <view class="muted" style="margin-bottom: 8rpx;">演示邀请码</view>
+    <input class="input-box" value="{{inviteCode}}" placeholder="如 CLIN-A-2026" bindinput="onInviteInput" />
+
+    <view class="row" style="margin-bottom: 20rpx;">
+      <view class="btn-secondary" data-key="demo_pat_a" data-invite="CLIN-A-2026" bindtap="onSelectDemoPatient">患者A (李建国)</view>
+      <view class="btn-secondary" data-key="demo_pat_b" data-invite="CLIN-B-2026" bindtap="onSelectDemoPatient">患者B (陈志远)</view>
+      <view class="btn-secondary" data-key="demo_pat_c" data-invite="CLIN-C-2026" bindtap="onSelectDemoPatient">患者C (王秀英)</view>
+    </view>
+
+    <button class="btn-primary" loading="{{loading}}" bindtap="onLocalScriptedLogin" style="margin-bottom: 16rpx;">本地演示登录</button>
+    <button class="btn-secondary" loading="{{loading}}" bindtap="onWeChatLogin">微信 wx.login 登录</button>
+  </view>
+</view>

@@ -11,7 +11,10 @@
     "dev": "vite dev",
     "build": "vite build",
     "typecheck": "tsc -b",
+    "typecheck:miniapp": "npx --prefix apps/patient-miniapp tsc -p apps/patient-miniapp/tsconfig.json --noEmit",
     "test": "node scripts/test.mjs",
+    "verify:wukongim": "node scripts/verify-wukongim-live.mjs",
+    "verify:llm": "node scripts/verify-local-llm.mjs",
     "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts",
     "test:e2e": "pnpm build && playwright test"
   },

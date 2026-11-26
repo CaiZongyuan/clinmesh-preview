@@ -115,13 +115,22 @@ Run one seam with `pnpm test --project worker` or `pnpm test --project web`.
 - `infrastructure/wukongim/` Version-pinned WuKongIM `v2.2.5-20260422` Docker Compose & runbook.
 - `data/demo-clinic/` Deterministic synthetic fixtures for Connected Clinic demo seeding and reset.
 
-### Connected Clinic (Issue #45 — S0 & S1)
+### Connected Clinic (Issue #45 — S0–S8)
 
-Connected Clinic runs on the same Worker and `ClinicWorkspaceDO` SQLite runtime isolated by `CLINIC_MODE=connected` (namespace `connected-clinic`; Phase 1 simulation remains the default on `default`). See `docs/adr/0004-connected-clinic-s0-poc-and-stack.md`, `docs/adr/0005-connected-clinic-auth-and-workspace-isolation.md`, `.env.example`, and `infrastructure/wukongim/README.md`.
+Connected Clinic runs on the same Worker and `ClinicWorkspaceDO` SQLite runtime isolated by `CLINIC_MODE=connected` (namespace `connected-clinic`; Phase 1 simulation remains the default on `default`). See `docs/adr/0004-connected-clinic-s0-poc-and-stack.md`, `docs/adr/0005-connected-clinic-auth-and-workspace-isolation.md`, `docs/adr/0006-connected-clinic-messaging-agents-and-local-storage.md`, `.env.example`, and `infrastructure/wukongim/README.md`.
 
-- **Local WuKongIM**: `docker compose -f infrastructure/wukongim/docker-compose.yml up -d` (HTTP management API loopback-only on `127.0.0.1:15001`, WS on `127.0.0.1:15200`).
-- **Auth & Portal routes**: `POST /api/auth/wechat` (invite-code demo binding), `POST /api/auth/staff`, `GET /api/me`, `POST /api/auth/logout`, `GET /api/clinic/departments`, `GET /api/clinic/doctors`, `GET /api/contacts`, `GET /api/patient/records[/:id]`, `GET /api/patient/reports[/:id]`, `GET /api/patient/prescriptions`, and dev/test-only `POST /api/demo/reset` (`DEMO_RESET_ENABLED=true`).
-- **External real-device prerequisites**: WeChat MiniProgram AppID, public HTTPS/WSS domains, and iOS/Android physical devices are required before real-device P0 acceptance can be checked off.
+- **Local startup**:
+  1. Configure `.dev.vars` from `.env.example` (`CLINIC_MODE=connected`, `WECHAT_AUTH_MODE=scripted`, `DEMO_RESET_ENABLED=true`, `LLM_MODEL=zhipu/glm-5.3-flash`, `LLM_REASONING_EFFORT=off`, `LLM_EFFORT_STYLE=zhipu`, `BAILIAN_TOKEN`, `WUKONGIM_*`).
+  2. Start local WuKongIM: `docker compose -f infrastructure/wukongim/docker-compose.yml up -d` (HTTP management API loopback-only on `127.0.0.1:15001`, WS on `127.0.0.1:15200`).
+  3. Start HIS Web + Worker API: `pnpm dev` and open `http://localhost:5173/clinic` (demo staff accounts: `dr.wang` / `demo-doctor-a-pass`, `dr.lin` / `demo-doctor-b-pass`, `nurse.zhou` / `demo-nurse-n-pass`).
+  4. Open `apps/patient-miniapp/` in WeChat Developer Tools, run **工具 → 构建 npm**, disable domain check in local dev settings, and log in with demo invite codes (`CLIN-A-2026`, `CLIN-B-2026`, `CLIN-C-2026`).
+- **Demo reset**: `POST /api/demo/reset` (requires `DEMO_RESET_ENABLED=true`, local/test only) wipes sessions, appointments, conversations, attachments, and follow-up plans and re-seeds `data/demo-clinic/seed-manifest.json`.
+- **Verification commands**:
+  - `pnpm typecheck` & `pnpm typecheck:miniapp`
+  - `pnpm test` (includes `test/worker/connected-clinic-auth.test.ts`, `test/worker/connected-clinic-scenarios.test.ts` covering B01–B20, `test/worker/truth-isolation.test.ts`, `test/web/connected-clinic-shell.test.tsx`, and all Phase 1 suites)
+  - `pnpm verify:wukongim` (live WuKongIM v2.2.5 integration check: 100 bidirectional texts, 10 group messages, 64-bit `message_id`, `messagesync` sequence verification, `subscriber_remove` + `device_quit`, P50/P95 latency)
+  - `pnpm verify:llm` (live local LLM non-thinking smoke check)
+- **External real-device prerequisites**: Formal WeChat MiniProgram AppID/AppSecret, public HTTPS/WSS domains, and iOS/Android physical devices are still required before real-device P0/S8 sign-off.
 
 ### Browser verification
 

@@ -1,0 +1,44 @@
+<view class="page-pad">
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view wx:if="{{conversation}}" class="card">
+    <view class="row">
+      <view class="card-title" style="margin-bottom: 0;">{{conversation.title}}</view>
+      <view class="badge">{{conversation.status}}</view>
+    </view>
+  </view>
+
+  <button wx:if="{{nextCursor}}" class="btn-secondary" bindtap="onLoadOlder" style="margin-bottom: 16rpx;">加载更早历史消息</button>
+
+  <view wx:for="{{messages}}" wx:key="messageId" class="card">
+    <view class="muted">{{item.senderName}} · #{{item.sequence}}</view>
+    <block wx:for="{{item.parts}}" wx:for-item="part" wx:key="index">
+      <view wx:if="{{part.type === 'text'}}" style="margin-top: 8rpx;">{{part.text}}</view>
+      <view wx:if="{{part.type === 'audio'}}" style="margin-top: 8rpx;">
+        <view class="btn-secondary" data-id="{{part.attachmentId}}" bindtap="onPlayAudio">
+          播放语音 ({{part.durationMs / 1000}}s)
+        </view>
+      </view>
+      <view wx:if="{{part.type === 'card'}}" style="margin-top: 10rpx; padding: 14rpx; background: #f8fafc; border-radius: 10rpx;">
+        <view class="badge">{{part.component}}</view>
+        <view class="card-title" style="margin-top: 6rpx;">{{part.safeProps.title}}</view>
+        <view wx:for="{{part.actions}}" wx:for-item="act" wx:key="name" style="margin-top: 10rpx;">
+          <view class="btn-primary" data-action="{{act}}" bindtap="onCardAction">打开</view>
+        </view>
+      </view>
+    </block>
+  </view>
+
+  <view wx:if="{{conversation && conversation.status === 'active'}}" class="card">
+    <input class="input-box" value="{{inputText}}" placeholder="输入消息..." bindinput="onInput" />
+    <view class="row">
+      <view wx:if="{{conversation.type === 'followup_group'}}" class="btn-secondary" bindtap="onToggleMention">
+        {{mentionAgent ? '已 @随访助手' : '@随访助手'}}
+      </view>
+      <view class="btn-secondary" bindtap="{{recording ? 'onStopRecord' : 'onStartRecord'}}">
+        {{recording ? '停止并发送语音' : '录制语音'}}
+      </view>
+      <view class="btn-primary" style="flex: 1;" bindtap="onSendText">发送</view>
+    </view>
+  </view>
+  <view wx:elif="{{conversation}}" class="card muted">当前会话已设为只读，仅可查阅历史记录。</view>
+</view>

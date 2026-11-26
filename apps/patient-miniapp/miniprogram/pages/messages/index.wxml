@@ -1,0 +1,13 @@
+<view class="page-pad">
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view wx:if="{{conversations.length === 0 && !loading}}" class="card muted">暂无会话记录</view>
+  <view wx:for="{{conversations}}" wx:key="conversationId" class="card" data-id="{{item.conversationId}}" data-type="{{item.type}}" bindtap="openConversation">
+    <view class="row">
+      <view class="card-title" style="margin-bottom: 0;">{{item.title}}</view>
+      <view wx:if="{{item.unreadCount > 0}}" class="badge">{{item.unreadCount}} 未读</view>
+    </view>
+    <view class="muted" style="margin-top: 8rpx;">
+      {{item.status === 'read_only' ? '[只读] ' : ''}}{{item.lastMessagePreview || '点击查看会话'}}
+    </view>
+  </view>
+</view>

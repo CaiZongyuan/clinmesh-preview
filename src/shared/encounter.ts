@@ -1,5 +1,8 @@
+import type { AppointmentErrorCode } from './appointment'
 import type { AuthErrorCode } from './auth'
+import type { CommunicationErrorCode } from './communication'
 import type { CompletionGateId } from './completion'
+import type { FollowupErrorCode } from './followup'
 import type { Sex, VisitKind } from './golden-case-queue'
 
 export type EncounterStatus = 'active' | 'abandoned' | 'completed'
@@ -82,6 +85,8 @@ export interface EncounterView {
   personaVersion: string
   status: EncounterStatus
   practitionerId: string
+  patientId?: string | null
+  appointmentId?: string | null
   startedAt: string
   endedAt: string | null
   patient: BannerPatient
@@ -175,6 +180,9 @@ export type EncounterErrorCode =
   | 'copilot-bridge-required'
   | 'copilot-run-stopped'
   | AuthErrorCode
+  | AppointmentErrorCode
+  | CommunicationErrorCode
+  | FollowupErrorCode
 
 export interface EncounterError {
   code: EncounterErrorCode
