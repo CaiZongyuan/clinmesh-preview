@@ -78,6 +78,13 @@
       "skillPath": "skills/engineering/domain-modeling/SKILL.md",
       "computedHash": "b78689833404148c769077355e12dbe5ad996a158a1e21e58ddf169e439d9d8c"
     },
+    "ego-browser": {
+      "source": "citrolabs/ego-lite",
+      "commit": "56589ea8b98fd3b17a5d2316bfd8ff7b803d3293",
+      "sourceType": "github",
+      "skillPath": "skills/ego-browser/SKILL.md",
+      "computedHash": "1ec529626bfbbcdb4933063c180f230d49b37bd8080dc7757f12472ec3f285f7"
+    },
     "git-guardrails-claude-code": {
       "source": "mattpocock/skills",
       "commit": "abeeaf95660ba9e8b7c753eb38f441ca707a8823",
