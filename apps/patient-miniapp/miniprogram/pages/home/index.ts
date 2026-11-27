@@ -1,7 +1,7 @@
 import type { AppointmentView } from '../../../../../src/shared/appointment'
 import type { Principal } from '../../../../../src/shared/auth'
 import type { FollowupPlanView } from '../../../../../src/shared/followup'
-import { ensureLoggedInOrRedirect, getStoredPrincipal } from '../../services/auth'
+import { ensureDevPatientSession, ensureLoggedInOrRedirect, getStoredPrincipal } from '../../services/auth'
 import { hisApi } from '../../services/his-api'
 import { imClient } from '../../services/im-client'
 
@@ -15,7 +15,8 @@ Page({
   },
 
   async onShow() {
-    if (!ensureLoggedInOrRedirect()) return
+    const ok = (await ensureDevPatientSession()) || ensureLoggedInOrRedirect()
+    if (!ok) return
     this.setData({ principal: getStoredPrincipal(), loading: true, error: '' })
     try {
       const [me, appointments, plans] = await Promise.all([

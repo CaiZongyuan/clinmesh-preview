@@ -34,6 +34,8 @@ import type {
 } from '../shared/medication'
 
 const STAFF_TOKEN_KEY = 'clinmesh.staff.token'
+const AUTO_DEV_STAFF_AUTH = import.meta.env.DEV && import.meta.env.MODE !== 'test'
+let pendingDevStaffLogin: Promise<string | null> | null = null
 
 export function getStaffToken(): string | null {
   try {
@@ -51,15 +53,51 @@ export function setStaffToken(token: string | null): void {
   } catch {}
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getStaffToken()
-  let nextInit = init
-  if (token) {
-    const headers = new Headers(init?.headers)
-    if (!headers.has('authorization')) headers.set('authorization', `Bearer ${token}`)
-    nextInit = { ...init, headers }
+// In local `pnpm dev`, transparently bootstrap the demo doctor session so `/` and `/clinic` open without a login wall.
+export async function ensureDevStaffToken(forceRefresh = false): Promise<string | null> {
+  if (!AUTO_DEV_STAFF_AUTH) return getStaffToken()
+  const existing = getStaffToken()
+  if (existing && !forceRefresh) return existing
+  if (!pendingDevStaffLogin) {
+    pendingDevStaffLogin = (async () => {
+      try {
+        const res = await fetch('/api/auth/staff', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username: 'dr.wang', password: 'demo-doctor-a-pass' }),
+        })
+        if (!res.ok) return null
+        const data = (await res.json()) as { token?: string }
+        if (typeof data.token === 'string' && data.token) {
+          setStaffToken(data.token)
+          return data.token
+        }
+        return null
+      } catch {
+        return null
+      } finally {
+        pendingDevStaffLogin = null
+      }
+    })()
   }
-  const response = await fetch(path, nextInit)
+  return pendingDevStaffLogin
+}
+
+function withStaffAuth(init: RequestInit | undefined, token: string | null): RequestInit | undefined {
+  if (!token) return init
+  const headers = new Headers(init?.headers)
+  if (!headers.has('authorization')) headers.set('authorization', `Bearer ${token}`)
+  return { ...init, headers }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response = await fetch(path, withStaffAuth(init, getStaffToken()))
+  if (response.status === 401 && AUTO_DEV_STAFF_AUTH) {
+    const devToken = await ensureDevStaffToken(true)
+    if (devToken) {
+      response = await fetch(path, withStaffAuth(init, devToken))
+    }
+  }
   const body: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     throw new Error((body as Partial<ErrorResponse> | null)?.error?.message ?? `请求失败（HTTP ${response.status}）`)

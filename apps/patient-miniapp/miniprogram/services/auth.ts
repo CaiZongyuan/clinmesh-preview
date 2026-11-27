@@ -87,6 +87,25 @@ export function logoutAndClear(): Promise<void> {
   })
 }
 
+export function isLocalDevMiniapp(): boolean {
+  try {
+    return wx.getAccountInfoSync().miniProgram.envVersion !== 'release'
+  } catch {
+    return true
+  }
+}
+
+export async function ensureDevPatientSession(): Promise<boolean> {
+  if (getStoredToken()) return true
+  if (!isLocalDevMiniapp()) return false
+  try {
+    await loginWithWeChatCode('wx-code:dev_pat_01', 'CLIN-A-2026')
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function ensureLoggedInOrRedirect(): boolean {
   if (getStoredToken()) return true
   wx.reLaunch({ url: '/pages/login/index' })

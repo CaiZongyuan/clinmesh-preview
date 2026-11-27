@@ -41,15 +41,26 @@ import type {
   FollowupSummaryView,
   ReviewFollowupSummaryRequest,
 } from '../../shared/followup'
-import { getStaffToken, setStaffToken } from '../api'
+import { ensureDevStaffToken, getStaffToken, setStaffToken } from '../api'
 
-async function clinicFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getStaffToken()
+const AUTO_DEV_STAFF_AUTH = import.meta.env.DEV && import.meta.env.MODE !== 'test'
+
+function buildClinicHeaders(init: RequestInit | undefined, token: string | null): Headers {
   const headers = new Headers(init?.headers)
   if (token && !headers.has('authorization')) {
     headers.set('authorization', `Bearer ${token}`)
   }
-  const response = await fetch(path, { ...init, headers })
+  return headers
+}
+
+async function clinicFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  let response = await fetch(path, { ...init, headers: buildClinicHeaders(init, getStaffToken()) })
+  if (response.status === 401 && AUTO_DEV_STAFF_AUTH && path !== '/api/auth/staff' && path !== '/api/auth/logout') {
+    const devToken = await ensureDevStaffToken(true)
+    if (devToken) {
+      response = await fetch(path, { ...init, headers: buildClinicHeaders(init, devToken) })
+    }
+  }
   const body: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     throw new Error((body as Partial<ErrorResponse> | null)?.error?.message ?? `请求失败（HTTP ${response.status}）`)

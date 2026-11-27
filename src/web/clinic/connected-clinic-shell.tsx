@@ -31,6 +31,7 @@ import './connected-clinic-shell.css'
 type ClinicSection = 'dashboard' | 'appointments' | 'patients' | 'messages' | 'followup' | 'runs'
 
 const SHOW_DEMO_CONTROLS = import.meta.env.DEV || import.meta.env.MODE === 'test'
+const AUTO_DEV_STAFF_AUTH = import.meta.env.DEV && import.meta.env.MODE !== 'test'
 
 function formatShanghaiTime(iso: string): string {
   const date = new Date(iso)
@@ -88,7 +89,12 @@ export function ConnectedClinicShell() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const me = await fetchCurrentPrincipal()
+      let me = await fetchCurrentPrincipal()
+      if (!me && AUTO_DEV_STAFF_AUTH) {
+        me = await loginStaffAccount('dr.wang', 'demo-doctor-a-pass')
+          .then((session) => session.principal)
+          .catch(() => null)
+      }
       if (cancelled) return
       setPrincipal(me)
       setLoadingAuth(false)
@@ -334,9 +340,23 @@ export function ConnectedClinicShell() {
             刷新数据
           </Button>
           {SHOW_DEMO_CONTROLS ? (
-            <Button className="cc-btn cc-btn-danger" disabled={busy} onClick={() => void handleResetDemo()}>
-              重置演示数据
-            </Button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>快捷切换演示身份</span>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+                <Button className="cc-btn" disabled={busy} onClick={() => void handleLogin('dr.wang', 'demo-doctor-a-pass')}>
+                  王明
+                </Button>
+                <Button className="cc-btn" disabled={busy} onClick={() => void handleLogin('dr.lin', 'demo-doctor-b-pass')}>
+                  林悦
+                </Button>
+                <Button className="cc-btn" disabled={busy} onClick={() => void handleLogin('nurse.zhou', 'demo-nurse-n-pass')}>
+                  周岚
+                </Button>
+              </div>
+              <Button className="cc-btn cc-btn-danger" disabled={busy} onClick={() => void handleResetDemo()}>
+                重置演示数据
+              </Button>
+            </div>
           ) : null}
           <Button className="cc-btn" onClick={() => void handleLogout()}>
             退出登录
