@@ -33,8 +33,71 @@ import type {
   PrescriptionsView,
 } from '../shared/medication'
 
+const STAFF_TOKEN_KEY = 'clinmesh.staff.token'
+const AUTO_DEV_STAFF_AUTH = import.meta.env.DEV && import.meta.env.MODE !== 'test'
+let pendingDevStaffLogin: Promise<string | null> | null = null
+
+export function getStaffToken(): string | null {
+  try {
+    return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STAFF_TOKEN_KEY) : null
+  } catch {
+    return null
+  }
+}
+
+export function setStaffToken(token: string | null): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    if (token) sessionStorage.setItem(STAFF_TOKEN_KEY, token)
+    else sessionStorage.removeItem(STAFF_TOKEN_KEY)
+  } catch {}
+}
+
+// In local `pnpm dev`, transparently bootstrap the demo doctor session so `/` and `/clinic` open without a login wall.
+export async function ensureDevStaffToken(forceRefresh = false): Promise<string | null> {
+  if (!AUTO_DEV_STAFF_AUTH) return getStaffToken()
+  const existing = getStaffToken()
+  if (existing && !forceRefresh) return existing
+  if (!pendingDevStaffLogin) {
+    pendingDevStaffLogin = (async () => {
+      try {
+        const res = await fetch('/api/auth/staff', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ username: 'dr.wang', password: 'demo-doctor-a-pass' }),
+        })
+        if (!res.ok) return null
+        const data = (await res.json()) as { token?: string }
+        if (typeof data.token === 'string' && data.token) {
+          setStaffToken(data.token)
+          return data.token
+        }
+        return null
+      } catch {
+        return null
+      } finally {
+        pendingDevStaffLogin = null
+      }
+    })()
+  }
+  return pendingDevStaffLogin
+}
+
+function withStaffAuth(init: RequestInit | undefined, token: string | null): RequestInit | undefined {
+  if (!token) return init
+  const headers = new Headers(init?.headers)
+  if (!headers.has('authorization')) headers.set('authorization', `Bearer ${token}`)
+  return { ...init, headers }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  let response = await fetch(path, withStaffAuth(init, getStaffToken()))
+  if (response.status === 401 && AUTO_DEV_STAFF_AUTH) {
+    const devToken = await ensureDevStaffToken(true)
+    if (devToken) {
+      response = await fetch(path, withStaffAuth(init, devToken))
+    }
+  }
   const body: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     throw new Error((body as Partial<ErrorResponse> | null)?.error?.message ?? `请求失败（HTTP ${response.status}）`)
@@ -158,9 +221,15 @@ export async function fetchVoiceConfig(): Promise<VoiceConfigResponse> {
   return request<VoiceConfigResponse>('/api/voice')
 }
 
-export function openVoiceSocket(encounterId: string): WebSocket {
+function wsUrl(path: string): string {
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/voice`)
+  const token = getStaffToken()
+  const suffix = token ? `?token=${encodeURIComponent(token)}` : ''
+  return `${scheme}//${location.host}${path}${suffix}`
+}
+
+export function openVoiceSocket(encounterId: string): WebSocket {
+  return new WebSocket(wsUrl(`${encounterPath(encounterId)}/voice`))
 }
 
 export async function retryPatientTurn(encounterId: string, turnId: string): Promise<ConsultationTurn> {
@@ -172,7 +241,11 @@ export async function retryPatientTurn(encounterId: string, turnId: string): Pro
 // synthesis task, so a cancelled playback or a navigation does not leave a late job running.
 export async function synthesizePatientSpeech(encounterId: string, turnId: string, text: string, signal: AbortSignal): Promise<ArrayBuffer> {
   const path = `${encounterPath(encounterId)}/consultation/patient-turns/${encodeURIComponent(turnId)}/speech`
-  const response = await fetch(path, { ...post({ text }), signal })
+  const token = getStaffToken()
+  const init = post({ text })
+  const headers = new Headers(init.headers)
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  const response = await fetch(path, { ...init, headers, signal })
   if (!response.ok) throw new Error(((await response.json().catch(() => null)) as ErrorResponse | null)?.error.message ?? '语音合成失败')
   return response.arrayBuffer()
 }
@@ -232,8 +305,7 @@ export async function recordNoMedication(encounterId: string): Promise<Prescript
 }
 
 export function openPatientSocket(encounterId: string): WebSocket {
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/patient/socket`)
+  return new WebSocket(wsUrl(`${encounterPath(encounterId)}/patient/socket`))
 }
 
 // The Clinical Copilot: commands go over HTTP, its events stream over its socket.
@@ -297,8 +369,7 @@ export function compactCopilot(encounterId: string): Promise<CopilotCompactRespo
 }
 
 export function openCopilotSocket(encounterId: string, channel: 'socket' | 'bridge' = 'socket'): WebSocket {
-  const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return new WebSocket(`${scheme}//${location.host}${encounterPath(encounterId)}/copilot/${channel}`)
+  return new WebSocket(wsUrl(`${encounterPath(encounterId)}/copilot/${channel}`))
 }
 
 export function setCopilotAutomaticAnalysis(encounterId: string, enabled: boolean) {

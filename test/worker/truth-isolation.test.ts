@@ -21,6 +21,7 @@ interface ProbeContext {
   pendingInvestigationId: string
   copilotTurnId: string | null
   patientToken: string | null
+  staffToken: string | null
   logoutToken: string | null
 }
 
@@ -95,7 +96,13 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
     const response = await request('POST', '/api/auth/staff', { username: 'dr.wang', password: 'demo-doctor-a-pass' })
     if (response.ok) {
       const cloned = (await response.clone().json()) as { token?: string }
-      if (cloned.token) ctx.logoutToken = cloned.token
+      if (cloned.token) {
+        ctx.staffToken = cloned.token
+        if (!ctx.logoutToken) {
+          const second = await request('POST', '/api/auth/staff', { username: 'dr.lin', password: 'demo-doctor-b-pass' })
+          if (second.ok) ctx.logoutToken = ((await second.json()) as { token?: string }).token ?? null
+        }
+      }
     }
     return response
   },
@@ -110,6 +117,60 @@ const probes: Record<string, (ctx: ProbeContext) => Promise<Response>> = {
   'GET /api/patient/reports/:id': ({ patientToken }) => request('GET', '/api/patient/reports/rel_rep_pat01_v1', undefined, patientToken),
   'GET /api/patient/prescriptions': ({ patientToken }) => request('GET', '/api/patient/prescriptions', undefined, patientToken),
   'POST /api/demo/reset': () => request('POST', '/api/demo/reset'),
+  'GET /api/appointments/slots': ({ patientToken }) => request('GET', '/api/appointments/slots', undefined, patientToken),
+  'POST /api/appointments': ({ patientToken }) =>
+    request('POST', '/api/appointments', { slotId: 'slot_wang_d1_01', clientRequestId: 'truth-probe-appt' }, patientToken),
+  'GET /api/patient/appointments': ({ patientToken }) => request('GET', '/api/patient/appointments', undefined, patientToken),
+  'POST /api/appointments/:id/cancel': ({ patientToken }) => request('POST', '/api/appointments/nonexistent/cancel', undefined, patientToken),
+  'GET /api/staff/appointments': ({ staffToken }) => request('GET', '/api/staff/appointments', undefined, staffToken),
+  'POST /api/appointments/:id/check-in': ({ staffToken }) => request('POST', '/api/appointments/nonexistent/check-in', undefined, staffToken),
+  'POST /api/appointments/:id/start-encounter': ({ staffToken }) => request('POST', '/api/appointments/nonexistent/start-encounter', {}, staffToken),
+  'GET /api/staff/patients': ({ staffToken }) => request('GET', '/api/staff/patients', undefined, staffToken),
+  'POST /api/staff/releases': ({ staffToken, encounterId }) =>
+    request('POST', '/api/staff/releases', { encounterId, resourceType: 'clinical_note' }, staffToken),
+  'POST /api/staff/releases/:id/retract': ({ staffToken }) => request('POST', '/api/staff/releases/nonexistent/retract', undefined, staffToken),
+  'GET /api/staff/encounters/:encounterId/releases': ({ staffToken, encounterId }) =>
+    request('GET', `/api/staff/encounters/${encounterId}/releases`, undefined, staffToken),
+  'GET /api/im/credentials': ({ patientToken }) => request('GET', '/api/im/credentials', undefined, patientToken),
+  'GET /api/conversations': ({ patientToken }) => request('GET', '/api/conversations', undefined, patientToken),
+  'POST /api/conversations': ({ patientToken }) =>
+    request('POST', '/api/conversations', { type: 'patient_assistant', memberActorIds: ['actor_agent_patient_svc'] }, patientToken),
+  'GET /api/conversations/:id': ({ patientToken }) => request('GET', '/api/conversations/conv_pat01_assistant', undefined, patientToken),
+  'GET /api/conversations/:id/members': ({ patientToken }) => request('GET', '/api/conversations/conv_pat01_assistant/members', undefined, patientToken),
+  'POST /api/conversations/:id/members': ({ staffToken }) =>
+    request('POST', '/api/conversations/conv_dept_general_group/members', { actorId: 'actor_agent_followup' }, staffToken),
+  'DELETE /api/conversations/:id/members/:actorId': ({ staffToken }) =>
+    request('DELETE', '/api/conversations/conv_dept_general_group/members/actor_agent_followup', undefined, staffToken),
+  'POST /api/conversations/:id/messages': ({ staffToken }) =>
+    request('POST', '/api/conversations/conv_dept_general_group/messages', {
+      clientMessageId: 'truth-probe-msg',
+      parts: [{ type: 'text', text: '交班同步' }],
+    }, staffToken),
+  'GET /api/conversations/:id/messages': ({ staffToken }) => request('GET', '/api/conversations/conv_dept_general_group/messages', undefined, staffToken),
+  'POST /api/conversations/:id/read': ({ staffToken }) =>
+    request('POST', '/api/conversations/conv_dept_general_group/read', { lastReadSeq: 1 }, staffToken),
+  'POST /api/attachments/init': ({ staffToken }) =>
+    request('POST', '/api/attachments/init', { conversationId: 'conv_dept_general_group', kind: 'image', mime: 'image/png', size: 12 }, staffToken),
+  'PUT /api/attachments/:id/upload': ({ staffToken }) => request('PUT', '/api/attachments/nonexistent/upload', 'abc', staffToken),
+  'POST /api/attachments/:id/complete': ({ staffToken }) => request('POST', '/api/attachments/nonexistent/complete', {}, staffToken),
+  'GET /api/attachments/:id/access': ({ staffToken }) => request('GET', '/api/attachments/nonexistent/access', undefined, staffToken),
+  'GET /api/attachments/:id/content': () => request('GET', '/api/attachments/nonexistent/content?exp=1&sig=bad'),
+  'POST /api/agent/conversations/:id/runs': ({ staffToken }) =>
+    request('POST', '/api/agent/conversations/conv_dept_general_group/runs', { text: '测试' }, staffToken),
+  'GET /api/agent/runs/:id': ({ staffToken }) => request('GET', '/api/agent/runs/nonexistent', undefined, staffToken),
+  'GET /api/agent/runs/:id/socket': ({ staffToken }) => request('GET', '/api/agent/runs/nonexistent/socket', undefined, staffToken),
+  'POST /api/agent/runs/:id/stop': ({ staffToken }) => request('POST', '/api/agent/runs/nonexistent/stop', undefined, staffToken),
+  'POST /api/agent/runs/:id/actions/:callId/result': ({ staffToken }) =>
+    request('POST', '/api/agent/runs/nonexistent/actions/c1/result', { status: 'unavailable' }, staffToken),
+  'POST /api/followup/plans': ({ staffToken }) =>
+    request('POST', '/api/followup/plans', { patientId: 'pat_01', title: '探针随访' }, staffToken),
+  'GET /api/followup/plans': ({ staffToken }) => request('GET', '/api/followup/plans', undefined, staffToken),
+  'GET /api/followup/plans/:id': ({ staffToken }) => request('GET', '/api/followup/plans/plan_demo_pat01', undefined, staffToken),
+  'POST /api/followup/tasks/:id/responses': ({ patientToken }) =>
+    request('POST', '/api/followup/tasks/nonexistent/responses', { answers: { ok: 'yes' }, idempotencyKey: 'probe-k' }, patientToken),
+  'POST /api/followup/summaries/:id/review': ({ staffToken }) =>
+    request('POST', '/api/followup/summaries/nonexistent/review', { decision: 'approved' }, staffToken),
+  'POST /api/followup/plans/:id/close': ({ staffToken }) => request('POST', '/api/followup/plans/nonexistent/close', undefined, staffToken),
   'PUT /api/encounters/:encounterId/investigations/draft': ({ encounterId }) =>
     request('PUT', `/api/encounters/${encounterId}/investigations/draft`, { entries: ['pct'] }),
   'PUT /api/encounters/:encounterId/prescriptions/draft': ({ encounterId }) =>
@@ -399,6 +460,7 @@ describe('Case Truth isolation over HTTP', () => {
       pendingInvestigationId: crp.investigationId,
       copilotTurnId: null,
       patientToken: null,
+      staffToken: null,
       logoutToken: null,
     }
     await probeEveryRoute(ctx, 'Report version 1 released', { keepActive: true })

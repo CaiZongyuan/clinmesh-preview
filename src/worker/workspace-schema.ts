@@ -334,6 +334,185 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE encounter ADD COLUMN patient_id TEXT;
    ALTER TABLE encounter ADD COLUMN appointment_id TEXT;
    CREATE UNIQUE INDEX encounter_by_appointment ON encounter (appointment_id) WHERE appointment_id IS NOT NULL;`,
+  // Connected Clinic S2/S4/S5/S7: appointments, conversations, membership, reliable send_command/outbox,
+  // local attachment storage, and follow-up plans/tasks/responses/summaries.
+  `CREATE TABLE appointment (
+     appointment_id TEXT PRIMARY KEY,
+     patient_id TEXT NOT NULL REFERENCES patient_profile (patient_id),
+     slot_id TEXT NOT NULL REFERENCES appointment_slot (slot_id),
+     doctor_id TEXT NOT NULL REFERENCES staff_profile (staff_id),
+     department_id TEXT NOT NULL REFERENCES clinic_department (department_id),
+     status TEXT NOT NULL CHECK (status IN ('booked', 'checked_in', 'in_encounter', 'completed', 'cancelled')),
+     client_request_id TEXT NOT NULL,
+     encounter_id TEXT,
+     chief_complaint TEXT,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL,
+     cancelled_at TEXT,
+     UNIQUE (patient_id, client_request_id)
+   );
+   CREATE UNIQUE INDEX appointment_active_patient_slot
+     ON appointment (patient_id, slot_id)
+     WHERE status IN ('booked', 'checked_in', 'in_encounter');
+   CREATE INDEX appointment_by_slot ON appointment (slot_id, status);
+   CREATE INDEX appointment_by_doctor ON appointment (doctor_id, created_at);
+
+   CREATE TABLE conversation (
+     conversation_id TEXT PRIMARY KEY,
+     type TEXT NOT NULL CHECK (type IN ('patient_assistant', 'patient_doctor', 'staff_direct', 'staff_group', 'followup_group')),
+     title TEXT NOT NULL,
+     im_channel_id TEXT NOT NULL UNIQUE,
+     im_channel_type INTEGER NOT NULL DEFAULT 2,
+     direct_key TEXT UNIQUE,
+     patient_id TEXT,
+     encounter_id TEXT,
+     followup_plan_id TEXT,
+     department_id TEXT,
+     status TEXT NOT NULL CHECK (status IN ('provisioning', 'active', 'read_only', 'archived')),
+     membership_version INTEGER NOT NULL DEFAULT 1,
+     created_by TEXT NOT NULL REFERENCES actor (actor_id),
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );
+   CREATE TABLE conversation_member (
+     conversation_id TEXT NOT NULL REFERENCES conversation (conversation_id),
+     actor_id TEXT NOT NULL REFERENCES actor (actor_id),
+     role TEXT NOT NULL CHECK (role IN ('owner', 'member', 'agent')),
+     status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'removed')),
+     joined_at TEXT NOT NULL,
+     removed_at TEXT,
+     last_read_seq INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (conversation_id, actor_id)
+   );
+   CREATE INDEX conversation_member_by_actor ON conversation_member (actor_id, status);
+
+   CREATE TABLE send_command (
+     command_id TEXT PRIMARY KEY,
+     conversation_id TEXT NOT NULL REFERENCES conversation (conversation_id),
+     client_message_id TEXT NOT NULL,
+     actor_id TEXT NOT NULL REFERENCES actor (actor_id),
+     payload_json TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('pending', 'sending', 'sent', 'failed')),
+     attempts INTEGER NOT NULL DEFAULT 0,
+     external_message_id TEXT,
+     sequence INTEGER,
+     last_error TEXT,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL,
+     UNIQUE (conversation_id, client_message_id)
+   );
+   CREATE TABLE im_message_mirror (
+     message_id TEXT PRIMARY KEY,
+     client_message_id TEXT NOT NULL,
+     conversation_id TEXT NOT NULL REFERENCES conversation (conversation_id),
+     sequence INTEGER NOT NULL,
+     sender_actor_id TEXT NOT NULL REFERENCES actor (actor_id),
+     sender_kind TEXT NOT NULL CHECK (sender_kind IN ('human', 'agent', 'system')),
+     payload_json TEXT NOT NULL,
+     agent_run_id TEXT,
+     created_at TEXT NOT NULL,
+     UNIQUE (conversation_id, sequence),
+     UNIQUE (conversation_id, client_message_id)
+   );
+   CREATE TABLE im_user_token (
+     actor_id TEXT PRIMARY KEY REFERENCES actor (actor_id),
+     im_uid TEXT NOT NULL,
+     token TEXT NOT NULL,
+     version INTEGER NOT NULL DEFAULT 1,
+     updated_at TEXT NOT NULL
+   );
+
+   CREATE TABLE attachment (
+     attachment_id TEXT PRIMARY KEY,
+     owner_actor_id TEXT NOT NULL REFERENCES actor (actor_id),
+     conversation_id TEXT NOT NULL REFERENCES conversation (conversation_id),
+     kind TEXT NOT NULL CHECK (kind IN ('audio', 'image')),
+     mime TEXT NOT NULL,
+     size INTEGER NOT NULL,
+     duration_ms INTEGER,
+     status TEXT NOT NULL CHECK (status IN ('pending', 'uploaded', 'ready', 'rejected')),
+     hash TEXT,
+     transcript_status TEXT NOT NULL DEFAULT 'none' CHECK (transcript_status IN ('none', 'pending', 'ready', 'failed', 'unavailable')),
+     transcript_text TEXT,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );
+   CREATE TABLE attachment_blob (
+     attachment_id TEXT PRIMARY KEY REFERENCES attachment (attachment_id),
+     data_base64 TEXT NOT NULL
+   );
+
+   CREATE TABLE followup_plan (
+     plan_id TEXT PRIMARY KEY,
+     patient_id TEXT NOT NULL REFERENCES patient_profile (patient_id),
+     encounter_id TEXT,
+     owner_staff_id TEXT NOT NULL REFERENCES staff_profile (staff_id),
+     title TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('active', 'completed', 'cancelled')),
+     conversation_id TEXT,
+     start_at TEXT NOT NULL,
+     end_at TEXT,
+     created_at TEXT NOT NULL,
+     closed_at TEXT
+   );
+   CREATE TABLE followup_task (
+     task_id TEXT PRIMARY KEY,
+     plan_id TEXT NOT NULL REFERENCES followup_plan (plan_id),
+     kind TEXT NOT NULL,
+     title TEXT NOT NULL,
+     due_at TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('pending', 'submitted', 'reviewed')),
+     questionnaire_version INTEGER NOT NULL DEFAULT 1,
+     schema_json TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   );
+   CREATE TABLE followup_response (
+     response_id TEXT PRIMARY KEY,
+     task_id TEXT NOT NULL REFERENCES followup_task (task_id),
+     plan_id TEXT NOT NULL REFERENCES followup_plan (plan_id),
+     patient_id TEXT NOT NULL REFERENCES patient_profile (patient_id),
+     payload_json TEXT NOT NULL,
+     idempotency_key TEXT NOT NULL,
+     submitted_at TEXT NOT NULL,
+     UNIQUE (task_id, patient_id),
+     UNIQUE (patient_id, idempotency_key)
+   );
+   CREATE TABLE followup_summary (
+     summary_id TEXT PRIMARY KEY,
+     plan_id TEXT NOT NULL REFERENCES followup_plan (plan_id),
+     version INTEGER NOT NULL,
+     source_response_ids_json TEXT NOT NULL,
+     draft_text TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'rejected')),
+     created_by TEXT NOT NULL REFERENCES actor (actor_id),
+     reviewed_by TEXT REFERENCES actor (actor_id),
+     reviewed_at TEXT,
+     review_note TEXT,
+     created_at TEXT NOT NULL,
+     UNIQUE (plan_id, version)
+   );
+   CREATE TABLE review_task (
+     review_task_id TEXT PRIMARY KEY,
+     plan_id TEXT NOT NULL REFERENCES followup_plan (plan_id),
+     source_ref TEXT NOT NULL,
+     reason TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
+     created_by TEXT NOT NULL REFERENCES actor (actor_id),
+     created_at TEXT NOT NULL,
+     UNIQUE (plan_id, source_ref)
+   );
+   CREATE TABLE agent_run_index (
+     run_id TEXT PRIMARY KEY,
+     agent_kind TEXT NOT NULL CHECK (agent_kind IN ('patient_service', 'followup')),
+     do_name TEXT NOT NULL,
+     conversation_id TEXT NOT NULL REFERENCES conversation (conversation_id),
+     trigger_actor_id TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   );
+   CREATE TABLE workspace_state (
+     key TEXT PRIMARY KEY,
+     value TEXT NOT NULL
+   );`,
 ]
 
 export function migrateWorkspaceSchema(sql: SqlStorage): void {

@@ -7,6 +7,8 @@ type EncounterRow = {
   case_version: string
   persona_version: string
   practitioner_id: string
+  patient_id: string | null
+  appointment_id: string | null
   status: EncounterStatus
   started_at: string
   ended_at: string | null
@@ -30,7 +32,13 @@ const notFound = (encounterId: string) =>
 export class EncounterRepository {
   constructor(private readonly sql: SqlStorage) {}
 
-  start(caseId: string, chart: EncounterChart, practitionerId: string, now: string): EncounterResult {
+  start(
+    caseId: string,
+    chart: EncounterChart,
+    practitionerId: string,
+    now: string,
+    links?: { patientId?: string; appointmentId?: string },
+  ): EncounterResult {
     const active = this.active()
     if (active) {
       return refuse({
@@ -41,9 +49,18 @@ export class EncounterRepository {
     const encounterId = crypto.randomUUID()
     const { caseVersion, personaVersion, ...visibleChart } = chart
     this.sql.exec(
-      `INSERT INTO encounter (encounter_id, case_id, case_version, persona_version, practitioner_id, status, started_at, visible_chart)
-       VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-      encounterId, caseId, caseVersion, personaVersion, practitionerId, now, JSON.stringify(visibleChart),
+      `INSERT INTO encounter (
+         encounter_id, case_id, case_version, persona_version, practitioner_id, patient_id, appointment_id, status, started_at, visible_chart
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+      encounterId,
+      caseId,
+      caseVersion,
+      personaVersion,
+      practitionerId,
+      links?.patientId ?? null,
+      links?.appointmentId ?? null,
+      now,
+      JSON.stringify(visibleChart),
     )
     this.audit(encounterId, 'encounter-started', practitionerId, now)
     return { ok: true, encounter: this.find(encounterId)! }
@@ -133,6 +150,8 @@ function toView(row: EncounterRow): EncounterView {
     personaVersion: row.persona_version,
     status: row.status,
     practitionerId: row.practitioner_id,
+    ...(row.patient_id ? { patientId: row.patient_id } : {}),
+    ...(row.appointment_id ? { appointmentId: row.appointment_id } : {}),
     startedAt: row.started_at,
     endedAt: row.ended_at,
     ...(JSON.parse(row.visible_chart) as Pick<EncounterView, 'patient' | 'triage' | 'visibleSourceHistory'>),

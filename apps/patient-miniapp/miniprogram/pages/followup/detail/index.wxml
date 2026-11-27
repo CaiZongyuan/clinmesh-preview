@@ -1,0 +1,26 @@
+<view class="page-pad">
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view wx:if="{{plan}}" class="card">
+    <view class="row">
+      <view class="card-title" style="margin-bottom: 0;">{{plan.title}}</view>
+      <view class="badge">{{plan.status}}</view>
+    </view>
+    <view class="muted" style="margin: 8rpx 0 14rpx;">负责医生：{{plan.ownerStaffName}}</view>
+    <button wx:if="{{plan.conversationId}}" class="btn-secondary" bindtap="openGroup">进入随访群</button>
+  </view>
+
+  <view wx:if="{{plan}}" wx:for="{{plan.tasks}}" wx:key="taskId" class="card">
+    <view class="row">
+      <view class="card-title" style="margin-bottom: 0;">{{item.title}}</view>
+      <view class="badge">{{item.status}}</view>
+    </view>
+    <view wx:if="{{item.status === 'pending' && plan.status === 'active'}}" style="margin-top: 14rpx;">
+      <view class="muted" style="margin-bottom: 6rpx;">居家体温/血压</view>
+      <input class="input-box" value="{{measurement}}" placeholder="如 126/78 mmHg" bindinput="onMeasurementInput" />
+      <view class="muted" style="margin-bottom: 6rpx;">补充说明</view>
+      <input class="input-box" value="{{notes}}" placeholder="可选" bindinput="onNotesInput" />
+      <button class="btn-primary" loading="{{submitting}}" data-task-id="{{item.taskId}}" bindtap="onSubmitTask">确认提交随访问卷</button>
+    </view>
+    <view wx:elif="{{item.response}}" class="muted" style="margin-top: 10rpx;">已于 {{item.response.submittedAt}} 提交反馈。</view>
+  </view>
+</view>

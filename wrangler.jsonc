@@ -12,14 +12,18 @@
       { "name": "CLINIC_WORKSPACE", "class_name": "ClinicWorkspaceDO" },
       { "name": "SIMULATED_PATIENT", "class_name": "SimulatedPatientDO" },
       { "name": "CLINICAL_COPILOT", "class_name": "ClinicalCopilotDO" },
-      { "name": "CONSULTATION_VOICE", "class_name": "ConsultationVoiceAgent" }
+      { "name": "CONSULTATION_VOICE", "class_name": "ConsultationVoiceAgent" },
+      { "name": "PATIENT_SERVICE_AGENT", "class_name": "PatientServiceAgentDO" },
+      { "name": "FOLLOWUP_AGENT", "class_name": "FollowUpAgentDO" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["ClinicWorkspaceDO"] },
     { "tag": "v2", "new_sqlite_classes": ["SimulatedPatientDO"] },
     { "tag": "v3", "new_sqlite_classes": ["ClinicalCopilotDO"] },
-    { "tag": "v4", "new_sqlite_classes": ["ConsultationVoiceAgent"] }
+    { "tag": "v4", "new_sqlite_classes": ["ConsultationVoiceAgent"] },
+    { "tag": "v5", "new_sqlite_classes": ["PatientServiceAgentDO"] },
+    { "tag": "v6", "new_sqlite_classes": ["FollowUpAgentDO"] }
   ],
   // LLM_API_KEY and BAILIAN_TOKEN are secrets: put them in .dev.vars locally (see README), never here.
   "vars": {

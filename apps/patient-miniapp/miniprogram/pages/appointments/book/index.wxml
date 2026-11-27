@@ -1,0 +1,18 @@
+<view class="page-pad">
+  <view wx:if="{{error}}" class="error-box">{{error}}</view>
+  <view class="card">
+    <view class="card-title">选择门诊号源（须患者本人确认提交）</view>
+    <view wx:for="{{slots}}" wx:key="slotId" data-id="{{item.slotId}}" bindtap="onSelectSlot" style="padding: 16rpx; margin-bottom: 12rpx; border-radius: 12rpx; border: 2rpx solid {{selectedSlotId === item.slotId ? '#1764c0' : '#e2e8f0'}};">
+      <view class="row">
+        <text>{{item.doctorName}} · {{item.departmentName}}</text>
+        <text class="badge">余号 {{item.remaining}}/{{item.capacity}}</text>
+      </view>
+      <view class="muted">{{item.startsAt}}</view>
+    </view>
+  </view>
+  <view class="card">
+    <view class="muted" style="margin-bottom: 8rpx;">就诊主诉（可选）</view>
+    <input class="input-box" value="{{chiefComplaint}}" placeholder="如：复查血压、咳嗽 3 天" bindinput="onComplaintInput" />
+    <button class="btn-primary" loading="{{submitting}}" disabled="{{!selectedSlotId}}" bindtap="onConfirmBook">确认提交预约</button>
+  </view>
+</view>

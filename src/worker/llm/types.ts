@@ -2,7 +2,7 @@ import type { ReasoningEffort } from '../../shared/reasoning-effort'
 
 export type { ReasoningEffort }
 
-export type AgentKind = 'patient' | 'copilot'
+export type AgentKind = 'patient' | 'copilot' | 'patient_service' | 'followup'
 
 export interface ToolSpec {
   name: string

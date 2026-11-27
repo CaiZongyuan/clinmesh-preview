@@ -25,7 +25,12 @@ export interface LlmOverride {
   effort?: ReasoningEffort
 }
 
-const AGENT_PREFIX: Record<AgentKind, string> = { patient: 'PATIENT_', copilot: 'COPILOT_' }
+const AGENT_PREFIX: Record<AgentKind, string> = {
+  patient: 'PATIENT_',
+  copilot: 'COPILOT_',
+  patient_service: 'PATIENT_SERVICE_',
+  followup: 'FOLLOWUP_',
+}
 
 const DEFAULT_MODEL = 'glm-5.3-flash'
 const DEFAULT_CONTEXT_WINDOW = 128_000

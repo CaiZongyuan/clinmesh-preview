@@ -8,7 +8,9 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router'
 import { fetchActiveEncounter, fetchCaseDebrief, fetchEncounter, fetchGoldenCaseQueue, fetchPhysicalExaminations } from './api'
+import { ConnectedClinicShell } from './clinic/connected-clinic-shell'
 import { ConnectedClinicPrototype } from './prototype/connected-clinic-prototype'
+import type { ClinicTabParam } from './workbench/doctor-masthead-nav'
 import { Workbench } from './workbench/workbench'
 
 const rootRoute = createRootRoute({ component: Outlet })
@@ -63,13 +65,28 @@ function WorkbenchLoadError({ error }: ErrorComponentProps) {
   )
 }
 
+const CLINIC_TABS = new Set<ClinicTabParam>(['dashboard', 'appointments', 'patients', 'messages', 'followup', 'runs'])
+
+const connectedClinicRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/clinic',
+  validateSearch: (search: Record<string, unknown>): { tab?: ClinicTabParam } =>
+    typeof search.tab === 'string' && CLINIC_TABS.has(search.tab as ClinicTabParam)
+      ? { tab: search.tab as ClinicTabParam }
+      : {},
+  component: function ConnectedClinicRoute() {
+    const { tab } = connectedClinicRoute.useSearch()
+    return <ConnectedClinicShell initialSection={tab} />
+  },
+})
+
 const connectedClinicPrototypeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/prototype/connected-clinic',
   component: ConnectedClinicPrototype,
 })
 
-const routeTree = rootRoute.addChildren([workbenchRoute, encounterRoute, connectedClinicPrototypeRoute])
+const routeTree = rootRoute.addChildren([workbenchRoute, encounterRoute, connectedClinicRoute, connectedClinicPrototypeRoute])
 
 export function createAppRouter(options: { history?: RouterHistory } = {}) {
   return createRouter({ routeTree, history: options.history })

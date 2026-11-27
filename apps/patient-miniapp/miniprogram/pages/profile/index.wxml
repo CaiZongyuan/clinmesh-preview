@@ -1,0 +1,12 @@
+<view class="page-pad">
+  <view class="card">
+    <view class="card-title">{{principal ? principal.displayName : '未登录'}}</view>
+    <view class="muted">演示患者 ID：{{principal ? principal.patientId : '-'}}</view>
+    <view class="muted">IM 标识：{{principal ? principal.imUid : '-'}}</view>
+  </view>
+  <view class="card">
+    <view class="card-title">隐私与演示说明</view>
+    <view class="muted">本小程序仅用于 ClinMesh Connected Clinic 合成演示，不收集真实患者病历；退出登录将立即撤销服务端会话并清除本地缓存。</view>
+  </view>
+  <button class="btn-primary" bindtap="onLogout">退出登录并清除缓存</button>
+</view>
