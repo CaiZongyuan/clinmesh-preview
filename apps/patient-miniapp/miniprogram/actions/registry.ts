@@ -1,4 +1,4 @@
-import { parseClientAction, type ClientActionSpec } from '../../../../src/shared/agent-stream-reducer'
+import { parseClientAction, type ClientActionSpec } from '../services/agent-stream-reducer'
 
 export interface ActionExecutionResult {
   ok: boolean

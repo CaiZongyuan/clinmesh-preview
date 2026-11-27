@@ -12,7 +12,7 @@
   "appid": "wx0000000000000000",
   "projectname": "clinmesh-patient-miniapp",
   "setting": {
-    "urlCheck": true,
+    "urlCheck": false,
     "es6": true,
     "enhance": true,
     "postcss": true,

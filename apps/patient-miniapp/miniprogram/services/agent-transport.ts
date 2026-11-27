@@ -4,7 +4,7 @@ import {
   reduceAgentServerMessage,
   type AgentStreamState,
   type StreamPatchMap,
-} from '../../../../src/shared/agent-stream-reducer'
+} from './agent-stream-reducer'
 
 // Minimal WeChat MiniProgram SocketTask surface required for S0/S6 agent streaming.
 export interface MiniProgramSocketTask {
