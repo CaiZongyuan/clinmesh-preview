@@ -14,12 +14,15 @@ export default defineConfig(async ({ command, isPreview }) => {
     const vars = Object.fromEntries(Object.entries(bindings).map(([name, binding]) => [name, binding.value]))
     const relay = await startDevProviderProxy(vars)
     if (relay) {
-      return { plugins: [...plugins, cloudflare({ config: { vars: { CLINMESH_DEV_PROVIDER_ORIGIN: relay.origin } } }), {
-        name: 'clinmesh-dev-providers',
-        configureServer(server: ViteDevServer) { server.httpServer?.once('close', relay.close) },
-        closeBundle: relay.close,
-      }] }
+      return {
+        server: { host: true },
+        plugins: [...plugins, cloudflare({ config: { vars: { CLINMESH_DEV_PROVIDER_ORIGIN: relay.origin } } }), {
+          name: 'clinmesh-dev-providers',
+          configureServer(server: ViteDevServer) { server.httpServer?.once('close', relay.close) },
+          closeBundle: relay.close,
+        }],
+      }
     }
   }
-  return { plugins: [...plugins, cloudflare()] }
+  return { server: { host: true }, plugins: [...plugins, cloudflare()] }
 })

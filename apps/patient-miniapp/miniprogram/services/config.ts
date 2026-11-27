@@ -1,6 +1,6 @@
 // Local development defaults; override via storage key `clinmesh.apiBaseUrl` in WeChat DevTools.
-const DEFAULT_API_BASE = 'http://127.0.0.1:5173'
-const DEFAULT_WS_BASE = 'ws://127.0.0.1:5173'
+const DEFAULT_API_BASE = 'http://localhost:5173'
+const DEFAULT_WS_BASE = 'ws://localhost:5173'
 
 export function getApiBaseUrl(): string {
   try {
