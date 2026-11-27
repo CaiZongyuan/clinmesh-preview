@@ -1,7 +1,9 @@
 .cc-shell {
   display: grid;
   grid-template-columns: 232px 1fr;
-  min-height: 100vh;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-ui);
@@ -12,6 +14,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 16px 12px;
+  overflow-y: auto;
   background: var(--card);
   border-right: 1px solid var(--border);
 }
@@ -71,6 +74,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cc-topbar {
@@ -92,6 +97,9 @@
 }
 
 .cc-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 20px;
   display: flex;
   flex-direction: column;

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { EncounterStatus, EncounterView, VitalSign, VitalSignKind } from '../../shared/encounter'
 import type { PhysicalExaminationView } from '../../shared/physical-examination'
 import { formatClock, formatDuration, SEX_LABEL, VISIT_KIND_LABEL } from './format'
+import { EncounterConnectedPopover } from './encounter-connected-popover'
 import { HealthRecordPopover } from './health-record'
 import { badge, iconButton } from './pane-styles'
 import { ActionTooltip } from './ui-tooltip'
@@ -46,6 +47,7 @@ export function PatientBanner({
         <div className="flex flex-none items-center gap-1.5">
           <EncounterTimer startedAt={encounter.startedAt} endedAt={encounter.endedAt} />
           <HealthRecordPopover history={history} />
+          <EncounterConnectedPopover encounter={encounter} />
         </div>
       </div>
       {hasClinicalFlags && (

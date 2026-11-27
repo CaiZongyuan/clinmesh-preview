@@ -1,5 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router'
 import { Button } from '@ui-sdk/react/button'
+import { Preferences } from '@ui-sdk/react/preferences'
+import { PlusIcon } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { AppointmentView, StaffPatientView } from '../../shared/appointment'
 import type { ContactView, DoctorView, Principal } from '../../shared/auth'
@@ -7,6 +9,9 @@ import type { ConversationView } from '../../shared/communication'
 import type { EncounterView } from '../../shared/encounter'
 import type { AgentRunSnapshot, FollowupPlanView } from '../../shared/followup'
 import { fetchActiveEncounter } from '../api'
+import { DoctorMastheadNav, type ClinicTabParam } from '../workbench/doctor-masthead-nav'
+import { CLINIC_DEPARTMENT } from '../workbench/queue-rail'
+import { WorkbenchAppearance, workbenchPreferences } from '../workbench/workbench-preferences'
 import {
   checkInStaffAppointment,
   createConversation,
@@ -28,7 +33,7 @@ import { ConnectedClinicFollowup } from './connected-clinic-followup'
 import { ConnectedClinicMessages } from './connected-clinic-messages'
 import './connected-clinic-shell.css'
 
-type ClinicSection = 'dashboard' | 'appointments' | 'patients' | 'messages' | 'followup' | 'runs'
+type ClinicSection = ClinicTabParam
 
 const SHOW_DEMO_CONTROLS = import.meta.env.DEV || import.meta.env.MODE === 'test'
 const AUTO_DEV_STAFF_AUTH = import.meta.env.DEV && import.meta.env.MODE !== 'test'
@@ -46,13 +51,19 @@ function formatShanghaiTime(iso: string): string {
   }).format(date)
 }
 
-export function ConnectedClinicShell() {
+export function ConnectedClinicShell({ initialSection }: { initialSection?: ClinicSection } = {}) {
   const navigate = useNavigate()
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [loadingAuth, setLoadingAuth] = useState(true)
   const [username, setUsername] = useState(SHOW_DEMO_CONTROLS ? 'dr.wang' : '')
   const [password, setPassword] = useState(SHOW_DEMO_CONTROLS ? 'demo-doctor-a-pass' : '')
-  const [section, setSection] = useState<ClinicSection>('dashboard')
+  const [localSection, setLocalSection] = useState<ClinicSection>(initialSection ?? 'dashboard')
+  const section = initialSection ?? localSection
+
+  function selectSection(next: ClinicSection) {
+    setLocalSection(next)
+    void navigate({ to: '/clinic', search: { tab: next }, replace: true })
+  }
   const [appointments, setAppointments] = useState<AppointmentView[]>([])
   const [patients, setPatients] = useState<StaffPatientView[]>([])
   const [doctors, setDoctors] = useState<DoctorView[]>([])
@@ -180,7 +191,7 @@ export function ConnectedClinicShell() {
     try {
       await createConversation({ type: 'patient_doctor', memberActorIds: [patientActorId] })
       await refreshAll()
-      setSection('messages')
+      selectSection('messages')
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建医患会话失败')
     } finally {
@@ -291,40 +302,51 @@ export function ConnectedClinicShell() {
   )
 
   return (
-    <div className="cc-shell">
-      <aside className="cc-sidebar">
-        <div className="cc-brand">
-          <h1 className="cc-brand-title">ClinMesh 互联门诊</h1>
-          <p className="cc-brand-sub">
-            {principal.displayName} · {principal.role === 'doctor' ? '主诊医生' : '护理团队'}
-          </p>
-        </div>
-        <nav className="cc-nav" aria-label="HIS 主导航">
-          {(
-            [
-              ['dashboard', '工作台', null],
-              ['appointments', '预约队列', appointments.filter((a) => a.status === 'booked' || a.status === 'checked_in').length || null],
-              ['patients', '患者档案', patients.length || null],
-              ['messages', '消息中心', totalUnread || null],
-              ['followup', '随访管理', pendingSummaries || null],
-              ['runs', 'Agent 运行', runs.length || null],
-            ] as const
-          ).map(([id, label, badge]) => (
-            <button
-              key={id}
-              type="button"
-              className="cc-nav-btn"
-              data-active={section === id}
-              onClick={() => {
-                setSection(id)
-                if (id === 'runs') void handleRefreshRuns()
-              }}
-            >
-              <span>{label}</span>
-              {badge ? <span className="cc-badge cc-badge-info">{badge}</span> : null}
-            </button>
-          ))}
-        </nav>
+    <Preferences preferences={workbenchPreferences}>
+      <div className="workbench-shell flex h-full flex-col">
+        <header className="masthead">
+          <span className="brand-mark" aria-hidden="true"><PlusIcon size={15} strokeWidth={3} /></span>
+          <h1>门诊医生工作台</h1>
+          <span className="department">{CLINIC_DEPARTMENT}</span>
+          <DoctorMastheadNav active={section} activeEncounterId={activeEncounter?.encounterId} />
+          <div className="masthead-tools">
+            <WorkbenchAppearance />
+          </div>
+        </header>
+        <div className="cc-shell">
+          <aside className="cc-sidebar">
+            <div className="cc-brand">
+              <h2 className="cc-brand-title">ClinMesh 互联门诊</h2>
+              <p className="cc-brand-sub">
+                {principal.displayName} · {principal.role === 'doctor' ? '主诊医生' : '护理团队'}
+              </p>
+            </div>
+            <nav className="cc-nav" aria-label="HIS 主导航">
+              {(
+                [
+                  ['dashboard', '工作台', null],
+                  ['appointments', '预约队列', appointments.filter((a) => a.status === 'booked' || a.status === 'checked_in').length || null],
+                  ['patients', '患者档案', patients.length || null],
+                  ['messages', '消息中心', totalUnread || null],
+                  ['followup', '随访管理', pendingSummaries || null],
+                  ['runs', 'Agent 运行', runs.length || null],
+                ] as const
+              ).map(([id, label, badge]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className="cc-nav-btn"
+                  data-active={section === id}
+                  onClick={() => {
+                    selectSection(id)
+                    if (id === 'runs') void handleRefreshRuns()
+                  }}
+                >
+                  <span>{label}</span>
+                  {badge ? <span className="cc-badge cc-badge-info">{badge}</span> : null}
+                </button>
+              ))}
+            </nav>
 
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
           {activeEncounter ? (
@@ -650,7 +672,9 @@ export function ConnectedClinicShell() {
             </div>
           ) : null}
         </main>
+        </div>
       </div>
-    </div>
+      </div>
+    </Preferences>
   )
 }

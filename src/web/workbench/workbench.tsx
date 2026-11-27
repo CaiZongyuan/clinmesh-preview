@@ -10,6 +10,7 @@ import { useCopilot, type CopilotSession } from '../copilot/use-copilot'
 import { EncounterWorkspace, WaitingRoom } from './case-workspace'
 import { ClinicalNoteProvider, useClinicalNoteContext } from './clinical-note/clinical-note-context'
 import { CLINIC_DEPARTMENT, QueueRail } from './queue-rail'
+import { DoctorMastheadNav } from './doctor-masthead-nav'
 import { WorkbenchColumns } from './workbench-columns'
 import { WorkbenchAppearance, workbenchPreferences } from './workbench-preferences'
 import { WorkbenchShortcuts, workbenchOwnsShortcut } from './workbench-shortcuts'
@@ -98,6 +99,7 @@ export function Workbench({ queue, focus }: { queue: GoldenCaseQueueEntry[]; foc
             <span className="brand-mark" aria-hidden="true"><PlusIcon size={15} strokeWidth={3} /></span>
             <h1>门诊医生工作台</h1>
             <span className="department">{CLINIC_DEPARTMENT}</span>
+            <DoctorMastheadNav active="clinical" activeEncounterId={encounter?.encounterId} />
             <div className="masthead-tools">
               {encounter && <CopilotTopBar copilot={copilot} active={activeEncounter} hidden={copilotHidden} buttonRef={copilotButton} onShow={showCopilot} />}
               <WorkbenchShortcuts />
